@@ -1,5 +1,7 @@
 # MANA
 
+[![CI](https://github.com/MANA-FYP/MANA/actions/workflows/ci.yml/badge.svg)](https://github.com/MANA-FYP/MANA/actions/workflows/ci.yml)
+
 **Multimodal Assistance for Navigation and Accessibility**
 
 Final Year Project F26-049, Department of Computer Science, FAST NUCES Islamabad.
@@ -130,17 +132,36 @@ Shared: architecture, integration, documentation and the defence presentation.
 
 The FYP-1 plan runs from 6 October 2026 and covers 53 tasks in 9 work packages: setup, CI/CD, simulation, decision core, perception, app and voice, integration, documentation, and reviews.
 
-## 9. Repository layout
+## 9. CI/CD
+
+GitHub Actions runs the pipeline.
+
+| Workflow | When | What it does |
+|---|---|---|
+| `ci.yml` (lint) | Every pull request and push to `main` | Runs `ruff` for code style and formatting |
+| `ci.yml` (build-test) | Every pull request and push to `main` | In a `ros:jazzy-ros-base` container: builds the ROS 2 packages in `src/` with `colcon`, runs `colcon test` and the Python tests in `tests/`, and uploads a coverage report |
+| `release.yml` | Pushing a tag such as `v0.1.0-mid` | Builds the Docker image, pushes it to `ghcr.io/mana-fyp/mana`, and creates a GitHub Release with notes |
+
+Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`), and the checks above must pass before it is merged.
+
+## 10. Repository layout
 
 ```
 .
+├── .github/workflows/   CI and release pipelines
+├── src/                 ROS 2 packages
+├── tests/               Python tests
+├── Dockerfile           image built on release
+├── ruff.toml            lint settings
+├── pytest.ini           test settings
 ├── README.md
-└── .gitignore
+├── CONTRIBUTING.md
+└── LICENSE
 ```
 
-Source code, the ROS 2 workspace, documents and CI workflows will be added as the plan progresses.
+The ROS 2 workspace and packages will be added to `src/` as the plan progresses.
 
-## 10. References
+## 11. References
 
 - He and Saha, 2023. Comparison of YOLO versions for obstacle detection for visually impaired users (arXiv:2312.07571)
 - Kurbis et al., 2024. StairNet
