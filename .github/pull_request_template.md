@@ -14,6 +14,6 @@ Tracker task: T__  ·  Issue: #__
 
 ## Checklist
 
-- [ ] Branch is `feature/<module>-<task>` or `fix/<name>`, and it targets `develop`
+- [ ] Branch is `feature/<module>-<task>` or `fix/<name>`, and it targets `main`
 - [ ] Commits follow Conventional Commits
 - [ ] Docs updated if behaviour changed

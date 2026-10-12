@@ -6,12 +6,11 @@ These rules apply to every member: Mushahid Hussain, Muhammad Waqas and Komail R
 
 | Branch | Purpose | Who merges |
 |---|---|---|
-| `main` | Released, tagged versions only (`v0.1.0-mid`, `v1.0.0-fyp1`) | Release pull request from `develop`, after all checks pass |
-| `develop` | Integration branch; always builds and passes tests | Pull requests from feature branches |
-| `feature/<module>-<task>` | One task from the tracker, for example `feature/m6-t9-decision-core` | The author opens a pull request into `develop` |
-| `fix/<short-name>` | A bug fix | Pull request into `develop` |
+| `main` | The working branch. Releases are tagged from it (`v0.1.0-mid`, `v1.0.0-fyp1`) | Pull requests from feature branches |
+| `feature/<module>-<task>` | One task from the tracker, for example `feature/m6-t9-decision-core` | The author opens a pull request into `main` |
+| `fix/<short-name>` | A bug fix | Pull request into `main` |
 
-Nobody pushes directly to `main` or `develop`.
+Nobody pushes directly to `main`.
 
 Module codes: `pm`, `ci`, `m1` (vision), `m2` (position), `m3` (connectivity), `m4` (voice and audio), `m5` (interface), `m6` (decision core), `sim`, `int`, `doc`, `rev`.
 
@@ -29,7 +28,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Pull requests
 
-1. Open the pull request into `develop` and fill in the template.
+1. Open the pull request into `main` and fill in the template.
 2. Link the tracker task ID (for example `T9`) and the GitHub issue if there is one.
 3. CI must be green before the pull request is merged.
 4. At least one member who is **not the author** reviews and approves.
