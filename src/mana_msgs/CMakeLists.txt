@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.8)
+project(mana_msgs)
+
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  # module reports -> decision core
+  "msg/GroundReport.msg"
+  "msg/ObstacleReport.msg"
+  "msg/MotionReport.msg"
+  "msg/PositionReport.msg"
+  "msg/LinkReport.msg"
+  "msg/UserCommand.msg"
+  # decision core -> host and user
+  "msg/DriveRequest.msg"
+  "msg/UserMessage.msg"
+  DEPENDENCIES std_msgs geometry_msgs
+)
+
+ament_export_dependencies(rosidl_default_runtime)
+ament_package()
