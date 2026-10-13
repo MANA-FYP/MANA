@@ -5,6 +5,8 @@ float32 trust           # 0.0 (ignore) to 1.0 (fully trusted)
 uint8 CAMERA=0
 uint8 DEPTH_CAMERA=1
 uint8 LIDAR=2
+uint8 CLASSIFIER=3        # ground classifier on the camera image
+uint8 DETECTOR=4          # object detector on the camera image
 uint8 source
 
 string label            # detector class, for example "person"; empty when the type is unknown

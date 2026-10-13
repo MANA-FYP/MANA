@@ -22,6 +22,8 @@ class Source(IntEnum):
     CAMERA = 0
     DEPTH_CAMERA = 1
     LIDAR = 2
+    CLASSIFIER = 3  # the ground classifier that runs on the camera image
+    DETECTOR = 4  # the object detector that runs on the camera image
 
 
 class Ground(IntEnum):
@@ -222,12 +224,17 @@ class DecisionCore:
         )
 
     def _confirmed_step(self) -> GroundReport | None:
-        """The depth report of a step that the camera and the 3D camera both see close ahead."""
-        cam, depth = (self.ground.get(s) for s in (Source.CAMERA, Source.DEPTH_CAMERA))
-        if self._ok(cam) and self._ok(depth) and cam.ground in STEPS and depth.ground in STEPS:
-            if depth.distance_m <= self.limits.step_m:
-                return depth
-        return None
+        """The nearest report of a step that at least two different sources both see close ahead.
+
+        The sources can be a camera and a 3D camera, or, on a phone without a depth sensor, the
+        ground classifier and the object detector. A report with an unknown distance can agree,
+        but at least one of the agreeing reports must give a distance within step_m.
+        """
+        agreeing = [r for r in self._grounds() if r.ground in STEPS]
+        if len({r.source for r in agreeing}) < 2:
+            return None
+        known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
+        return min(known, key=lambda r: r.distance_m, default=None)
 
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
