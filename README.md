@@ -116,6 +116,18 @@ The wheelchair and its sensors are simulated in ROS 2 and Gazebo. Commands are t
 - PyTorch, Ultralytics YOLO and ONNX (models)
 - Tablet app with voice, touch and buttons
 
+### Set up a development machine
+
+On Ubuntu 24.04, native or in WSL 2, from the repository root:
+
+```bash
+bash tools/setup_ubuntu.sh        # ROS 2 Jazzy, Gazebo Harmonic, colcon, rosdep
+bash tools/setup_ubuntu.sh --ml   # the same, plus ~/.venvs/mana-ml for the model work
+bash tools/check_env.sh           # one PASS or FAIL line per item
+```
+
+The ML packages are pinned in `requirements-ml.txt`. The setup installs the CPU build of PyTorch; train on a GPU machine with the matching CUDA build. The `Setup check` workflow runs both scripts on a fresh Ubuntu 24.04 runner whenever they change, so the setup is tested on a clean machine.
+
 ## 7. Team
 
 | Member | Roll no. | Main responsibility |

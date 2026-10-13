@@ -1,0 +1,7 @@
+# Python packages for the model work (M1 Vision, M4 Voice and audio), pinned so every machine matches.
+# tools/setup_ubuntu.sh --ml installs them into ~/.venvs/mana-ml with the CPU build of PyTorch.
+torch==2.14.1
+torchvision==0.29.1
+ultralytics==8.4.176
+onnx==1.23.2
+onnxruntime==1.31.0

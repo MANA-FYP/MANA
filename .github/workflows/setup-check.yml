@@ -1,0 +1,25 @@
+name: Setup check
+
+# Runs the setup script on a fresh Ubuntu 24.04 runner, so the setup is tested on a clean machine.
+on:
+  pull_request:
+    paths:
+      - tools/setup_ubuntu.sh
+      - tools/check_env.sh
+      - requirements-ml.txt
+      - .github/workflows/setup-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-machine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the machine
+        run: bash tools/setup_ubuntu.sh --ml
+      - name: Check the machine
+        run: bash tools/check_env.sh
