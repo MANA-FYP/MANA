@@ -10,6 +10,9 @@
   <depend>rclpy</depend>
   <depend>mana_msgs</depend>
   <exec_depend>py_trees</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 
