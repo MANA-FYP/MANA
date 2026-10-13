@@ -14,6 +14,7 @@ Phone to laptop, text messages (JSON):
   button  {"type": "button", "name": "stop" | "go" | "automatic" | "manual"}
   ping    {"type": "ping", "t": 123}   answered with pong; the phone then sends an rtt message
   rtt     {"type": "rtt", "ms": 12}     the round trip it measured
+  radio   {"type": "radio", "wifi": true, "bluetooth": false}   null when the browser cannot tell
 Phone to laptop, binary messages: a first byte of 1 then a JPEG frame, or 2 then float32 audio.
 """
 
@@ -144,6 +145,8 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         await ws.send_json({"type": "pong", "t": d.get("t")})
     elif kind == "rtt":
         mw.on_heartbeat(float(d["ms"]), now)
+    elif kind == "radio":
+        mw.on_radio(d.get("wifi"), d.get("bluetooth"), now)
 
 
 async def on_binary(app: web.Application, data: bytes) -> None:

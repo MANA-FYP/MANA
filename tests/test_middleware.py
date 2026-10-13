@@ -11,6 +11,7 @@ from demo.middleware import (
     LinkSelector,
     Middleware,
     PositionSource,
+    RadioLink,
     State,
     camera_trust_factor,
     tilt,
@@ -47,11 +48,10 @@ def by_id(snapshot):
 # ---- the sensor panel
 
 
-def test_there_are_eight_sensors_for_a_two_by_four_grid():
-    assert len(SENSORS) == 8
-    assert [s.id for s in SENSORS] == [
-        "camera", "motion", "gps", "microphone", "link", "depth", "lidar", "temperature",
-    ]  # fmt: skip
+def test_there_are_nine_sensors_for_a_three_by_three_grid():
+    assert len(SENSORS) == 9
+    ids = "camera motion gps microphone wifi bluetooth depth lidar temperature".split()
+    assert [s.id for s in SENSORS] == ids
 
 
 def test_depth_lidar_and_temperature_are_never_available_to_a_browser():
@@ -287,6 +287,66 @@ def test_missing_heartbeats_give_zero_link_trust():
     assert link.trust(5.0) == 0.0
 
 
+# ---- which radio carries the alerts
+
+
+def test_wifi_present_means_wifi():
+    assert RadioLink().update(True, True, 0.0) == "wifi"
+
+
+def test_the_browser_not_being_able_to_tell_is_unknown_not_a_guess():
+    assert RadioLink().update(None, None, 0.0) == "unknown"
+
+
+def test_losing_wifi_for_two_seconds_moves_alerts_to_bluetooth():
+    r = RadioLink()
+    r.update(True, True, 0.0)
+    assert r.update(False, True, 1.0) == "wifi"
+    assert r.update(False, True, 3.0) == "bluetooth"
+
+
+def test_with_wifi_and_bluetooth_both_off_there_is_no_link():
+    r = RadioLink()
+    r.update(True, True, 0.0)
+    r.update(False, False, 1.0)
+    assert r.update(False, False, 3.5) == "none"
+
+
+def test_bluetooth_coming_on_while_wifi_is_gone_gives_a_link_again():
+    r = RadioLink()
+    r.update(True, False, 0.0)
+    r.update(False, False, 1.0)
+    assert r.update(False, False, 4.0) == "none"
+    assert r.update(False, True, 5.0) == "bluetooth"
+
+
+def test_wifi_must_be_back_for_five_seconds_before_alerts_return_to_it():
+    r = RadioLink()
+    r.update(True, True, 0.0)
+    r.update(False, True, 1.0)
+    r.update(False, True, 3.5)
+    assert r.state == "bluetooth"
+    assert r.update(True, True, 4.0) == "bluetooth"
+    assert r.update(True, True, 8.9) == "bluetooth"
+    assert r.update(True, True, 9.1) == "wifi"
+
+
+def test_a_flickering_wifi_does_not_flip_the_link():
+    r = RadioLink()
+    r.update(True, True, 0.0)
+    for t in range(1, 30):
+        r.update(bool(t % 2), True, float(t))
+    assert r.state == "wifi"
+
+
+def test_radio_reports_light_up_the_wifi_and_bluetooth_tiles_with_what_they_say():
+    m = Middleware()
+    m.on_radio(False, True, now=1.0)
+    tiles = by_id(m.tick(1.1))
+    assert (tiles["wifi"]["state"], tiles["wifi"]["value"]) == ("active", "off")
+    assert (tiles["bluetooth"]["state"], tiles["bluetooth"]["value"]) == ("active", "on")
+
+
 # ---- the snapshot
 
 
@@ -295,9 +355,11 @@ def test_snapshot_has_what_the_dashboard_needs():
     m.on_heartbeat(15.0, now=1.0)
     snap = m.tick(1.0)
     assert set(snap) >= {"sensors", "messages", "decision", "rules", "position", "link", "latency"}
-    assert len(snap["sensors"]) == 8
+    assert len(snap["sensors"]) == 9
     assert snap["rules"][0] == "user stop"
-    assert snap["link"]["state"] == "wifi"
+    assert snap["link"]["state"] == "unknown"  # no radio report yet
+    m.on_radio(True, True, now=1.0)
+    assert m.tick(1.0)["link"]["state"] == "wifi"
 
 
 def test_mode_enum_matches_the_snapshot_names():

@@ -50,10 +50,11 @@ SENSORS = (
     SensorInfo("motion", "Motion"),
     SensorInfo("gps", "GPS"),
     SensorInfo("microphone", "Microphone"),
-    SensorInfo("link", "Link"),
-    SensorInfo("depth", "Depth camera", "Browsers do not expose depth sensors"),
-    SensorInfo("lidar", "Lidar", "Browsers do not expose lidar"),
-    SensorInfo("temperature", "Temperature", "Browsers do not expose a temperature sensor"),
+    SensorInfo("wifi", "Wi-Fi"),
+    SensorInfo("bluetooth", "Bluetooth"),
+    SensorInfo("depth", "Depth", "Not exposed to browsers"),
+    SensorInfo("lidar", "Lidar", "Not exposed to browsers"),
+    SensorInfo("temperature", "Temperature", "Not exposed to browsers"),
 )
 FRESH_S = 2.0  # a sensor counts as active when it reported within this time
 
@@ -167,6 +168,50 @@ class LinkSelector:
         return self.state
 
 
+# ---- which radio would carry the alerts: Wi-Fi, or Bluetooth when Wi-Fi is gone
+
+
+class RadioLink:
+    """Alerts go over Wi-Fi. When Wi-Fi has been gone for leave_s seconds they would go over
+    Bluetooth, if Bluetooth is on; with neither there is no link. Wi-Fi must be back for back_s
+    seconds before the choice returns to it, so a flickering signal does not flip the link.
+
+    The inputs are what the phone's browser reports (None means it cannot tell). The data path of
+    the demo itself can be a cable, so turning Wi-Fi off does not cut the demo.
+    """
+
+    WIFI, BLUETOOTH, NONE, UNKNOWN = "wifi", "bluetooth", "none", "unknown"
+
+    def __init__(self, leave_s=2.0, back_s=5.0):
+        self.leave_s, self.back_s = leave_s, back_s
+        self.state = self.UNKNOWN
+        self._wifi_gone_since: float | None = None
+        self._wifi_back_since: float | None = None
+
+    def update(self, wifi: bool | None, bluetooth: bool | None, now: float) -> str:
+        if wifi is None:
+            self.state = self.UNKNOWN
+            self._wifi_gone_since = self._wifi_back_since = None
+            return self.state
+        if self.state in (self.UNKNOWN, self.WIFI) and wifi:
+            self.state = self.WIFI
+            self._wifi_gone_since = None
+        elif wifi:
+            self._wifi_gone_since = None
+            self._wifi_back_since = now if self._wifi_back_since is None else self._wifi_back_since
+            if now - self._wifi_back_since >= self.back_s:
+                self.state, self._wifi_back_since = self.WIFI, None
+        else:
+            self._wifi_back_since = None
+            self._wifi_gone_since = now if self._wifi_gone_since is None else self._wifi_gone_since
+            if self.state in (self.UNKNOWN, self.WIFI):
+                if now - self._wifi_gone_since >= self.leave_s or self.state == self.UNKNOWN:
+                    self.state = self.BLUETOOTH if bluetooth else self.NONE
+        if self.state in (self.BLUETOOTH, self.NONE):
+            self.state = self.BLUETOOTH if bluetooth else self.NONE
+        return self.state
+
+
 # ---- from phone readings to the decision layer's inputs
 
 
@@ -210,7 +255,10 @@ class Middleware:
         self.clock = clock
         self.sensors = {s.id: SensorState(s) for s in SENSORS}
         self.position = PositionSource()
-        self.link = LinkSelector()
+        self.link = LinkSelector()  # heartbeats: round trip and missed beats of the data path
+        self.radio = RadioLink()
+        self.wifi: bool | None = None
+        self.bluetooth: bool | None = None
         self.log: deque = deque(maxlen=40)  # the common messages, newest last
         self.detections: list[dict] = []
         self.brightness = 1.0
@@ -300,7 +348,17 @@ class Middleware:
     def on_heartbeat(self, rtt_ms: float | None, now: float | None = None) -> None:
         now = self.clock() if now is None else now
         self.link.heartbeat(now, rtt_ms)
-        self._seen("link", now, "" if rtt_ms is None else f"{rtt_ms:.0f} ms", self.link.trust(now))
+
+    def on_radio(self, wifi: bool | None, bluetooth: bool | None, now: float | None = None) -> None:
+        """What the phone's browser says about its radios. None means it cannot tell."""
+        now = self.clock() if now is None else now
+        self.wifi, self.bluetooth = wifi, bluetooth
+        if wifi is not None:
+            self._seen("wifi", now, "connected" if wifi else "off", 0.9)
+        if bluetooth is not None:
+            self._seen("bluetooth", now, "on" if bluetooth else "off", 0.9)
+        word = {True: "on", False: "off", None: "unknown"}
+        self._say(now, "radio", "link", f"Wi-Fi {word[wifi]}, Bluetooth {word[bluetooth]}", 0.9)
 
     def on_microphone(self, now: float | None = None, value: str = "listening") -> None:
         now = self.clock() if now is None else now
@@ -377,7 +435,7 @@ class Middleware:
     def tick(self, now: float | None = None) -> dict:
         now = self.clock() if now is None else now
         pos = self.position.update(self.accuracy_m, now)
-        link = self.link.update(now)
+        link = self.radio.update(self.wifi, self.bluetooth, now)
         d = self.core.tick(now)
         self._last_decision = d
         if self._stop_sent is not None and d.stop:
@@ -418,6 +476,8 @@ class Middleware:
             },
             "link": {
                 "state": link,
+                "wifi": self.wifi,
+                "bluetooth": self.bluetooth,
                 "rtt_ms": self.link.rtt_ms,
                 "missed": self.link.missed(now),
                 "trust": self.link.trust(now),
