@@ -150,6 +150,7 @@ Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`),
 .
 ├── .github/workflows/   CI and release pipelines
 ├── src/                 ROS 2 packages (colcon workspace)
+│   ├── mana_core/       decision core (M6)
 │   └── mana_msgs/       message types between modules, decision core and host
 ├── tests/               Python tests
 ├── ruff.toml            lint settings
@@ -196,6 +197,25 @@ Each module is its own package, added by its owner in their own pull request:
 | `UserMessage` | core → M4, M5 | Text for the user, its priority, and whether to speak it |
 
 Every report to the core starts with the same two fields: `header` (its stamp is when the value was measured) and `trust` (0 to 1). The core uses them to line reports up in time and weigh them. `tests/test_msgs_contract.py` checks this rule on every pull request.
+
+### Decision core (`mana_core`)
+
+```bash
+ros2 run mana_core core_node
+```
+
+The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+
+1. The user said stop: stop until they say go
+2. A drop within 0.5 m or an obstacle within 0.8 m: stop
+3. Manual mode: follow the user's mode and speed
+4. Stairs or a curb seen by both cameras, or wheel slip: tracks, slow
+5. On tracks and not yet level for 2 s: stay on tracks
+6. No trusted ground report: slow down
+7. An obstacle, drop, ramp or possible step ahead: slow down
+8. Otherwise: wheels, full speed
+
+The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
 ## 11. References
 
