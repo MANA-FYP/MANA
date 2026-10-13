@@ -202,6 +202,7 @@ class Snapshot:
 
 
 class Middleware:
+    LOG_EVERY_S = 0.5  # how often one source may add a line to the log
     VIBRATION_SLIP = 2.0  # m/s^2 of acceleration spread over one second counts as rough ground
 
     def __init__(self, core: DecisionCore | None = None, clock=time.monotonic):
@@ -216,6 +217,10 @@ class Middleware:
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
         self._last_decision = None
+        self._t0: float | None = (
+            None  # the first time seen, so the dashboard shows seconds since start
+        )
+        self._last_say: dict[tuple[str, str], float] = {}
         self._stop_sent: float | None = None
         self.latency: dict[str, float] = {}
 
@@ -237,10 +242,22 @@ class Middleware:
         st.last_seen, st.value, st.trust = now, value, round(trust, 2)
         st.stamps.append(now)
 
+    def _since_start(self, now: float) -> float:
+        if self._t0 is None:
+            self._t0 = now
+        return now - self._t0
+
     def _say(self, now: float, source: str, kind: str, value: str, trust: float) -> None:
+        """Add a line to the common-message log. Streams are thinned to a few lines a second so
+        the log stays readable; commands are always kept."""
+        key = (source, kind)
+        last = self._last_say.get(key)
+        if kind != "command" and last is not None and now - last < self.LOG_EVERY_S:
+            return
+        self._last_say[key] = now
         self.log.append(
             {
-                "t": round(now, 2),
+                "t": round(self._since_start(now), 1),
                 "source": source,
                 "kind": kind,
                 "value": value,
@@ -381,7 +398,7 @@ class Middleware:
                 }
             )
         return {
-            "time": round(now, 2),
+            "time": round(self._since_start(now), 1),
             "sensors": sensors,
             "messages": list(self.log)[-12:],
             "decision": {

@@ -302,3 +302,21 @@ def test_snapshot_has_what_the_dashboard_needs():
 
 def test_mode_enum_matches_the_snapshot_names():
     assert {m.name for m in Mode} == {"WHEELS", "TRACKS"}
+
+
+def test_a_busy_stream_is_thinned_in_the_log_but_commands_are_always_kept():
+    m = Middleware()
+    for i in range(30):
+        m.on_motion(0.0, 0.0, G, now=10.0 + i * 0.033)  # 30 readings in one second
+    assert len([e for e in m.log if e["source"] == "motion"]) <= 3
+    m.on_command(Command.STOP, 1.0, now=11.0)
+    m.on_command(Command.GO, 1.0, now=11.01)
+    assert [e["value"] for e in m.log if e["kind"] == "command"] == ["STOP", "GO"]
+
+
+def test_log_and_snapshot_times_are_seconds_since_the_first_message():
+    m = Middleware()
+    m.on_gps(6.0, now=5000.0)
+    m.on_gps(6.0, now=5002.0)
+    assert [e["t"] for e in m.log] == [0.0, 2.0]
+    assert m.tick(5003.0)["time"] == 3.0
