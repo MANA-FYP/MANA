@@ -217,6 +217,37 @@ The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decide
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
+### Scenarios, pass marks and the live demo
+
+Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:
+
+| Scenario | What it shows |
+|---|---|
+| `level` | Wheels at full speed on level ground |
+| `ramp` | A ramp is driven on wheels, more slowly, never on tracks |
+| `stairs` | Both cameras confirm the stairs: tracks before the first step, wheels again once level at the top |
+| `curb` | A 12 cm curb crossed on tracks |
+| `stop` | A spoken stop at full speed, held until the user says go |
+| `drop` | Edge case: slows down for a drop, then stops 0.5 m before it on the 3D camera's distance |
+| `manual_drop` | Edge case: in manual mode at full speed, safety still stops the chair before a drop |
+| `picture` | Edge case: only the camera sees stairs (a picture), so MANA slows down but does not change mode |
+| `dark` | Failure case: the camera is not trusted in the dark; the lidar still sees a person, and MANA stops and says why |
+| `imu_lost` | Failure case: the IMU stops during the climb, so MANA cannot confirm level ground and stays on tracks |
+
+The pass marks are the team's targets: no track request on flat ground or ramps, tracks requested at least 1.5 m before the first step, a stop acted on within 1 s, and obstacles still announced in the dark. No scenario may end with the chair on a step on wheels, over a drop or against an obstacle.
+
+Check every scenario in fast time (CI runs the same as `tests/test_scenarios.py`):
+
+```bash
+ros2 run mana_core evaluate              # or one or more by name: ros2 run mana_core evaluate stairs dark
+```
+
+Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
+
+```bash
+ros2 launch mana_core demo.launch.py scenario:=stairs
+```
+
 ## 11. References
 
 - He and Saha, 2023. Comparison of YOLO versions for obstacle detection for visually impaired users (arXiv:2312.07571)
