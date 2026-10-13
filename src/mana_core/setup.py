@@ -11,6 +11,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
     ],
     install_requires=["setuptools"],
+    extras_require={"test": ["pytest"]},  # tells colcon to run the tests with pytest
     zip_safe=True,
     maintainer="Mushahid Hussain",
     maintainer_email="184832252+mushi0541@users.noreply.github.com",
