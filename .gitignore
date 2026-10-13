@@ -22,3 +22,7 @@ data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local certificates and keys for the phone demo
+*.pem
+*.key
