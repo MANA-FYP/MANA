@@ -9,6 +9,10 @@ let boxes = [];
 let frameSize = { w: 0, h: 0 };
 let chipsKey = "";
 let streamKey = "";
+let lastDecision = null;
+let linesKey = "";
+let inputsKey = "";
+let voiceOn = true;   // the spoken message comes from the laptop, not the phone
 
 function connect() {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -31,6 +35,11 @@ const LINK_TEXT = {
   unknown: ["Alerts: link unknown", "off"],
 };
 
+function speak(text) {
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));   // queued: one never cuts off another
+}
+
 function render(s) {
   // header chips: rebuilt only when their text changes
   const active = s.sensors.filter((x) => x.state === "active").length;
@@ -48,7 +57,7 @@ function render(s) {
   updateTiles($("inputs"), s.sensors);
 
   // middleware messages: newest first, replaced only when something new arrived
-  const rows = s.messages.slice().reverse().slice(0, 7);
+  const rows = s.messages.slice().reverse().slice(0, 4);
   const key = JSON.stringify(rows);
   if (key !== streamKey) {
     streamKey = key;
@@ -62,24 +71,41 @@ function render(s) {
   const kind = d.stop ? "stopped" : d.mode === "TRACKS" ? "tracks" : d.speed < 1 ? "slow" : "wheels";
   const cls = "result " + kind;
   if ($("result").className !== cls) $("result").className = cls;
-  setText($("mode"), d.stop ? "STOPPED" : d.mode);
-  setText($("meta"), "speed " + Math.round(d.speed * 100) + " % · " + (s.manual ? "manual" : "automatic") +
-    " · " + d.priority.toLowerCase());
-  setText($("why"), d.reason);
+  // the action box shows only the last action MANA took, the same one the voice says
+  const log = s.decisions;
+  const last = log.length ? log[log.length - 1] : null;
+  const shown = last ? last.text : d.sentence;
+  if (shown !== linesKey) {
+    linesKey = shown;
+    $("mode").innerHTML = "<p class=\"main\">" + shown + "</p>";
+  }
 
-  // timing facts
-  const lat = s.latency;
-  const facts = [
-    [s.link.rtt_ms === null ? "-" : Math.round(s.link.rtt_ms) + " ms", "phone to laptop"],
-    [lat.detector_ms === undefined ? "-" : Math.round(lat.detector_ms) + " ms", "detector, one frame"],
-    [lat.voice_or_button_to_stop_ms === undefined ? "-" : Math.round(lat.voice_or_button_to_stop_ms) + " ms",
-     "stop to decision"],
-    [Math.round(s.link.trust * 100) + " %", "data link trust"],
-    [String(s.link.missed), "heartbeats missed"],
-    [s.time.toFixed(0) + " s", "running"],
-  ];
-  const fhtml = facts.map((f) => '<div class="fact"><b>' + f[0] + "</b><span>" + f[1] + "</span></div>").join("");
-  if ($("facts").dataset.k !== fhtml) { $("facts").dataset.k = fhtml; $("facts").innerHTML = fhtml; }
+  // the voice says each new action, in order; a new one waits for the one still being spoken
+  const newest = last ? last.n : 0;
+  if (lastDecision === null) {
+    lastDecision = newest;   // what happened before the page opened is not spoken
+  } else if (newest > lastDecision) {
+    const fresh = log.filter((e) => e.n > lastDecision);
+    lastDecision = newest;
+    fresh.forEach((e) => speak(e.text));
+  }
+
+  // box 4: only what the user says into the microphone
+  const mic = s.sensors.find((x) => x.id === "microphone");
+  const heard = s.inputs.slice().reverse().slice(0, 3);
+  const ikey = JSON.stringify([heard, s.speaking, mic && mic.state]);
+  if (ikey !== inputsKey) {
+    inputsKey = ikey;
+    const none = mic && mic.state === "active" ? "Listening. Say stop, go, manual or automatic."
+      : mic && mic.state === "unavailable" ? "Microphone: " + (mic.reason || "not available").toLowerCase() + "."
+      : "The microphone is not on. Tap the Microphone tile on the phone.";
+    const live = s.speaking ? '<li class="live"><span class="when">now</span><span class="said">&ldquo;' +
+      s.speaking + "&rdquo;</span></li>" : "";
+    $("userInputs").innerHTML = live + heard.map((i) =>
+      '<li><span class="when">' + i.t.toFixed(1) + '</span><span class="said">&ldquo;' + i.text + "&rdquo;</span>" +
+      (i.command ? '<span class="via">' + i.command + "</span>" : "") + "</li>").join("") ||
+      (live ? "" : '<li class="none">' + none + "</li>");
+  }
 
   if (!m.detector) setText($("cameraHint"), "The detector is not installed, so no boxes are drawn.");
   if (s.frame.seq > lastFrame) {
@@ -126,19 +152,10 @@ document.querySelectorAll("[data-button]").forEach((b) => {
   b.onclick = () => ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: "button", name: b.dataset.button }));
 });
 
-$("openEvidence").onclick = () => $("modal").classList.add("open");
-$("closeEvidence").onclick = () => $("modal").classList.remove("open");
-$("modal").onclick = (e) => { if (e.target === $("modal")) $("modal").classList.remove("open"); };
-
-$("runEvidence").onclick = async () => {
-  $("evidence").innerHTML = '<div class="hint">Running…</div>';
-  const r = await (await fetch("/api/evidence")).json();
-  $("evidence").innerHTML = '<span class="chip warn">' + r.label + "</span><table>" +
-    r.scenarios.map((sc) =>
-      '<tr><td colspan="3"><b>' + sc.title + '</b> · <span style="color:#64748b">' + sc.shows + "</span></td></tr>" +
-      sc.marks.map((m) => '<tr><td class="' + (m.ok ? "pass" : "fail") + '">' + (m.ok ? "PASS" : "FAIL") +
-        "</td><td>" + m.text + '</td><td style="color:#64748b">' + m.measured + "</td></tr>").join("")).join("") +
-    "</table>";
+$("voice").onclick = () => {
+  voiceOn = !voiceOn;
+  $("voice").textContent = "Voice: " + (voiceOn ? "on" : "off");
+  if (!voiceOn && "speechSynthesis" in window) speechSynthesis.cancel();
 };
 
 connect();

@@ -278,7 +278,7 @@ The decision layer driven by real data from a phone, shown on a laptop dashboard
 and no Gazebo. The phone page lists its sensors as eight small tiles, and a sensor the browser
 cannot read is shown as **N/A**; nothing is simulated. Both pages fit one screen, and the phone
 is connected with a USB cable. Stairs, ramps and drops that a phone
-cannot sense are shown as scripted test evidence and labelled as tests. See
+cannot sense are verified by scripted scenarios and labelled as tests. See
 [`demo/README.md`](demo/README.md) for how to run it and what is real.
 
 ```bash

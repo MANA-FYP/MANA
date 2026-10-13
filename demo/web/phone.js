@@ -1,14 +1,15 @@
-// MANA phone page: streams the phone's real sensors to the laptop and shows what comes back.
+// MANA phone page: a sensor input only. It streams the phone's real sensors to the laptop; the
+// decision and its voice output are on the laptop.
 // Nothing is simulated here. A sensor the browser cannot read is shown as "N/A" with the reason.
 
 const grid = document.getElementById("grid");
 const conn = document.getElementById("conn");
 
 let ws = null;
-let started = {};          // which sensors this page has started
-let lastReason = "";
 let bluetoothOn = null;    // true / false, or null when the browser cannot tell
+const declaredOff = {};    // radio tiles the user switched off on the phone (a page cannot switch a radio)
 let audioRate = 48000;
+let laptopHasVoiceModel = false;   // when the laptop recognises speech itself, the phone streams audio
 
 // The data path is the USB cable (adb reverse), so the page is opened as localhost.
 document.getElementById("path").textContent = "data path: USB cable";
@@ -68,21 +69,12 @@ function capabilities() {
 
 function onState(m) {
   updateTiles(grid, m.sensors);
-  const d = m.decision;
-  const box = document.getElementById("device");
-  const kind = d.stop ? "stopped" : d.mode === "TRACKS" ? "tracks" : d.speed < 1 ? "slow" : "wheels";
-  const cls = "card device " + kind;
-  if (box.className !== cls) box.className = cls;
-  setText(document.getElementById("mode"),
-          d.stop ? "STOPPED" : d.mode + " · " + Math.round(d.speed * 100) + " %");
-  setText(document.getElementById("why"), d.reason);
-  if (d.reason !== lastReason) {
-    lastReason = d.reason;
-    if (d.priority !== "INFO" && "speechSynthesis" in window) {
-      speechSynthesis.speak(new SpeechSynthesisUtterance(d.reason));
-    }
-    if (d.stop && navigator.vibrate) navigator.vibrate(200);
-  }
+  laptopHasVoiceModel = !!(m.models && m.models.speech);
+  // the mode buttons show which one is on
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    const on = (b.dataset.mode === "manual") === !!m.manual;
+    b.classList.toggle("on", on);
+  });
 }
 
 // ---- heartbeat: the round trip of the data path
@@ -102,80 +94,78 @@ setInterval(heartbeat, 1000);
 
 // ---- radios: what the browser says about Wi-Fi and Bluetooth, once a second
 
-async function watchBluetooth() {
+// Asked again every second: the change event is not reliable in every Chrome version.
+async function readBluetooth() {
   if (!("bluetooth" in navigator) || !navigator.bluetooth.getAvailability) return;
-  try {
-    bluetoothOn = await navigator.bluetooth.getAvailability();
-    navigator.bluetooth.addEventListener("availabilitychanged", (e) => { bluetoothOn = e.value; });
-  } catch (_) { bluetoothOn = null; }
+  try { bluetoothOn = await navigator.bluetooth.getAvailability(); } catch (_) { bluetoothOn = null; }
 }
 
-function reportRadios() {
+async function reportRadios() {
+  await readBluetooth();
   const c = navigator.connection;
-  const wifi = c && typeof c.type === "string" ? c.type === "wifi" : null;
-  send({ type: "radio", wifi, bluetooth: bluetoothOn });
+  let wifi = c && typeof c.type === "string" ? c.type === "wifi" : null;
+  let bluetooth = bluetoothOn;
+  if (declaredOff.wifi) wifi = false;           // the user switched it off with a tap
+  if (declaredOff.bluetooth) bluetooth = false;
+  send({ type: "radio", wifi, bluetooth });
 }
-watchBluetooth();
 setInterval(reportRadios, 1000);
 
-// ---- motion
+// ---- sensors: a tap on a tile switches that sensor on, another tap switches it off.
+// Each start function returns a function that stops it again.
 
 let lastMotion = 0;
 async function startMotion() {
-  if (started.motion) return;
   if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
     const r = await DeviceMotionEvent.requestPermission();  // iPhone asks here
-    if (r !== "granted") return;
+    if (r !== "granted") return null;
   }
-  started.motion = true;
-  window.addEventListener("devicemotion", (e) => {
+  const onMotion = (e) => {
     const now = performance.now();
     const a = e.accelerationIncludingGravity;
     if (!a || a.x === null || now - lastMotion < 33) return;  // about 30 readings a second
     lastMotion = now;
     send({ type: "motion", ax: a.x, ay: a.y, az: a.z });
-  });
+  };
+  window.addEventListener("devicemotion", onMotion);
+  return () => window.removeEventListener("devicemotion", onMotion);
 }
 
-// ---- location
-
 function startGps() {
-  if (started.gps || !("geolocation" in navigator)) return;
-  started.gps = true;
-  navigator.geolocation.watchPosition(
+  if (!("geolocation" in navigator)) return null;
+  const id = navigator.geolocation.watchPosition(
     (p) => send({ type: "gps", accuracy: p.coords.accuracy }),
     () => send({ type: "gps", accuracy: null }),
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
+  return () => navigator.geolocation.clearWatch(id);
 }
 
-// ---- camera: a small JPEG about five times a second
-
+// a small JPEG about five times a second
 async function startCamera() {
-  if (started.camera) return;
   const stream = await navigator.mediaDevices.getUserMedia(
     { video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } });
-  started.camera = true;
   const video = document.createElement("video");
   video.playsInline = true;
   video.muted = true;
   video.srcObject = stream;
   await video.play();
   const canvas = document.createElement("canvas");
-  setInterval(() => {
+  const timer = setInterval(() => {
     if (!video.videoWidth) return;
     canvas.width = 480;
     canvas.height = Math.round(480 * video.videoHeight / video.videoWidth);
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((b) => b && b.arrayBuffer().then((buf) => sendBinary(1, buf)), "image/jpeg", 0.6);
   }, 200);
+  return () => { clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); };
 }
 
-// ---- microphone: raw audio for the laptop's recogniser, and the browser's own recogniser
-
+// raw audio for the laptop's recogniser, and the browser's own recogniser
 async function startMicrophone() {
-  if (started.microphone) return;
+  // Android Chrome cannot run its own recogniser and a second audio capture at the same time, so
+  // one of them is used: the laptop's model when it has one, otherwise the browser's recogniser.
+  if (!laptopHasVoiceModel) return startBrowserRecognition();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  started.microphone = true;
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   audioRate = ctx.sampleRate;
   send({ type: "hello", caps: capabilities(), audio_rate: audioRate });
@@ -186,34 +176,78 @@ async function startMicrophone() {
   };
   src.connect(proc);
   proc.connect(ctx.destination);
-  startBrowserRecognition();
+  const beat = setInterval(() => send({ type: "mic", state: "listening" }), 1000);
+  return () => {
+    clearInterval(beat);
+    proc.onaudioprocess = null;
+    proc.disconnect();
+    src.disconnect();
+    stream.getTracks().forEach((t) => t.stop());
+    ctx.close();
+  };
 }
 
 function startBrowserRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return;
+  if (!SR) {
+    send({ type: "mic", state: "unsupported" });
+    return null;
+  }
   const rec = new SR();
+  let on = true;
+  let fatal = false;
+  const beat = setInterval(() => { if (!fatal) send({ type: "mic", state: "listening" }); }, 1000);
   rec.continuous = true;
-  rec.interimResults = false;
+  rec.interimResults = true;   // the laptop shows the words while they are being spoken
   rec.lang = "en-US";
   rec.onresult = (e) => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const alt = e.results[i][0];
+      if (!e.results[i].isFinal) {
+        send({ type: "heard", text: alt.transcript, final: false });
+        continue;
+      }
+      send({ type: "heard", text: alt.transcript, final: true });
       alt.transcript.trim().toLowerCase().split(/\s+/).forEach((w) =>
         send({ type: "word", word: w, confidence: alt.confidence || 0.8 }));
     }
   };
-  rec.onend = () => { try { rec.start(); } catch (_) {} };
+  rec.onerror = (e) => {
+    // "no-speech" and "aborted" are normal pauses; anything else is a reason to show on the tile
+    if (e.error === "no-speech" || e.error === "aborted") return;
+    fatal = e.error === "not-allowed" || e.error === "service-not-allowed";
+    send({ type: "mic", state: e.error });
+  };
+  rec.onend = () => { if (on && !fatal) setTimeout(() => { try { rec.start(); } catch (_) {} }, 300); };
   try { rec.start(); } catch (_) {}
+  return () => { on = false; clearInterval(beat); try { rec.stop(); } catch (_) {} };
 }
 
-// ---- start, tap to enable, buttons
+// ---- start, tap a tile to switch a sensor on or off, buttons
 
 const STARTERS = { camera: startCamera, motion: startMotion, gps: startGps, microphone: startMicrophone };
+const stoppers = {};   // sensor id -> function that stops it, while it is running
+
+async function switchOn(id) {
+  if (stoppers[id] || !STARTERS[id]) return;
+  const stop = await STARTERS[id]();
+  if (stop) {
+    stoppers[id] = stop;
+    send({ type: "sensor", id, on: true });
+  }
+}
+
+function switchOff(id) {
+  const stop = stoppers[id];
+  if (!stop) return;
+  delete stoppers[id];
+  stop();
+  send({ type: "sensor", id, on: false });   // so the decision layer answers at once
+}
 
 async function startAll() {
   for (const id of Object.keys(STARTERS)) {
-    try { await STARTERS[id](); } catch (_) { /* a refused permission just leaves the tile idle */ }
+    try { await switchOn(id); } catch (_) { /* a refused permission just leaves the tile idle */ }
   }
 }
 
@@ -226,11 +260,26 @@ document.getElementById("startBtn").onclick = async () => {
 grid.addEventListener("click", async (e) => {
   const tile = e.target.closest(".tile");
   const id = tile && tile.dataset.id;
-  if (id && STARTERS[id]) {
-    try { await STARTERS[id](); } catch (_) {}
+  if (!id) return;
+  if (id === "wifi" || id === "bluetooth") {   // radios: a tap declares it off, another tap clears it
+    if (tile.classList.contains("unavailable") && !declaredOff[id]) return;
+    declaredOff[id] = !declaredOff[id];
+    send({ type: "sensor", id, on: !declaredOff[id] });
+    reportRadios();
+    return;
   }
+  if (!STARTERS[id]) return;
+  if (tile.classList.contains("unavailable") && id !== "microphone") return;   // the mic can be retried
+  try {
+    if (stoppers[id]) switchOff(id);
+    else await switchOn(id);
+  } catch (_) {}
 });
-document.getElementById("stopBtn").onclick = () => send({ type: "button", name: "stop" });
-document.getElementById("goBtn").onclick = () => send({ type: "button", name: "go" });
+
+document.querySelectorAll("[data-button]").forEach((b) => {
+  b.onclick = () => send({ type: "button", name: b.dataset.button });
+});
+
+document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 connect();

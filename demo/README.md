@@ -10,9 +10,11 @@ phone browser  ----USB cable---->  laptop server  -->  laptop browser (dashboard
  sensor tiles, command  <-command-   decision layer      decision rules, camera
 ```
 
-Both pages are one screen each, so neither needs scrolling. The dashboard shows the inputs and the
-switching rules on the left, the camera in the middle, and the current action with the middleware
-messages on the right.
+Both pages are one screen each, so neither needs scrolling. The dashboard shows the inputs on the
+left, the camera in the middle, and on the right the decision as a sentence with a written log of
+every decision (stop and go, Wi-Fi to Bluetooth, GPS to indoor map, a sensor going on or off,
+obstacles), what the user said into the microphone, and a small middleware box. The laptop speaks
+each decision.
 
 ## Run it
 
@@ -40,8 +42,13 @@ microphone with no certificate.
 
 ## The phone screen
 
-Eight tiles in two columns, then the command from the decision layer
-and the STOP and GO buttons. Text sizes follow the screen height, so nothing scrolls.
+Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an
+active sensor tile switches that sensor off and MANA answers at once in the decision box and by
+voice (GPS off moves the position to the indoor map); tapping it again switches it on. A web page
+cannot switch Wi-Fi or Bluetooth itself, so tapping those tiles declares them off for MANA. The phone is a sensor input only: the
+decision and its spoken message are on the laptop dashboard (Chrome needs one click on the page
+before it will speak; the Voice button turns it off). Text sizes follow the screen height, so
+nothing scrolls.
 
 | State | Meaning |
 |---|---|
@@ -57,8 +64,8 @@ and the STOP and GO buttons. Text sizes follow the screen height, so nothing scr
 | Motion | real tilt and vibration | level or not; shaking counts as rough ground, so it changes to tracks |
 | GPS | real position accuracy | worse than 15 m for 3 s leaves GPS, better than 8 m for 5 s returns |
 | Microphone | real audio and the browser's recogniser | the words stop, go, on, off, up, down become commands |
-| Wi-Fi | the network type the browser reports (Android Chrome) | gone for 2 s means alerts would move to Bluetooth |
-| Bluetooth | whether the phone's Bluetooth is available and on | Wi-Fi gone and Bluetooth on means alerts use Bluetooth; both off means no link |
+| Wi-Fi | the network type the browser reports (Android Chrome); switched off shows Not available | gone for 2 s means alerts would move to Bluetooth |
+| Bluetooth | what the browser says about the Bluetooth adapter (asked every second). Chrome does not always follow the Settings switch, so tap the tile to declare it off | Wi-Fi gone and Bluetooth on means alerts use Bluetooth; both off means no link |
 | Depth | **N/A**, browsers do not expose depth sensors | nothing |
 | Lidar | **N/A**, browsers do not expose lidar | nothing |
 
@@ -85,8 +92,9 @@ The server starts without any model and says which ones are missing.
   when two different sources agree, so stairs need the classifier and a second source.
 - **Distances from the camera are estimates**, made from the size of the box and a typical
   object height. Calibrate with `vision.calibrate_focal`.
-- **Drops and step height need depth.** They are verified by the scripted scenarios behind the
-  **Test evidence** button, which are labelled as an automated test and not live data.
+- **Drops and step height need depth.** They are verified by the scripted scenarios
+  (`python -m mana_core.evaluate`, or `/api/evidence` on the server), which are an automated test
+  and not live data.
 - **Wi-Fi detection needs Android Chrome.** Other browsers cannot see the network type, and then
   the tile shows N/A and the alert link shows "unknown" rather than a guess.
 - **The browser's speech recognition is an online service.** Chrome sends the audio to Google, so

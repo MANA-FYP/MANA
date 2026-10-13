@@ -22,17 +22,15 @@
   </div>
 
   <div class="grid" id="grid"></div>
-  <div class="legend">Active &middot; Tap = tap to enable &middot; N/A = the browser cannot read it</div>
 
-  <div class="card device" id="device">
-    <div class="label">Command from the decision layer</div>
-    <div class="mode" id="mode">WAITING</div>
-    <div class="why" id="why">Connecting to the laptop.</div>
+  <div class="modes">
+    <button class="mode-btn" data-button="automatic" data-mode="automatic">Automatic</button>
+    <button class="mode-btn" data-button="manual" data-mode="manual">Manual</button>
   </div>
 
   <div class="buttons">
-    <button class="btn stop" id="stopBtn">STOP</button>
-    <button class="btn go" id="goBtn">GO</button>
+    <button class="btn stop" data-button="stop">STOP</button>
+    <button class="btn go" data-button="go">GO</button>
   </div>
 
   <script src="/static/common.js"></script>

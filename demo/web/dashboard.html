@@ -9,8 +9,9 @@
 <body class="dash">
   <div class="ribbon"></div>
   <header>
-    <div>
+    <div class="title">
       <h1>MANA <span>decision layer</span></h1>
+      <div class="rule"></div>
       <div class="subtitle">Live data from the phone, through the middleware, into the decision layer</div>
     </div>
     <div class="chips" id="chips"></div>
@@ -35,50 +36,32 @@
       </section>
     </div>
 
-    <!-- column 3: the decision, and the messages that led to it -->
+    <!-- column 3: the decision as a sentence, what the user said, and a small middleware box -->
     <div class="col">
-      <section class="card">
+      <section class="card grow">
         <h2>3 &middot; Decision layer</h2>
-        <div class="hint">The action it has chosen now.</div>
+        <div class="hint">The last action MANA took, in words.</div>
         <div class="result" id="result">
           <div class="mode" id="mode">&nbsp;</div>
-          <div class="meta" id="meta"></div>
-          <div class="why" id="why"></div>
         </div>
         <div class="row">
           <button class="btn-danger" data-button="stop">Stop</button>
           <button class="btn-primary" data-button="go">Go</button>
           <button class="btn-secondary" data-button="automatic">Auto</button>
           <button class="btn-secondary" data-button="manual">Manual</button>
+          <button class="btn-secondary" id="voice">Voice: on</button>
         </div>
       </section>
-      <section class="card grow">
+      <section class="card small">
+        <h2>4 &middot; What you said</h2>
+        <ul class="inputs" id="userInputs"></ul>
+      </section>
+      <section class="card small">
         <h2>2 &middot; Middleware</h2>
-        <div class="hint">One message from every module: value, trust, time.</div>
         <table class="stream" id="stream"></table>
-        <div class="steps">
-          <span class="step">&#10003; Aligned in time</span>
-          <span class="step">&#10003; Weighed by trust</span>
-        </div>
       </section>
     </div>
   </main>
-
-  <footer>
-    <div class="facts" id="facts"></div>
-    <button class="btn-primary" id="openEvidence">Test evidence</button>
-  </footer>
-
-  <div class="modal" id="modal">
-    <div class="panel">
-      <h2>Test evidence</h2>
-      <div class="hint">Stairs, ramps, curbs and drops are verified here by scripted scenarios.
-        This is an automated test, not live data.</div>
-      <div class="row"><button class="btn-primary" id="runEvidence">Run the scripted scenarios</button>
-        <button class="btn-secondary" id="closeEvidence">Close</button></div>
-      <div id="evidence"></div>
-    </div>
-  </div>
 
   <script src="/static/common.js"></script>
   <script src="/static/dashboard.js"></script>
