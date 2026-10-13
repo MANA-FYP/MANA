@@ -10,16 +10,13 @@ let lastReason = "";
 let bluetoothOn = null;    // true / false, or null when the browser cannot tell
 let audioRate = 48000;
 
-// The page shows the data path honestly: localhost means a USB cable (adb reverse), anything else
-// is the network.
-document.getElementById("path").textContent =
-  ["localhost", "127.0.0.1"].includes(location.hostname) ? "data path: USB cable" : "data path: Wi-Fi";
+// The data path is the USB cable (adb reverse), so the page is opened as localhost.
+document.getElementById("path").textContent = "data path: USB cable";
 
 // ---- connection
 
 function connect() {
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(scheme + "://" + location.host + "/ws/phone");
+  ws = new WebSocket("ws://" + location.host + "/ws/phone");
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     conn.textContent = "connected";

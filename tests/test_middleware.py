@@ -49,14 +49,14 @@ def by_id(snapshot):
 
 
 def test_there_are_nine_sensors_for_a_three_by_three_grid():
-    assert len(SENSORS) == 9
-    ids = "camera motion gps microphone wifi bluetooth depth lidar temperature".split()
+    assert len(SENSORS) == 8
+    ids = "camera motion gps microphone wifi bluetooth depth lidar".split()
     assert [s.id for s in SENSORS] == ids
 
 
-def test_depth_lidar_and_temperature_are_never_available_to_a_browser():
+def test_depth_and_lidar_are_never_available_to_a_browser():
     sensors = by_id(Middleware().tick(1.0))
-    for sid in ("depth", "lidar", "temperature"):
+    for sid in ("depth", "lidar"):
         assert sensors[sid]["state"] == State.UNAVAILABLE
         assert sensors[sid]["reason"]
 
@@ -355,7 +355,7 @@ def test_snapshot_has_what_the_dashboard_needs():
     m.on_heartbeat(15.0, now=1.0)
     snap = m.tick(1.0)
     assert set(snap) >= {"sensors", "messages", "decision", "rules", "position", "link", "latency"}
-    assert len(snap["sensors"]) == 9
+    assert len(snap["sensors"]) == 8
     assert snap["rules"][0] == "user stop"
     assert snap["link"]["state"] == "unknown"  # no radio report yet
     m.on_radio(True, True, now=1.0)

@@ -5,7 +5,7 @@ no Gazebo. Nothing in the demo is simulated: a sensor the phone's browser can re
 sensor it cannot read is shown as **N/A** with the reason.
 
 ```
-phone browser  --cable or Wi-Fi-->  laptop server  -->  laptop browser (dashboard)
+phone browser  ----USB cable---->  laptop server  -->  laptop browser (dashboard)
  sensors, camera frames, audio       middleware +        inputs, middleware,
  sensor tiles, command  <-command-   decision layer      decision rules, camera
 ```
@@ -21,7 +21,7 @@ pip install -r demo/requirements.txt
 python -m demo.server                         # dashboard at http://localhost:8000/dashboard
 ```
 
-### Connect the phone: with a USB cable (recommended, Android)
+### Connect the phone: USB cable (Android)
 
 A cable means the phone's Wi-Fi and Bluetooth can be switched off during the demo without losing
 the data, so you can show the alert link changing.
@@ -38,24 +38,9 @@ the data, so you can show the alert link changing.
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
 
-### Connect the phone: over Wi-Fi
-
-Phone browsers only give those sensors to **HTTPS** pages, so make a certificate once (Git for
-Windows includes `openssl`) and start the server with it:
-
-```bash
-openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30 \
-  -subj "/CN=mana-demo" -addext "subjectAltName=IP:<the laptop's address>"
-python -m demo.server --port 8443 --cert cert.pem --key key.pem
-```
-
-Open the phone address the server prints, for example `https://192.168.0.12:8443/phone`, accept
-the certificate warning once, and tap **Start sensors**. `*.pem` files are ignored by git. Never
-commit a private key.
-
 ## The phone screen
 
-Nine tiles in two columns (the last one is full width), then the command from the decision layer
+Eight tiles in two columns, then the command from the decision layer
 and the STOP and GO buttons. Text sizes follow the screen height, so nothing scrolls.
 
 | State | Meaning |
@@ -76,11 +61,10 @@ and the STOP and GO buttons. Text sizes follow the screen height, so nothing scr
 | Bluetooth | whether the phone's Bluetooth is available and on | Wi-Fi gone and Bluetooth on means alerts use Bluetooth; both off means no link |
 | Depth | **N/A**, browsers do not expose depth sensors | nothing |
 | Lidar | **N/A**, browsers do not expose lidar | nothing |
-| Temperature | **N/A**, browsers do not expose a temperature sensor | nothing |
 
 The alert link is a **decision**: a web page cannot open a Bluetooth connection to the chair, so
 the dashboard shows which radio the alerts *would* use. The data of the demo itself travels over the
-cable or Wi-Fi.
+USB cable.
 
 ## Optional models
 

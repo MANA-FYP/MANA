@@ -58,10 +58,10 @@ def test_motion_from_the_phone_makes_the_motion_sensor_active_on_the_dashboard()
     run(with_clients(go))
 
 
-def test_depth_lidar_and_temperature_stay_unavailable():
+def test_depth_and_lidar_stay_unavailable():
     async def go(client, phone, dash):
         snap = await snapshot_where(dash, lambda s: True)
-        for sid in ("depth", "lidar", "temperature"):
+        for sid in ("depth", "lidar"):
             assert sensor(snap, sid)["state"] == "unavailable"
 
     run(with_clients(go))
@@ -116,7 +116,7 @@ def test_the_phone_receives_the_sensor_states_and_the_decision():
             msg = await asyncio.wait_for(phone.receive_json(), 3)
             if msg["type"] == "state":
                 break
-        assert len(msg["sensors"]) == 9
+        assert len(msg["sensors"]) == 8
         assert "mode" in msg["decision"] and "reason" in msg["decision"]
 
     run(with_clients(go))
@@ -197,13 +197,13 @@ def test_the_phone_and_dashboard_pages_and_their_files_are_served():
     run(with_clients(go))
 
 
-def test_the_phone_page_lists_nine_sensors_in_two_columns_and_needs_no_scrolling():
+def test_the_phone_page_lists_eight_sensors_in_two_columns_and_needs_no_scrolling():
     from pathlib import Path
 
     from demo.middleware import SENSORS
 
     css = (Path(__file__).parents[1] / "demo" / "web" / "style.css").read_text()
-    assert len(SENSORS) == 9
+    assert len(SENSORS) == 8
     assert "grid-template-columns: repeat(2, 1fr)" in css  # the phone grid
     assert "height: 100dvh" in css  # the phone page is one screen
     assert "height: 100vh" in css  # and so is the dashboard

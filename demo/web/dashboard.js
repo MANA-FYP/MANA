@@ -67,17 +67,6 @@ function render(s) {
     " · " + d.priority.toLowerCase());
   setText($("why"), d.reason);
 
-  // position and link
-  const radio = (v) => (v === null ? "unknown" : v ? "on" : "off");
-  const acc = s.position.accuracy_m === null ? "no fix" : "±" + Math.round(s.position.accuracy_m) + " m";
-  const kv = [
-    ["Position", (s.position.source === "gps" ? "GPS " : "Indoor map ") + acc],
-    ["Wi-Fi / Bluetooth", radio(s.link.wifi) + " / " + radio(s.link.bluetooth)],
-    ["Alerts would use", link[0].replace("Alerts: ", "")],
-  ];
-  const html = kv.map((p) => "<dt>" + p[0] + "</dt><dd>" + p[1] + "</dd>").join("");
-  if ($("kv").dataset.k !== html) { $("kv").dataset.k = html; $("kv").innerHTML = html; }
-
   // timing facts
   const lat = s.latency;
   const facts = [

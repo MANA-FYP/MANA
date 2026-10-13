@@ -11,7 +11,6 @@ const ICONS = {
   bluetooth: '<path d="M7 7.5l10 9-5 5V2.5l5 5-10 9"/>',
   depth: '<path d="M12 2.5l8.5 4.5v10L12 21.5 3.5 17V7z"/><path d="M12 12l8.5-5M12 12L3.5 7M12 12v9.5"/>',
   lidar: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12L18 6"/>',
-  temperature: '<path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/><path d="M12 9v7"/>',
 };
 
 const STATE_TEXT = { active: "Active", idle: "Tap", unavailable: "N/A" };

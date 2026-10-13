@@ -54,7 +54,6 @@ SENSORS = (
     SensorInfo("bluetooth", "Bluetooth"),
     SensorInfo("depth", "Depth", "Not exposed to browsers"),
     SensorInfo("lidar", "Lidar", "Not exposed to browsers"),
-    SensorInfo("temperature", "Temperature", "Not exposed to browsers"),
 )
 FRESH_S = 2.0  # a sensor counts as active when it reported within this time
 

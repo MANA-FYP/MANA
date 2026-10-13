@@ -1,7 +1,7 @@
 """Laptop server for the MANA phone demo.
 
     python -m demo.server                      # http://localhost:8000/dashboard
-    python -m demo.server --cert c.pem --key k.pem --port 8443   # HTTPS, for the phone page
+    python -m demo.usb                         # the phone then opens http://localhost:8000/phone
 
 The phone page opens /phone and streams its real sensors over a WebSocket. The dashboard opens
 /dashboard and watches. Everything between them is the middleware and the decision layer.
@@ -25,8 +25,6 @@ import asyncio
 import contextlib
 import io
 import json
-import socket
-import ssl
 import sys
 import warnings
 from array import array
@@ -301,23 +299,10 @@ async def stop_loop(app: web.Application) -> None:
 # ---- command line
 
 
-def lan_address() -> str:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("10.255.255.255", 1))
-        return s.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        s.close()
-
-
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="MANA phone demo server")
-    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--host", default="127.0.0.1", help="the phone arrives through the USB cable")
     p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--cert", help="TLS certificate (PEM); needed for the phone page's sensors")
-    p.add_argument("--key", help="TLS private key (PEM)")
     p.add_argument("--weights", default="yolo26n.pt", help="object detector weights (Ultralytics)")
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
@@ -329,18 +314,11 @@ def main(argv=None) -> None:
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     app = build_app(detector=detector, classifier=classifier, recognizer=recognizer)
 
-    ctx = None
-    if a.cert and a.key:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(a.cert, a.key)
-    scheme, ip = ("https" if ctx else "http"), lan_address()
-    print(f"dashboard: {scheme}://localhost:{a.port}/dashboard")
-    print(f"phone:     {scheme}://{ip}:{a.port}/phone")
-    if ctx is None:
-        print("note: phone browsers give sensors only to HTTPS pages; pass --cert and --key")
+    print(f"dashboard: http://localhost:{a.port}/dashboard")
+    print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
     for name, on in models_status(app).items():
         print(f"model {name}: {'loaded' if on else 'not available'}")
-    web.run_app(app, host=a.host, port=a.port, ssl_context=ctx, print=None)
+    web.run_app(app, host=a.host, port=a.port, print=None)
 
 
 if __name__ == "__main__":
