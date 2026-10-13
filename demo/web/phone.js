@@ -62,7 +62,7 @@ function capabilities() {
     motion: needs("DeviceMotionEvent" in window && secure, secure ? "No motion access" : https),
     gps: needs("geolocation" in navigator && secure, secure ? "No location access" : https),
     microphone: needs(md && secure, secure ? "No microphone access" : https),
-    wifi: needs(!!(navigator.connection && "type" in navigator.connection), "Browser cannot see the network type"),
+    wifi: needs(!!(navigator.connection && "type" in navigator.connection), "No network info"),
     bluetooth: needs("bluetooth" in navigator, "No Bluetooth access"),
   };
 }

@@ -197,13 +197,13 @@ def test_the_phone_and_dashboard_pages_and_their_files_are_served():
     run(with_clients(go))
 
 
-def test_the_phone_page_lists_nine_sensors_in_a_three_column_grid_that_needs_no_scrolling():
+def test_the_phone_page_lists_nine_sensors_in_two_columns_and_needs_no_scrolling():
     from pathlib import Path
 
     from demo.middleware import SENSORS
 
     css = (Path(__file__).parents[1] / "demo" / "web" / "style.css").read_text()
     assert len(SENSORS) == 9
-    assert "grid-template-columns: repeat(3, 1fr)" in css
+    assert "grid-template-columns: repeat(2, 1fr)" in css  # the phone grid
     assert "height: 100dvh" in css  # the phone page is one screen
     assert "height: 100vh" in css  # and so is the dashboard

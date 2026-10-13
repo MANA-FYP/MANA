@@ -17,7 +17,7 @@
   </header>
 
   <main>
-    <!-- column 1: what the phone provides -->
+    <!-- column 1: what the phone provides, and the switching rules on it -->
     <div class="col">
       <section class="card">
         <h2>1 &middot; Inputs from the phone</h2>
@@ -31,17 +31,8 @@
       </section>
     </div>
 
-    <!-- column 2: the middleware and the camera -->
+    <!-- column 2: the camera, as tall as the screen allows -->
     <div class="col">
-      <section class="card">
-        <h2>2 &middot; Middleware</h2>
-        <div class="hint">Every module reports one message: value, trust and time.</div>
-        <table class="stream" id="stream"></table>
-        <div class="steps">
-          <span class="step">&#10003; Aligned in time</span>
-          <span class="step">&#10003; Weighed by trust</span>
-        </div>
-      </section>
       <section class="card grow">
         <h2>Camera</h2>
         <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
@@ -49,12 +40,11 @@
       </section>
     </div>
 
-    <!-- column 3: the decision layer -->
+    <!-- column 3: the decision, and the messages that led to it -->
     <div class="col">
-      <section class="card grow">
+      <section class="card">
         <h2>3 &middot; Decision layer</h2>
-        <div class="hint">Rules run in priority order. The first one that holds decides.</div>
-        <ul class="rules" id="rules"></ul>
+        <div class="hint">The action it has chosen now.</div>
         <div class="result" id="result">
           <div class="mode" id="mode">&nbsp;</div>
           <div class="meta" id="meta"></div>
@@ -63,8 +53,17 @@
         <div class="row">
           <button class="btn-danger" data-button="stop">Stop</button>
           <button class="btn-primary" data-button="go">Go</button>
-          <button class="btn-secondary" data-button="automatic">Automatic</button>
+          <button class="btn-secondary" data-button="automatic">Auto</button>
           <button class="btn-secondary" data-button="manual">Manual</button>
+        </div>
+      </section>
+      <section class="card grow">
+        <h2>2 &middot; Middleware</h2>
+        <div class="hint">One message from every module: value, trust, time.</div>
+        <table class="stream" id="stream"></table>
+        <div class="steps">
+          <span class="step">&#10003; Aligned in time</span>
+          <span class="step">&#10003; Weighed by trust</span>
         </div>
       </section>
     </div>

@@ -9,7 +9,6 @@ let boxes = [];
 let frameSize = { w: 0, h: 0 };
 let chipsKey = "";
 let streamKey = "";
-let rulesKey = "";
 
 function connect() {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -59,17 +58,7 @@ function render(s) {
       '<tr><td colspan="4" style="color:#64748b">No messages yet. Tap start on the phone.</td></tr>';
   }
 
-  // rules: built once, then only the lit one changes
   const d = s.decision;
-  if (rulesKey !== s.rules.join("|")) {
-    rulesKey = s.rules.join("|");
-    $("rules").innerHTML = s.rules.map((r) => "<li>" + r + "</li>").join("");
-  }
-  [...$("rules").children].forEach((li, i) => {
-    const fired = s.rules[i] === d.fired;
-    if (li.classList.contains("fired") !== fired) li.classList.toggle("fired", fired);
-  });
-
   const kind = d.stop ? "stopped" : d.mode === "TRACKS" ? "tracks" : d.speed < 1 ? "slow" : "wheels";
   const cls = "result " + kind;
   if ($("result").className !== cls) $("result").className = cls;
@@ -80,13 +69,11 @@ function render(s) {
 
   // position and link
   const radio = (v) => (v === null ? "unknown" : v ? "on" : "off");
+  const acc = s.position.accuracy_m === null ? "no fix" : "±" + Math.round(s.position.accuracy_m) + " m";
   const kv = [
-    ["Position source", s.position.source === "gps" ? "GPS" : "Indoor map"],
-    ["GPS accuracy", s.position.accuracy_m === null ? "no fix" : "±" + Math.round(s.position.accuracy_m) + " m"],
-    ["Wi-Fi", radio(s.link.wifi)],
-    ["Bluetooth", radio(s.link.bluetooth)],
+    ["Position", (s.position.source === "gps" ? "GPS " : "Indoor map ") + acc],
+    ["Wi-Fi / Bluetooth", radio(s.link.wifi) + " / " + radio(s.link.bluetooth)],
     ["Alerts would use", link[0].replace("Alerts: ", "")],
-    ["Heartbeats missed", String(s.link.missed)],
   ];
   const html = kv.map((p) => "<dt>" + p[0] + "</dt><dd>" + p[1] + "</dd>").join("");
   if ($("kv").dataset.k !== html) { $("kv").dataset.k = html; $("kv").innerHTML = html; }
@@ -99,7 +86,7 @@ function render(s) {
     [lat.voice_or_button_to_stop_ms === undefined ? "-" : Math.round(lat.voice_or_button_to_stop_ms) + " ms",
      "stop to decision"],
     [Math.round(s.link.trust * 100) + " %", "data link trust"],
-    [String(s.messages.length), "messages in the log"],
+    [String(s.link.missed), "heartbeats missed"],
     [s.time.toFixed(0) + " s", "running"],
   ];
   const fhtml = facts.map((f) => '<div class="fact"><b>' + f[0] + "</b><span>" + f[1] + "</span></div>").join("");

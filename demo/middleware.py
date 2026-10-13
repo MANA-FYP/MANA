@@ -322,7 +322,7 @@ class Middleware:
         slip = spread > self.VIBRATION_SLIP
         self.core.on_motion(MotionReport(now, 0.9, pitch_rad=pitch, roll_rad=roll, wheel_slip=slip))
         deg = math.degrees(max(abs(pitch), abs(roll)))
-        self._seen("motion", now, f"tilt {deg:.0f} deg, {'rough' if slip else 'smooth'}", 0.9)
+        self._seen("motion", now, f"{deg:.0f}° {'rough' if slip else 'smooth'}", 0.9)
         self._say(now, "motion", "motion", f"tilt {deg:.0f} deg, slip {slip}", 0.9)
 
     def on_gps(self, accuracy_m: float | None, now: float | None = None) -> None:

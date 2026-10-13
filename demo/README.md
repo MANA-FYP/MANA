@@ -10,7 +10,9 @@ phone browser  --cable or Wi-Fi-->  laptop server  -->  laptop browser (dashboar
  sensor tiles, command  <-command-   decision layer      decision rules, camera
 ```
 
-Both pages are one screen each, so neither needs scrolling.
+Both pages are one screen each, so neither needs scrolling. The dashboard shows the inputs and the
+switching rules on the left, the camera in the middle, and the current action with the middleware
+messages on the right.
 
 ## Run it
 
@@ -53,8 +55,8 @@ commit a private key.
 
 ## The phone screen
 
-Nine small tiles in three columns and three rows, then the command from the decision layer and the
-STOP and GO buttons.
+Nine tiles in two columns (the last one is full width), then the command from the decision layer
+and the STOP and GO buttons. Text sizes follow the screen height, so nothing scrolls.
 
 | State | Meaning |
 |---|---|
