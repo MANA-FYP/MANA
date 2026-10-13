@@ -14,6 +14,9 @@ Phone to laptop, text messages (JSON):
   button  {"type": "button", "name": "stop" | "go" | "automatic" | "manual"}
   ping    {"type": "ping", "t": 123}   answered with pong; the phone then sends an rtt message
   rtt     {"type": "rtt", "ms": 12}     the round trip it measured
+  heard   {"type": "heard", "text": "stop the chair"}   (the phrase, shown as what the user said)
+  sensor  {"type": "sensor", "id": "camera", "on": false}   the user tapped a tile
+  mic     {"type": "mic", "state": "listening" | "<recogniser error>"}
   radio   {"type": "radio", "wifi": true, "bluetooth": false}   null when the browser cannot tell
 Phone to laptop, binary messages: a first byte of 1 then a JPEG frame, or 2 then float32 audio.
 """
@@ -62,8 +65,17 @@ def brightness_of(jpeg: bytes) -> float:
     return sum(pixels) / (len(pixels) * 255.0)
 
 
+@web.middleware
+async def no_cache(request, handler):
+    """Pages and scripts are never cached, so an edited page shows up on the next refresh."""
+    resp = await handler(request)
+    if not request.path.startswith("/ws/"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def build_app(mw=None, detector=None, classifier=None, recognizer=None) -> web.Application:
-    app = web.Application(client_max_size=16 * 1024 * 1024)
+    app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     app["phones"], app["dashboards"] = set(), set()
@@ -133,7 +145,10 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         acc = d.get("accuracy")
         mw.on_gps(None if acc is None else float(acc), now)
     elif kind == "word":
-        mw.on_word(str(d.get("word", "")), float(d.get("confidence", 0.8)), now)
+        # the phone sends the whole phrase first ("heard"), so a word is not written down twice
+        mw.on_word(str(d.get("word", "")), float(d.get("confidence", 0.8)), now, record=False)
+    elif kind == "heard":
+        mw.on_heard(str(d.get("text", "")), now, final=bool(d.get("final", True)))
     elif kind == "button":
         command = BUTTONS.get(str(d.get("name", "")).lower())
         if command is not None:
@@ -143,6 +158,10 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         await ws.send_json({"type": "pong", "t": d.get("t")})
     elif kind == "rtt":
         mw.on_heartbeat(float(d["ms"]), now)
+    elif kind == "sensor":
+        mw.on_sensor_switch(str(d.get("id", "")), bool(d.get("on")), now)
+    elif kind == "mic":
+        mw.on_microphone_state(str(d.get("state", "")), now)
     elif kind == "radio":
         mw.on_radio(d.get("wifi"), d.get("bluetooth"), now)
 
@@ -274,7 +293,8 @@ async def broadcast(app: web.Application) -> None:
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_json({"type": "snapshot", **snap})
     state = {"type": "state", "sensors": snap["sensors"], "decision": snap["decision"],
-             "link": snap["link"], "position": snap["position"]}  # fmt: skip
+             "link": snap["link"], "position": snap["position"],
+             "manual": snap["manual"], "models": snap["models"]}  # fmt: skip
     for ws in list(app["phones"]):
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_json(state)

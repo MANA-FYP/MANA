@@ -339,12 +339,93 @@ def test_a_flickering_wifi_does_not_flip_the_link():
     assert r.state == "wifi"
 
 
-def test_radio_reports_light_up_the_wifi_and_bluetooth_tiles_with_what_they_say():
+def test_a_radio_that_is_on_is_active_and_one_that_is_off_is_not_available():
     m = Middleware()
     m.on_radio(False, True, now=1.0)
     tiles = by_id(m.tick(1.1))
-    assert (tiles["wifi"]["state"], tiles["wifi"]["value"]) == ("active", "off")
+    assert (tiles["wifi"]["state"], tiles["wifi"]["reason"]) == ("unavailable", "Not available")
     assert (tiles["bluetooth"]["state"], tiles["bluetooth"]["value"]) == ("active", "on")
+
+
+def test_bluetooth_turned_off_says_so_and_comes_back_when_it_is_on_again():
+    m = Middleware()
+    m.on_radio(True, False, now=1.0)
+    tiles = by_id(m.tick(1.1))
+    assert (tiles["bluetooth"]["state"], tiles["bluetooth"]["reason"]) == (
+        "unavailable",
+        "Turned off",
+    )
+    m.on_radio(True, True, now=2.0)
+    assert by_id(m.tick(2.1))["bluetooth"]["state"] == "active"
+
+
+def test_what_the_user_says_into_the_microphone_is_kept_as_text():
+    m = Middleware()
+    m.on_heard("stop the chair", now=1.0)
+    m.on_word("stop", 0.9, now=1.0, record=False)  # the same words, not written down twice
+    m.on_command(Command.MANUAL, now=1.5, source="button")  # a button is not what was said
+    assert m.tick(1.6)["inputs"] == [{"t": 0.0, "text": "stop the chair", "command": "Stop"}]
+
+
+def test_a_recognised_word_without_a_phrase_is_written_down_once():
+    m = Middleware()
+    m.on_word("banana", 0.9, now=1.0)
+    assert m.tick(1.1)["inputs"] == [{"t": 0.0, "text": "banana", "command": ""}]
+
+
+def run_ticks(m, start, seconds, step=0.1, **kw):
+    t = start
+    while t < start + seconds:
+        m.tick(t)
+        t += step
+    return t
+
+
+def texts(m, kind=None):
+    return [e["text"] for e in m.tick(m.clock())["decisions"] if kind in (None, e["kind"])]
+
+
+def test_the_decision_log_says_stop_and_go_in_words():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    m.on_command(Command.STOP, now=1.0, source="button")
+    m.tick(1.1)
+    m.on_command(Command.GO, now=2.0, source="button")
+    m.tick(2.1)
+    log = texts(m, "decision")
+    assert "MANA deactivated. You are fully in control." in log
+    assert any(t.startswith("MANA reactivated.") for t in log)
+
+
+def test_the_decision_log_says_when_alerts_switch_to_bluetooth():
+    m = Middleware(clock=lambda: 10.0)
+    m.on_radio(True, True, now=0.0)
+    m.tick(0.0)
+    m.on_radio(False, True, now=1.0)
+    t = run_ticks(m, 1.0, 4.0)
+    assert "Wi-Fi is not available. Switching alerts to Bluetooth." in texts(m, "link")
+    m.on_radio(True, True, now=t)
+    run_ticks(m, t, 7.0)
+    assert "Wi-Fi is available again. Alerts use Wi-Fi." in texts(m, "link")
+
+
+def test_the_decision_log_says_when_a_sensor_goes_off():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)  # everything starts idle
+    t = 0.1
+    while t < 2.0:  # the phone keeps sending motion
+        m.on_motion(0.0, 0.0, 9.81, now=t)
+        m.tick(t)
+        t += 0.1
+    assert "Motion is available. MANA can check tilt and rough ground." in texts(m, "switch")
+    run_ticks(m, t, 6.0)  # nothing arrives any more
+    assert "Motion is not available. MANA cannot check tilt or rough ground." in texts(m, "switch")
+
+
+def test_the_decision_sentence_is_in_the_snapshot():
+    m = Middleware()
+    snap = m.tick(0.0)
+    assert snap["decision"]["sentence"].startswith("Driving on wheels")
 
 
 # ---- the snapshot
@@ -382,3 +463,95 @@ def test_log_and_snapshot_times_are_seconds_since_the_first_message():
     m.on_gps(6.0, now=5002.0)
     assert [e["t"] for e in m.log] == [0.0, 2.0]
     assert m.tick(5003.0)["time"] == 3.0
+
+
+def test_a_recogniser_that_cannot_listen_says_why_and_listening_clears_it():
+    m = Middleware()
+    m.on_microphone_state("network", now=1.0)
+    tile = by_id(m.tick(1.1))["microphone"]
+    assert (tile["state"], tile["reason"]) == ("unavailable", "Needs internet")
+    m.on_microphone_state("listening", now=2.0)
+    assert by_id(m.tick(2.1))["microphone"]["state"] == "active"
+
+
+def test_the_action_box_lines_hold_every_decision_in_force():
+    m = Middleware(clock=lambda: 10.0)
+    m.on_radio(True, True, now=0.0)
+    m.tick(0.0)
+    m.on_radio(False, True, now=1.0)
+    t = run_ticks(m, 1.0, 4.0)
+    lines = m.tick(t)["decision"]["lines"]
+    assert lines[0].startswith("Driving on wheels")
+    assert "Wi-Fi is not available. Switching alerts to Bluetooth." in lines
+    assert not any(line == "Wi-Fi is not available." for line in lines)  # not said twice
+
+
+def test_a_phrase_being_spoken_fills_the_live_line_until_it_is_final():
+    m = Middleware()
+    m.on_heard("sto", now=1.0, final=False)
+    assert m.tick(1.1)["speaking"] == "sto"
+    m.on_heard("stop", now=1.5, final=True)
+    snap = m.tick(1.6)
+    assert snap["speaking"] == ""
+    assert snap["inputs"][-1]["text"] == "stop"
+
+
+def test_switching_a_sensor_off_is_answered_at_once_in_words():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    m.on_motion(0.0, 0.0, 9.81, now=0.5)
+    m.tick(0.6)
+    m.on_sensor_switch("motion", False, now=0.7)
+    snap = m.tick(0.8)
+    tile = by_id(snap)["motion"]
+    assert (tile["state"], tile["value"]) == ("idle", "Switched off")
+    assert any("Motion is not available" in line for line in snap["decision"]["lines"])
+    assert not any("by you" in line for line in snap["decision"]["lines"])
+    assert [e["kind"] for e in snap["decisions"] if e["text"].startswith("Motion")] == ["switch"]
+
+
+def test_switching_gps_off_moves_the_position_to_the_indoor_map():
+    m = Middleware(clock=lambda: 10.0)
+    m.on_gps(5.0, now=0.0)
+    m.tick(0.0)
+    m.on_sensor_switch("gps", False, now=1.0)
+    run_ticks(m, 1.0, 4.0)
+    assert m.tick(5.1)["position"]["source"] == "indoor"
+
+
+def test_a_sensor_that_comes_back_is_said_to_be_available():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    m.on_sensor_switch("camera", False, now=0.1)
+    m.on_sensor_switch("camera", True, now=1.0)
+    t = 1.1
+    while t < 3.0:
+        m.on_light(0.5, now=t)
+        m.tick(t)
+        t += 0.1
+    assert "Camera is available. MANA can see obstacles and the ground." in texts(m, "switch")
+
+
+def test_losing_wifi_is_said_once_not_three_times():
+    m = Middleware(clock=lambda: 10.0)
+    m.on_radio(True, True, now=0.0)
+    m.tick(0.0)
+    t = 0.1
+    while t < 8.0:  # the browser keeps saying wifi is gone, and flickers once
+        m.on_radio(False if round(t, 1) != 3.0 else None, True, now=t)
+        m.tick(t)
+        t += 0.1
+    said = [x for x in texts(m) if "Wi-Fi" in x and "not available" in x]
+    assert said == ["Wi-Fi is not available. Switching alerts to Bluetooth."]
+
+
+def test_bluetooth_available_comes_with_what_it_is_for():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    t = 0.1
+    while t < 3.0:
+        m.on_radio(True, True, now=t)
+        m.tick(t)
+        t += 0.1
+    assert "Bluetooth is available. It is the backup link for alerts." in texts(m, "switch")
+    assert "Wi-Fi is available. Alerts use Wi-Fi." in texts(m, "link")

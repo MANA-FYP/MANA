@@ -143,7 +143,8 @@ def test_radio_reports_make_the_wifi_and_bluetooth_tiles_active_and_pick_the_lin
         finally:
             stop.set()
             await task
-        assert sensor(snap, "wifi")["value"] == "off"
+        assert sensor(snap, "wifi")["state"] == "unavailable"
+        assert sensor(snap, "wifi")["reason"] == "Not available"
 
     run(with_clients(go))
 

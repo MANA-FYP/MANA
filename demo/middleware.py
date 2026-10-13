@@ -14,6 +14,7 @@ and the decision layer simply never receives anything from it.
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -24,6 +25,7 @@ from mana_core.decision import (
     DecisionCore,
     Ground,
     GroundReport,
+    Mode,
     MotionReport,
     ObstacleReport,
     Source,
@@ -52,8 +54,8 @@ SENSORS = (
     SensorInfo("microphone", "Microphone"),
     SensorInfo("wifi", "Wi-Fi"),
     SensorInfo("bluetooth", "Bluetooth"),
-    SensorInfo("depth", "Depth", "Not exposed to browsers"),
-    SensorInfo("lidar", "Lidar", "Not exposed to browsers"),
+    SensorInfo("depth", "Depth", "Not available"),
+    SensorInfo("lidar", "Lidar", "Not available"),
 )
 FRESH_S = 2.0  # a sensor counts as active when it reported within this time
 
@@ -66,6 +68,7 @@ class SensorState:
     last_seen: float | None = None
     value: str = ""
     trust: float = 0.0
+    switched_off: bool = False  # the user switched this sensor off on the phone
     stamps: deque = field(default_factory=lambda: deque(maxlen=200))
 
     def rate_hz(self, now: float, window_s: float = 2.0) -> float:
@@ -74,6 +77,8 @@ class SensorState:
     def state(self, now: float) -> State:
         if self.info.always_unavailable or not self.browser_has_it:
             return State.UNAVAILABLE
+        if self.switched_off:
+            return State.IDLE
         if self.last_seen is not None and now - self.last_seen <= FRESH_S:
             return State.ACTIVE
         return State.IDLE
@@ -238,6 +243,65 @@ WORD_COMMANDS = {
 }
 
 
+COMMAND_TEXT = {
+    Command.STOP: "Stop",
+    Command.GO: "Go",
+    Command.AUTOMATIC: "Automatic mode",
+    Command.MANUAL: "Manual mode",
+    Command.WHEELS: "Use wheels",
+    Command.TRACKS: "Use tracks",
+    Command.SPEED_UP: "Speed up",
+    Command.SLOW_DOWN: "Slow down",
+}
+
+
+# What each sensor gives MANA, and what is lost without it. The person using the device is not
+# the one running the sensors, so the wording never says who switched them.
+AVAILABLE_TEXT = {
+    "camera": "MANA can see obstacles and the ground.",
+    "motion": "MANA can check tilt and rough ground.",
+    "gps": "Using GPS for position.",
+    "microphone": "Voice commands are on.",
+    "bluetooth": "It is the backup link for alerts.",
+    "wifi": "Alerts use Wi-Fi.",
+}
+LOST_TEXT = {
+    "camera": "MANA cannot see obstacles or the ground.",
+    "motion": "MANA cannot check tilt or rough ground.",
+    "gps": "Using the indoor map for position.",
+    "microphone": "Voice commands are off, the buttons still work.",
+    "bluetooth": "There is no backup link for alerts.",
+    "wifi": "",
+}
+
+LINK_TEXT = {
+    "wifi": "Wi-Fi is available. Alerts use Wi-Fi.",
+    "bluetooth": "Wi-Fi is not available. Switching alerts to Bluetooth.",
+    "none": "Wi-Fi and Bluetooth are off. There is no alert link.",
+}
+
+
+def sensor_text(label: str, reason: str) -> str:
+    """One sentence for a sensor that is not available."""
+    why = reason.strip().lower()
+    if why in ("", "not available"):
+        return f"{label} is not available."
+    return f"{label} is not available: {why}."
+
+
+def not_available(sid: str, label: str, reason: str = "") -> str:
+    """The sentence for a sensor that is gone, with what MANA loses."""
+    return f"{sensor_text(label, reason)} {LOST_TEXT.get(sid, '')}".strip()
+
+
+def available(sid: str, label: str) -> str:
+    return f"{label} is available. {AVAILABLE_TEXT.get(sid, '')}".strip()
+
+
+def end_sentence(text: str) -> str:
+    return text if text[-1:] in ".!?" else text + "."
+
+
 @dataclass
 class Snapshot:
     """Everything the dashboard and the phone need, as plain data."""
@@ -259,6 +323,22 @@ class Middleware:
         self.wifi: bool | None = None
         self.bluetooth: bool | None = None
         self.log: deque = deque(maxlen=40)  # the common messages, newest last
+        self.inputs: deque = deque(maxlen=20)  # what the user said into the microphone, as text
+        self.decisions: deque = deque(maxlen=30)  # every decision MANA took, as text
+        self._decision_n = 0
+        self._decision_key: tuple | None = None
+        self._last_link: str | None = None
+        self._last_position: str | None = None
+        self._last_manual: bool | None = None
+        self._sensor_state: dict[str, str] = {}
+        self._sensor_pending: dict[str, tuple[str, float]] = {}
+        self._was_user_stop = False
+        self._reactivated_until = -1.0
+        self._ever_active: set[str] = set()
+        self._available_since: dict[str, float] = {}
+        self._said_at: dict[str, float] = {}
+        self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
+        self._obstacle_said: dict[str, float] = {}
         self.detections: list[dict] = []
         self.brightness = 1.0
         self.accuracy_m: float | None = None
@@ -288,6 +368,146 @@ class Middleware:
         st = self.sensors[sid]
         st.last_seen, st.value, st.trust = now, value, round(trust, 2)
         st.stamps.append(now)
+
+    def _decide(self, now: float, kind: str, text: str) -> None:
+        """Write down one decision MANA took, as a sentence. The same sentence is not written
+        again within 10 s, so a radio that flickers does not repeat itself."""
+        if kind in ("switch", "link", "position"):  # stop and go may repeat; radios may not
+            last = self._said_at.get(text)
+            if last is not None and now - last < 10.0:
+                return
+            self._said_at[text] = now
+        self._decision_n += 1
+        self.decisions.append(
+            {
+                "n": self._decision_n,
+                "t": round(self._since_start(now), 1),
+                "kind": kind,
+                "text": text,
+            }
+        )
+
+    def _sentence(self, d, fired: str, now: float) -> tuple[str, bool]:
+        """The decision as one sentence, and whether the stop came from the user."""
+        user_stop = d.stop and fired == "user stop"
+        if user_stop:
+            return "MANA deactivated. You are fully in control.", True
+        if d.stop:
+            return f"Stopped. {end_sentence(d.reason)}", False
+        how = "tracks" if d.mode == Mode.TRACKS else "wheels"
+        lead = f"Driving on {how} at {round(d.speed_limit * 100)} percent speed."
+        prefix = "MANA reactivated. " if now < self._reactivated_until else ""
+        if not self.core.automatic:
+            prefix += "Manual mode. "
+        return f"{prefix}{lead} {end_sentence(d.reason)}", False
+
+    def _standing(
+        self, now: float, sentence: str, link: str, pos: str, sensors: list[dict]
+    ) -> list[str]:
+        """Everything MANA has decided that is still true, as sentences for the action box."""
+        lines = [sentence]
+        if link in ("bluetooth", "none"):
+            lines.append(LINK_TEXT[link])
+        if pos == PositionSource.INDOOR:
+            lines.append("GPS is poor. Using the indoor map for position.")
+        for s in sensors:
+            sid = s["id"]
+            if s["state"] == "active":
+                self._ever_active.add(sid)
+            if self.sensors[sid].info.always_unavailable:
+                continue
+            if sid in ("wifi", "bluetooth") and link in ("bluetooth", "none"):
+                continue  # the link sentence already says it
+            if self.sensors[sid].switched_off:
+                lines.append(not_available(sid, s["label"]))
+            elif s["state"] == "unavailable":
+                lines.append(not_available(sid, s["label"], s["reason"]))
+            elif s["state"] == "idle" and sid in self._ever_active:
+                lines.append(not_available(sid, s["label"]))
+            elif now - self._available_since.get(sid, -99.0) < 6.0:
+                lines.append(available(sid, s["label"]))
+        recent = [x for x in self.detections if now - x["t"] < 3.0]
+        if recent:
+            last = recent[-1]
+            lines.append(f"Obstacle detected: {last['label']}, about {last['distance_m']} m ahead.")
+        return lines
+
+    def _watch(self, now: float, d, fired: str, link: str, pos: str, sensors: list[dict]) -> str:
+        """Write every change as text: the decision, the alert link, the position source, manual
+        or automatic, and each sensor going on or off. Returns the decision sentence."""
+        sentence, user_stop = self._sentence(d, fired, now)
+        if self._was_user_stop and not d.stop:
+            self._reactivated_until = now + 6.0
+            sentence, user_stop = self._sentence(d, fired, now)
+        self._was_user_stop = user_stop
+
+        key = (user_stop, d.stop, d.mode.name, re.sub(r"[\d.]+", "#", d.reason))
+        if key != self._decision_key:
+            self._decision_key = key
+            self._decide(now, "decision", sentence)
+
+        if link != self._last_link:
+            if link != "unknown":
+                text = LINK_TEXT[link]
+                if link == "wifi" and self._last_link not in (None, "unknown"):
+                    text = "Wi-Fi is available again. Alerts use Wi-Fi."
+                self._decide(now, "link", text)
+            self._last_link = link
+
+        if pos != self._last_position:
+            if self._last_position is not None:
+                indoor = pos == PositionSource.INDOOR
+                self._decide(
+                    now,
+                    "position",
+                    "GPS is poor. Using the indoor map for position."
+                    if indoor
+                    else "GPS is good again. Using GPS for position.",
+                )
+            self._last_position = pos
+
+        manual = not self.core.automatic
+        if manual != self._last_manual:
+            if self._last_manual is not None:
+                self._decide(
+                    now,
+                    "mode",
+                    "Manual mode. You are in control of the device."
+                    if manual
+                    else "Automatic mode. MANA is choosing the action.",
+                )
+            self._last_manual = manual
+
+        # a sensor must hold its new state for 1.5 s before it is written down
+        for s in sensors:
+            sid = s["id"]
+            if self.sensors[sid].info.always_unavailable:
+                continue
+            shown = self._sensor_state.setdefault(sid, s["state"])
+            if s["state"] == shown:
+                self._sensor_pending.pop(sid, None)
+                continue
+            cand = self._sensor_pending.get(sid)
+            if cand is None or cand[0] != s["state"]:
+                self._sensor_pending[sid] = (s["state"], now)
+            elif now - cand[1] >= 1.5:
+                self._sensor_pending.pop(sid)
+                self._sensor_state[sid] = s["state"]
+                label = s["label"]
+                if s["state"] == "active":
+                    self._available_since[sid] = now
+                if sid == "wifi":
+                    continue  # the alert-link rule says it, once, with what it means
+                if sid == "bluetooth" and s["state"] != "active" and self.wifi is False:
+                    continue  # both radios gone: the link rule says it
+                if s["state"] == "active":
+                    text = available(sid, label)
+                elif s["state"] == "unavailable":
+                    text = not_available(sid, label, s["reason"])
+                else:
+                    text = not_available(sid, label)
+                self._decide(now, "switch", text)
+        return sentence
 
     def _since_start(self, now: float) -> float:
         if self._t0 is None:
@@ -352,24 +572,96 @@ class Middleware:
         """What the phone's browser says about its radios. None means it cannot tell."""
         now = self.clock() if now is None else now
         self.wifi, self.bluetooth = wifi, bluetooth
-        if wifi is not None:
-            self._seen("wifi", now, "connected" if wifi else "off", 0.9)
-        if bluetooth is not None:
-            self._seen("bluetooth", now, "on" if bluetooth else "off", 0.9)
+        # a radio that is switched off is shown as not available, not as a live value
+        for sid, on, why in (
+            ("wifi", wifi, "Not available"),
+            ("bluetooth", bluetooth, "Turned off"),
+        ):
+            if on is None:
+                continue
+            st = self.sensors[sid]
+            st.browser_has_it, st.why_not = on, ("" if on else why)
+            if on:
+                self._seen(sid, now, "connected" if sid == "wifi" else "on", 0.9)
         word = {True: "on", False: "off", None: "unknown"}
         self._say(now, "radio", "link", f"Wi-Fi {word[wifi]}, Bluetooth {word[bluetooth]}", 0.9)
+
+    def on_sensor_switch(self, sid: str, on: bool, now: float | None = None) -> None:
+        """The user tapped a sensor tile on the phone to switch that sensor off or on."""
+        now = self.clock() if now is None else now
+        st = self.sensors.get(sid)
+        if st is None or st.info.always_unavailable:
+            return
+        if on:
+            st.switched_off = False
+            return
+        st.switched_off = True
+        self._available_since.pop(sid, None)
+        self._sensor_state[sid] = "idle"  # said here, so it is not said again as "stopped sending"
+        self._sensor_pending.pop(sid, None)
+        if sid == "gps":
+            self.accuracy_m = None  # no fix: the position rule moves to the indoor map
+        if sid != "wifi" and not (sid == "bluetooth" and self.wifi is False):
+            self._decide(now, "switch", not_available(sid, st.info.label))
 
     def on_microphone(self, now: float | None = None, value: str = "listening") -> None:
         now = self.clock() if now is None else now
         self._seen("microphone", now, value, 0.9)
 
+    MIC_ERRORS = {
+        "not-allowed": "Permission denied",
+        "service-not-allowed": "Permission denied",
+        "network": "Needs internet",
+        "audio-capture": "No microphone",
+        "language-not-supported": "Language not supported",
+    }
+
+    def on_microphone_state(self, state: str, now: float | None = None) -> None:
+        """The phone says whether its recogniser is listening, or why it is not."""
+        now = self.clock() if now is None else now
+        st = self.sensors["microphone"]
+        if state == "listening":
+            st.browser_has_it, st.why_not = True, ""
+            self._seen("microphone", now, "listening", 0.9)
+        else:
+            st.browser_has_it = False
+            st.why_not = self.MIC_ERRORS.get(state, "Not working")
+
+    def on_heard(self, text: str, now: float | None = None, final: bool = True) -> None:
+        """A phrase from the browser recogniser. While it is still being spoken (final is false)
+        it only fills the live line; a finished phrase is kept as what the user said."""
+        now = self.clock() if now is None else now
+        text = text.strip().lower()
+        if not final:
+            if text:
+                self._speaking = (text, now)
+                self._seen("microphone", now, "hearing you", 0.9)
+            return
+        self._speaking = None
+        if not text:
+            return
+        found = [COMMAND_TEXT[WORD_COMMANDS[w]] for w in text.split() if w in WORD_COMMANDS]
+        self.inputs.append(
+            {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
+        )
+
     def on_word(
-        self, word: str, confidence: float = 0.9, now: float | None = None
+        self,
+        word: str,
+        confidence: float = 0.9,
+        now: float | None = None,
+        record: bool = True,
     ) -> Command | None:
         """A recognised word. Only the command words reach the decision layer."""
         now = self.clock() if now is None else now
         command = WORD_COMMANDS.get(word.strip().lower())
-        self._seen("microphone", now, f'heard "{word.strip().lower()}"', confidence)
+        heard = word.strip().lower()
+        self._seen("microphone", now, f'heard "{heard}"', confidence)
+        if record and heard:
+            said = COMMAND_TEXT.get(command, "") if command else ""
+            self.inputs.append(
+                {"t": round(self._since_start(now), 1), "text": heard, "command": said}
+            )
         if command is None:
             return None
         return self.on_command(command, confidence, now, source="voice")
@@ -396,6 +688,12 @@ class Middleware:
         trust = confidence * camera_trust_factor(self.brightness)
         self.core.on_obstacle(ObstacleReport(now, trust, Source.DETECTOR, distance_m, label))
         self._say(now, "detector", "obstacle", f"{label} {distance_m:.1f} m", trust)
+        last = self._obstacle_said.get(label)
+        if last is None or now - last >= 3.0:
+            self._obstacle_said[label] = now
+            self._decide(
+                now, "obstacle", f"Obstacle detected: {label}, about {distance_m:.1f} m ahead."
+            )
         self.detections.append(
             {
                 "t": now,
@@ -449,20 +747,32 @@ class Middleware:
                     "label": st.info.label,
                     "state": state.value,
                     "reason": st.reason(),
-                    "value": st.value if state == State.ACTIVE else "",
+                    "value": st.value
+                    if state == State.ACTIVE
+                    else ("Switched off" if st.switched_off else ""),
                     "trust": st.trust if state == State.ACTIVE else 0.0,
                     "rate_hz": round(st.rate_hz(now), 1),
                 }
             )
+        sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
+        lines = self._standing(now, sentence, link, pos, sensors)
+        speaking = ""
+        if self._speaking is not None and now - self._speaking[1] < 4.0:
+            speaking = self._speaking[0]
         return {
             "time": round(self._since_start(now), 1),
             "sensors": sensors,
+            "decisions": list(self.decisions),
+            "speaking": speaking,
             "messages": list(self.log)[-12:],
+            "inputs": list(self.inputs),
             "decision": {
                 "mode": d.mode.name,
                 "stop": d.stop,
                 "speed": round(d.speed_limit, 2),
                 "reason": d.reason,
+                "sentence": sentence,
+                "lines": lines,
                 "priority": d.priority.name,
                 "fired": self.fired_rule(),
             },
