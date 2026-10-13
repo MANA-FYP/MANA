@@ -149,7 +149,8 @@ Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`),
 ```
 .
 ├── .github/workflows/   CI and release pipelines
-├── src/                 ROS 2 packages
+├── src/                 ROS 2 packages (colcon workspace)
+│   └── mana_msgs/       message types between modules, decision core and host
 ├── tests/               Python tests
 ├── ruff.toml            lint settings
 ├── pytest.ini           test settings
@@ -158,7 +159,43 @@ Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`),
 └── LICENSE
 ```
 
-The ROS 2 workspace and packages will be added to `src/` as the plan progresses.
+### ROS 2 workspace
+
+The repository root is a colcon workspace for ROS 2 Jazzy:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build
+source install/setup.bash
+```
+
+Each module is its own package, added by its owner in their own pull request:
+
+| Package | Part | Owner |
+|---|---|---|
+| `mana_msgs` | Message types (shared) | All |
+| `mana_vision` | M1 Vision | Waqas |
+| `mana_position` | M2 Position and motion | Mushahid |
+| `mana_connectivity` | M3 Connectivity | Mushahid |
+| `mana_voice` | M4 Voice and audio | Komail |
+| `mana_ui` | M5 User interface | Komail |
+| `mana_core` | M6 Decision core | Mushahid |
+| `mana_sim` | Gazebo world, robot and scenarios | Komail |
+
+### Messages (`mana_msgs`)
+
+| Message | From → to | Carries |
+|---|---|---|
+| `GroundReport` | M1 → core | Ground ahead (flat, ramp, stairs, curb, drop), its distance and step height |
+| `ObstacleReport` | M1 → core | Nearest obstacle: distance, bearing and label |
+| `MotionReport` | M2 → core | Tilt and wheel slip |
+| `PositionReport` | M2 → core | One position source (GPS, lidar map, odometry) and its error |
+| `LinkReport` | M3 → core | One link (Wi-Fi or Bluetooth): signal and missed heartbeats |
+| `UserCommand` | M4, M5 → core | One voice, touch or button command |
+| `DriveRequest` | core → host | Wheels or tracks, speed limit, stop |
+| `UserMessage` | core → M4, M5 | Text for the user, its priority, and whether to speak it |
+
+Every report to the core starts with the same two fields: `header` (its stamp is when the value was measured) and `trust` (0 to 1). The core uses them to line reports up in time and weigh them. `tests/test_msgs_contract.py` checks this rule on every pull request.
 
 ## 11. References
 
