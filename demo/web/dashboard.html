@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MANA decision layer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dash">
+  <div class="ribbon"></div>
+  <header>
+    <div>
+      <h1>MANA <span>decision layer</span></h1>
+      <div class="subtitle">Live data from the phone, through the middleware, into the decision layer</div>
+    </div>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <main>
+    <section class="card col-4">
+      <h2>1 &middot; Inputs</h2>
+      <div class="hint">What the phone can actually provide. Nothing here is simulated.</div>
+      <div class="grid" id="inputs"></div>
+    </section>
+
+    <section class="card col-4">
+      <h2>2 &middot; Middleware</h2>
+      <div class="hint">Every module reports the same message: value, trust and time.</div>
+      <table class="stream" id="stream"></table>
+      <div class="steps">
+        <span class="step">&#10003; Aligned in time</span>
+        <span class="step">&#10003; Weighed by trust</span>
+      </div>
+    </section>
+
+    <section class="card col-4">
+      <h2>3 &middot; Decision layer</h2>
+      <div class="hint">The rules run in priority order. The first one that holds decides.</div>
+      <ul class="rules" id="rules"></ul>
+      <div class="result" id="result">
+        <div class="mode" id="mode">&nbsp;</div>
+        <div class="meta" id="meta"></div>
+        <div class="why" id="why"></div>
+      </div>
+      <div class="row">
+        <button class="btn-danger" data-button="stop">Stop</button>
+        <button class="btn-primary" data-button="go">Go</button>
+        <button class="btn-secondary" data-button="automatic">Automatic</button>
+        <button class="btn-secondary" data-button="manual">Manual</button>
+      </div>
+    </section>
+
+    <section class="card col-6">
+      <h2>Camera</h2>
+      <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
+      <div class="camera" id="camera"><div class="empty">Waiting for the phone camera.</div></div>
+    </section>
+
+    <section class="card col-6">
+      <h2>Timing and position</h2>
+      <div class="hint">Measured on this run.</div>
+      <div class="facts" id="facts"></div>
+    </section>
+
+    <section class="card col-12 evidence">
+      <h2>Test evidence</h2>
+      <div class="hint">Stairs, ramps, curbs and drops are verified here by scripted scenarios.
+        This is an automated test, not live data.</div>
+      <div class="row" style="margin-top:0"><button class="btn-primary" id="runEvidence">Run the scripted scenarios</button></div>
+      <div id="evidence"></div>
+    </section>
+  </main>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

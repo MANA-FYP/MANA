@@ -155,3 +155,27 @@ def test_the_evidence_endpoint_runs_the_scripted_scenarios_and_labels_them_as_te
         assert json.dumps(data)  # plain data
 
     run(with_clients(go))
+
+
+def test_the_phone_and_dashboard_pages_and_their_files_are_served():
+    async def go(client, phone, dash):
+        phone_page = await client.get("/phone")
+        assert phone_page.status == 200
+        html = await phone_page.text()
+        assert 'id="grid"' in html and "MANA" in html
+        dash_page = await client.get("/dashboard")
+        assert dash_page.status == 200 and 'id="inputs"' in await dash_page.text()
+        for path in ("style.css", "common.js", "phone.js", "dashboard.js"):
+            assert (await client.get("/static/" + path)).status == 200
+
+    run(with_clients(go))
+
+
+def test_the_phone_page_lists_eight_sensors_in_a_two_column_grid():
+    from pathlib import Path
+
+    css = (Path(__file__).parents[1] / "demo" / "web" / "style.css").read_text()
+    js = (Path(__file__).parents[1] / "demo" / "web" / "phone.js").read_text()
+    assert "grid-template-columns: repeat(2, 1fr)" in css
+    ids = ["camera", "motion", "gps", "microphone", "link", "depth", "lidar", "temperature"]
+    assert all(f'"{i}"' in js for i in ids) and len(ids) == 8

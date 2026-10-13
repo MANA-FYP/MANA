@@ -68,9 +68,8 @@ def build_app(mw=None, detector=None, classifier=None, recognizer=None) -> web.A
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     app["phones"], app["dashboards"] = set(), set()
-    app["audio_rate"] = 48000
+    app["live"] = {"audio_rate": 48000, "busy": False}
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
-    app["busy"] = False
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard_page)
@@ -128,7 +127,7 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
     kind, now = d.get("type"), mw.clock()
     if kind == "hello":
         mw.hello(d.get("caps", {}), now)
-        app["audio_rate"] = int(d.get("audio_rate") or app["audio_rate"])
+        app["live"]["audio_rate"] = int(d.get("audio_rate") or app["live"]["audio_rate"])
     elif kind == "motion":
         mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now)
     elif kind == "gps":
@@ -160,7 +159,7 @@ async def on_binary(app: web.Application, data: bytes) -> None:
         samples.frombytes(payload[: len(payload) // 4 * 4])
         mw.on_microphone(now)
         if app["recognizer"] is not None:
-            pcm = speech.to_pcm16_16k(list(samples), app["audio_rate"])
+            pcm = speech.to_pcm16_16k(list(samples), app["live"]["audio_rate"])
             for word, confidence in app["recognizer"].feed(pcm):
                 mw.on_word(word, confidence, now)
 
@@ -173,13 +172,13 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
         return
     frame = app["frame"]
     frame.update(seq=frame["seq"] + 1, jpeg=jpeg, boxes=[])
-    if app["busy"] or (app["detector"] is None and app["classifier"] is None):
+    if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
-    app["busy"] = True
+    app["live"]["busy"] = True
     try:
         await asyncio.get_running_loop().run_in_executor(None, analyse, app, jpeg, now)
     finally:
-        app["busy"] = False
+        app["live"]["busy"] = False
 
 
 def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
