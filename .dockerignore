@@ -1,0 +1,3 @@
+# The image needs only the ROS 2 packages
+*
+!src

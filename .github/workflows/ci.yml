@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_call:  # release.yml runs these checks before it publishes anything
 
 permissions:
   contents: read
@@ -61,3 +62,16 @@ jobs:
           name: coverage-report
           path: coverage.xml
           if-no-files-found: ignore
+
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mana:ci
+      - name: Check ROS 2 runs in the image
+        run: docker run --rm mana:ci ros2 pkg prefix rclpy
