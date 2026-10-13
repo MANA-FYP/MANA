@@ -169,6 +169,7 @@ docker run --rm -it ghcr.io/mana-fyp/mana:v0.1.0-mid ros2 run mana_core core_nod
 .
 ├── .github/workflows/   CI and release pipelines
 ├── src/                 ROS 2 packages (colcon workspace)
+│   ├── mana_core/       decision core (M6)
 │   └── mana_msgs/       message types between modules, decision core and host
 ├── tests/               Python tests
 ├── tools/               set up and check a development machine
@@ -219,6 +220,56 @@ Each module is its own package, added by its owner in their own pull request:
 | `UserMessage` | core → M4, M5 | Text for the user, its priority, and whether to speak it |
 
 Every report to the core starts with the same two fields: `header` (its stamp is when the value was measured) and `trust` (0 to 1). The core uses them to line reports up in time and weigh them. `tests/test_msgs_contract.py` checks this rule on every pull request.
+
+### Decision core (`mana_core`)
+
+```bash
+ros2 run mana_core core_node
+```
+
+The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+
+1. The user said stop: stop until they say go
+2. A drop within 0.5 m or an obstacle within 0.8 m: stop
+3. Manual mode: follow the user's mode and speed
+4. Stairs or a curb seen by both cameras, or wheel slip: tracks, slow
+5. On tracks and not yet level for 2 s: stay on tracks
+6. No trusted ground report: slow down
+7. An obstacle, drop, ramp or possible step ahead: slow down
+8. Otherwise: wheels, full speed
+
+The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
+
+### Scenarios, pass marks and the live demo
+
+Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:
+
+| Scenario | What it shows |
+|---|---|
+| `level` | Wheels at full speed on level ground |
+| `ramp` | A ramp is driven on wheels, more slowly, never on tracks |
+| `stairs` | Both cameras confirm the stairs: tracks before the first step, wheels again once level at the top |
+| `curb` | A 12 cm curb crossed on tracks |
+| `stop` | A spoken stop at full speed, held until the user says go |
+| `drop` | Edge case: slows down for a drop, then stops 0.5 m before it on the 3D camera's distance |
+| `manual_drop` | Edge case: in manual mode at full speed, safety still stops the chair before a drop |
+| `picture` | Edge case: only the camera sees stairs (a picture), so MANA slows down but does not change mode |
+| `dark` | Failure case: the camera is not trusted in the dark; the lidar still sees a person, and MANA stops and says why |
+| `imu_lost` | Failure case: the IMU stops during the climb, so MANA cannot confirm level ground and stays on tracks |
+
+The pass marks are the team's targets: no track request on flat ground or ramps, tracks requested at least 1.5 m before the first step, a stop acted on within 1 s, and obstacles still announced in the dark. No scenario may end with the chair on a step on wheels, over a drop or against an obstacle.
+
+Check every scenario in fast time (CI runs the same as `tests/test_scenarios.py`):
+
+```bash
+ros2 run mana_core evaluate              # or one or more by name: ros2 run mana_core evaluate stairs dark
+```
+
+Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
+
+```bash
+ros2 launch mana_core demo.launch.py scenario:=stairs
+```
 
 ## 11. References
 
