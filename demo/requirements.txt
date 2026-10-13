@@ -1,0 +1,9 @@
+# Laptop side of the phone demo. Install with:  pip install -r demo/requirements.txt
+aiohttp>=3.9          # web server and WebSockets
+py_trees>=2.2         # the decision layer's behaviour tree
+pillow>=10            # decode the phone's camera frames
+
+# Optional models. Without them the dashboard shows the sensor as "not available".
+# ultralytics>=8.3    # lightweight COCO object detector (yolo26n.pt or yolo11n.pt)
+# vosk>=0.3.45        # offline voice commands; also download a small English model
+# onnxruntime>=1.18   # the stairs classifier, once a trained ONNX model exists
