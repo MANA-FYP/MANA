@@ -2,13 +2,15 @@
 
 The decision layer driven by **real data from a phone**, shown on a laptop dashboard. No ROS 2 and
 no Gazebo. Nothing in the demo is simulated: a sensor the phone's browser can read is used, and a
-sensor it cannot read is shown as **Not available**.
+sensor it cannot read is shown as **N/A** with the reason.
 
 ```
-phone browser  --WebSocket over Wi-Fi-->  laptop server  -->  laptop browser (dashboard)
- sensors, camera frames, audio             middleware +       inputs, middleware,
- sensor tiles, command  <--command--       decision layer     decision rules, camera
+phone browser  --cable or Wi-Fi-->  laptop server  -->  laptop browser (dashboard)
+ sensors, camera frames, audio       middleware +        inputs, middleware,
+ sensor tiles, command  <-command-   decision layer      decision rules, camera
 ```
+
+Both pages are one screen each, so neither needs scrolling.
 
 ## Run it
 
@@ -17,9 +19,27 @@ pip install -r demo/requirements.txt
 python -m demo.server                         # dashboard at http://localhost:8000/dashboard
 ```
 
-**The phone page needs HTTPS.** Phone browsers only give the camera, microphone, motion and
-location to secure pages. Make a certificate once (Git for Windows includes `openssl`), then start
-the server with it:
+### Connect the phone: with a USB cable (recommended, Android)
+
+A cable means the phone's Wi-Fi and Bluetooth can be switched off during the demo without losing
+the data, so you can show the alert link changing.
+
+1. On the phone: Settings, About phone, tap *Build number* 7 times; then Developer options, turn
+   on *USB debugging*. Plug the phone in and accept the question on the phone.
+2. On the laptop (needs `adb` from the Android platform tools):
+
+   ```bash
+   python -m demo.usb
+   ```
+3. On the phone open **http://localhost:8000/phone** in Chrome.
+
+`localhost` counts as a secure page, so the phone gives the camera, motion, location and
+microphone with no certificate.
+
+### Connect the phone: over Wi-Fi
+
+Phone browsers only give those sensors to **HTTPS** pages, so make a certificate once (Git for
+Windows includes `openssl`) and start the server with it:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30 \
@@ -27,38 +47,38 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30
 python -m demo.server --port 8443 --cert cert.pem --key key.pem
 ```
 
-1. Put the phone and the laptop on the same Wi-Fi (a phone hotspot is the safest).
-2. Open the **phone** address the server prints, for example `https://192.168.0.12:8443/phone`.
-   Accept the certificate warning once.
-3. Tap **Start sensors** and allow motion, location, camera and microphone.
-4. Open `https://localhost:8443/dashboard` on the laptop.
-
-`*.pem` files are ignored by git. Never commit a private key.
+Open the phone address the server prints, for example `https://192.168.0.12:8443/phone`, accept
+the certificate warning once, and tap **Start sensors**. `*.pem` files are ignored by git. Never
+commit a private key.
 
 ## The phone screen
 
-Eight tiles in two columns and four rows, one per sensor.
+Nine small tiles in three columns and three rows, then the command from the decision layer and the
+STOP and GO buttons.
 
 | State | Meaning |
 |---|---|
-| **Active** | the phone is streaming it now, with its live value |
-| **Tap to enable** | the browser has it, but nothing is arriving yet (permission not given) |
-| **Not available** | a web page cannot read it, with the reason |
-
-The strip at the bottom shows the command from the decision layer and has STOP and GO buttons.
+| **Active** | the phone is streaming it now, with its live value and a trust bar |
+| **Tap** | the browser has it, but nothing is arriving yet (permission not given) |
+| **N/A** | a web page cannot read it, with the reason |
 
 ## What is real
 
-| Sensor | In the demo | What the decision layer does with it |
+| Tile | In the demo | What the decision layer does with it |
 |---|---|---|
 | Camera | real frames and light level | light level sets the trust of camera reports; frames go to the detector |
 | Motion | real tilt and vibration | level or not; shaking counts as rough ground, so it changes to tracks |
 | GPS | real position accuracy | worse than 15 m for 3 s leaves GPS, better than 8 m for 5 s returns |
 | Microphone | real audio and the browser's recogniser | the words stop, go, on, off, up, down become commands |
-| Link | real heartbeat delay | two missed heartbeats leave Wi-Fi; stale data slows the chair down |
-| Depth camera | **not available** | browsers do not expose depth sensors |
-| Lidar | **not available** | browsers do not expose lidar |
-| Temperature | **not available** | browsers do not expose a temperature sensor |
+| Wi-Fi | the network type the browser reports (Android Chrome) | gone for 2 s means alerts would move to Bluetooth |
+| Bluetooth | whether the phone's Bluetooth is available and on | Wi-Fi gone and Bluetooth on means alerts use Bluetooth; both off means no link |
+| Depth | **N/A**, browsers do not expose depth sensors | nothing |
+| Lidar | **N/A**, browsers do not expose lidar | nothing |
+| Temperature | **N/A**, browsers do not expose a temperature sensor | nothing |
+
+The alert link is a **decision**: a web page cannot open a Bluetooth connection to the chair, so
+the dashboard shows which radio the alerts *would* use. The data of the demo itself travels over the
+cable or Wi-Fi.
 
 ## Optional models
 
@@ -79,10 +99,10 @@ The server starts without any model and says which ones are missing.
   when two different sources agree, so stairs need the classifier and a second source.
 - **Distances from the camera are estimates**, made from the size of the box and a typical
   object height. Calibrate with `vision.calibrate_focal`.
-- **Drops and step height need depth.** They are verified by the scripted scenarios on the
-  **Test evidence** card, which is labelled as an automated test and not live data.
-- **The fallback link is a decision only.** A web page cannot use Bluetooth, so the demo shows
-  that the rule would switch.
+- **Drops and step height need depth.** They are verified by the scripted scenarios behind the
+  **Test evidence** button, which are labelled as an automated test and not live data.
+- **Wi-Fi detection needs Android Chrome.** Other browsers cannot see the network type, and then
+  the tile shows N/A and the alert link shows "unknown" rather than a guess.
 - **The browser's speech recognition is an online service.** Chrome sends the audio to Google, so
   list it in the tool and API disclosure. The offline recogniser does not need the internet.
 
