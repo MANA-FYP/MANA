@@ -140,9 +140,16 @@ GitHub Actions runs the pipeline.
 |---|---|---|
 | `ci.yml` (lint) | Every pull request and push to `main` | Runs `ruff` for code style and formatting |
 | `ci.yml` (build-test) | Every pull request and push to `main` | In a `ros:jazzy-ros-base` container: builds the ROS 2 packages in `src/` with `colcon`, runs `colcon test` and the Python tests in `tests/`, and uploads a coverage report |
-| `release.yml` | Pushing a tag such as `v0.1.0-mid` | Creates a GitHub Release for the tag with generated release notes |
+| `ci.yml` (image) | Every pull request and push to `main` | Builds the Docker image from `Dockerfile` and checks that ROS 2 runs inside it |
+| `release.yml` | Pushing a tag such as `v0.1.0-mid` | Runs every `ci.yml` check first. If they pass, it publishes the Docker image `ghcr.io/mana-fyp/mana:<tag>` to GitHub Packages and creates a GitHub Release with generated release notes, marked as a pre-release when the tag has a suffix such as `-mid` |
 
-Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`), and the checks above must pass before it is merged.
+Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`). Lint and build-test must pass, and another member must approve, before it is merged.
+
+Once a version is released, anyone can run it without installing ROS 2:
+
+```bash
+docker run --rm -it ghcr.io/mana-fyp/mana:v0.1.0-mid ros2 run mana_core core_node
+```
 
 ## 10. Repository layout
 
@@ -153,6 +160,8 @@ Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`),
 ├── tests/               Python tests
 ├── ruff.toml            lint settings
 ├── pytest.ini           test settings
+├── docs/diagrams/       system diagrams
+├── Dockerfile           release image: the ROS 2 workspace, built
 ├── README.md
 ├── CONTRIBUTING.md
 └── LICENSE
