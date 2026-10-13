@@ -163,6 +163,8 @@ Every change goes in through a pull request into `main` (see `CONTRIBUTING.md`),
 ├── .github/workflows/   CI and release pipelines
 ├── src/                 ROS 2 packages
 ├── tests/               Python tests
+├── tools/               set up and check a development machine
+├── requirements-ml.txt  pinned packages for the model work
 ├── ruff.toml            lint settings
 ├── pytest.ini           test settings
 ├── README.md
