@@ -95,7 +95,7 @@ def test_the_dashboard_can_stop_the_chair_too():
     run(with_clients(go))
 
 
-def test_a_ping_is_answered_with_a_pong_and_the_link_becomes_active():
+def test_a_ping_is_answered_with_a_pong_and_the_round_trip_is_recorded():
     async def go(client, phone, dash):
         await phone.send_json({"type": "ping", "t": 42})
         while True:
@@ -104,8 +104,8 @@ def test_a_ping_is_answered_with_a_pong_and_the_link_becomes_active():
                 assert msg["t"] == 42
                 break
         await phone.send_json({"type": "rtt", "ms": 12.0})
-        snap = await snapshot_where(dash, lambda s: sensor(s, "link")["state"] == "active")
-        assert snap["link"]["state"] == "wifi"
+        snap = await snapshot_where(dash, lambda s: s["link"]["rtt_ms"] == 12.0)
+        assert snap["link"]["missed"] == 0
 
     run(with_clients(go))
 
@@ -116,8 +116,34 @@ def test_the_phone_receives_the_sensor_states_and_the_decision():
             msg = await asyncio.wait_for(phone.receive_json(), 3)
             if msg["type"] == "state":
                 break
-        assert len(msg["sensors"]) == 8
+        assert len(msg["sensors"]) == 9
         assert "mode" in msg["decision"] and "reason" in msg["decision"]
+
+    run(with_clients(go))
+
+
+def test_radio_reports_make_the_wifi_and_bluetooth_tiles_active_and_pick_the_link():
+    async def go(client, phone, dash):
+        await phone.send_json({"type": "radio", "wifi": True, "bluetooth": True})
+        snap = await snapshot_where(dash, lambda s: sensor(s, "wifi")["state"] == "active")
+        assert sensor(snap, "bluetooth")["state"] == "active"
+        assert snap["link"]["state"] == "wifi"
+        stop = asyncio.Event()
+
+        async def keep_reporting():  # the phone page reports its radios every second
+            while not stop.is_set():
+                await phone.send_json({"type": "radio", "wifi": False, "bluetooth": True})
+                await asyncio.sleep(0.4)
+
+        task = asyncio.create_task(keep_reporting())
+        try:
+            snap = await snapshot_where(
+                dash, lambda s: s["link"]["state"] == "bluetooth", tries=150
+            )
+        finally:
+            stop.set()
+            await task
+        assert sensor(snap, "wifi")["value"] == "off"
 
     run(with_clients(go))
 
@@ -171,11 +197,13 @@ def test_the_phone_and_dashboard_pages_and_their_files_are_served():
     run(with_clients(go))
 
 
-def test_the_phone_page_lists_eight_sensors_in_a_two_column_grid():
+def test_the_phone_page_lists_nine_sensors_in_a_three_column_grid_that_needs_no_scrolling():
     from pathlib import Path
 
+    from demo.middleware import SENSORS
+
     css = (Path(__file__).parents[1] / "demo" / "web" / "style.css").read_text()
-    js = (Path(__file__).parents[1] / "demo" / "web" / "phone.js").read_text()
-    assert "grid-template-columns: repeat(2, 1fr)" in css
-    ids = ["camera", "motion", "gps", "microphone", "link", "depth", "lidar", "temperature"]
-    assert all(f'"{i}"' in js for i in ids) and len(ids) == 8
+    assert len(SENSORS) == 9
+    assert "grid-template-columns: repeat(3, 1fr)" in css
+    assert "height: 100dvh" in css  # the phone page is one screen
+    assert "height: 100vh" in css  # and so is the dashboard

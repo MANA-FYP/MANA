@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#050b24">
+  <meta name="theme-color" content="#f1f5f9">
   <title>MANA sensor host</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -15,24 +15,24 @@
     <button id="startBtn">Start sensors</button>
   </div>
 
+  <div class="ribbon"></div>
   <div class="top">
-    <div class="brand">MANA<small>sensor host</small></div>
-    <div class="conn off" id="conn">offline</div>
+    <div class="brand">MANA <span>sensor host</span><small id="path">connecting</small></div>
+    <span class="chip off" id="conn">offline</span>
   </div>
 
   <div class="grid" id="grid"></div>
+  <div class="legend">Active &middot; Tap = tap to enable &middot; N/A = the browser cannot read it</div>
 
-  <div class="dock">
-  <div class="device stopped" id="device">
+  <div class="card device" id="device">
     <div class="label">Command from the decision layer</div>
     <div class="mode" id="mode">WAITING</div>
-    <div class="why" id="why">Connect to the laptop to begin.</div>
+    <div class="why" id="why">Connecting to the laptop.</div>
   </div>
 
   <div class="buttons">
     <button class="btn stop" id="stopBtn">STOP</button>
     <button class="btn go" id="goBtn">GO</button>
-  </div>
   </div>
 
   <script src="/static/common.js"></script>

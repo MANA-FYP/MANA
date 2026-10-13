@@ -17,59 +17,74 @@
   </header>
 
   <main>
-    <section class="card col-4">
-      <h2>1 &middot; Inputs</h2>
-      <div class="hint">What the phone can actually provide. Nothing here is simulated.</div>
-      <div class="grid" id="inputs"></div>
-    </section>
+    <!-- column 1: what the phone provides -->
+    <div class="col">
+      <section class="card">
+        <h2>1 &middot; Inputs from the phone</h2>
+        <div class="hint">Real sensors only. N/A means the browser cannot read it.</div>
+        <div class="grid" id="inputs"></div>
+      </section>
+      <section class="card grow">
+        <h2>Position and link</h2>
+        <div class="hint">Switching rules on real readings.</div>
+        <dl class="kv" id="kv"></dl>
+      </section>
+    </div>
 
-    <section class="card col-4">
-      <h2>2 &middot; Middleware</h2>
-      <div class="hint">Every module reports the same message: value, trust and time.</div>
-      <table class="stream" id="stream"></table>
-      <div class="steps">
-        <span class="step">&#10003; Aligned in time</span>
-        <span class="step">&#10003; Weighed by trust</span>
-      </div>
-    </section>
+    <!-- column 2: the middleware and the camera -->
+    <div class="col">
+      <section class="card">
+        <h2>2 &middot; Middleware</h2>
+        <div class="hint">Every module reports one message: value, trust and time.</div>
+        <table class="stream" id="stream"></table>
+        <div class="steps">
+          <span class="step">&#10003; Aligned in time</span>
+          <span class="step">&#10003; Weighed by trust</span>
+        </div>
+      </section>
+      <section class="card grow">
+        <h2>Camera</h2>
+        <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
+        <div class="camera"><canvas id="cam"></canvas><div class="empty" id="camEmpty">Waiting for the phone camera.</div></div>
+      </section>
+    </div>
 
-    <section class="card col-4">
-      <h2>3 &middot; Decision layer</h2>
-      <div class="hint">The rules run in priority order. The first one that holds decides.</div>
-      <ul class="rules" id="rules"></ul>
-      <div class="result" id="result">
-        <div class="mode" id="mode">&nbsp;</div>
-        <div class="meta" id="meta"></div>
-        <div class="why" id="why"></div>
-      </div>
-      <div class="row">
-        <button class="btn-danger" data-button="stop">Stop</button>
-        <button class="btn-primary" data-button="go">Go</button>
-        <button class="btn-secondary" data-button="automatic">Automatic</button>
-        <button class="btn-secondary" data-button="manual">Manual</button>
-      </div>
-    </section>
+    <!-- column 3: the decision layer -->
+    <div class="col">
+      <section class="card grow">
+        <h2>3 &middot; Decision layer</h2>
+        <div class="hint">Rules run in priority order. The first one that holds decides.</div>
+        <ul class="rules" id="rules"></ul>
+        <div class="result" id="result">
+          <div class="mode" id="mode">&nbsp;</div>
+          <div class="meta" id="meta"></div>
+          <div class="why" id="why"></div>
+        </div>
+        <div class="row">
+          <button class="btn-danger" data-button="stop">Stop</button>
+          <button class="btn-primary" data-button="go">Go</button>
+          <button class="btn-secondary" data-button="automatic">Automatic</button>
+          <button class="btn-secondary" data-button="manual">Manual</button>
+        </div>
+      </section>
+    </div>
+  </main>
 
-    <section class="card col-6">
-      <h2>Camera</h2>
-      <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
-      <div class="camera" id="camera"><div class="empty">Waiting for the phone camera.</div></div>
-    </section>
+  <footer>
+    <div class="facts" id="facts"></div>
+    <button class="btn-primary" id="openEvidence">Test evidence</button>
+  </footer>
 
-    <section class="card col-6">
-      <h2>Timing and position</h2>
-      <div class="hint">Measured on this run.</div>
-      <div class="facts" id="facts"></div>
-    </section>
-
-    <section class="card col-12 evidence">
+  <div class="modal" id="modal">
+    <div class="panel">
       <h2>Test evidence</h2>
       <div class="hint">Stairs, ramps, curbs and drops are verified here by scripted scenarios.
         This is an automated test, not live data.</div>
-      <div class="row" style="margin-top:0"><button class="btn-primary" id="runEvidence">Run the scripted scenarios</button></div>
+      <div class="row"><button class="btn-primary" id="runEvidence">Run the scripted scenarios</button>
+        <button class="btn-secondary" id="closeEvidence">Close</button></div>
       <div id="evidence"></div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script src="/static/common.js"></script>
   <script src="/static/dashboard.js"></script>

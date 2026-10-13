@@ -1,23 +1,19 @@
 // MANA phone page: streams the phone's real sensors to the laptop and shows what comes back.
-// Nothing is simulated here. A sensor the browser cannot read is shown as "Not available".
+// Nothing is simulated here. A sensor the browser cannot read is shown as "N/A" with the reason.
 
-const PHONE_ORDER = ["camera", "motion", "gps", "microphone", "link", "depth", "lidar", "temperature"];
 const grid = document.getElementById("grid");
 const conn = document.getElementById("conn");
 
 let ws = null;
 let started = {};          // which sensors this page has started
 let lastReason = "";
-let tiles = PHONE_ORDER.map((id) => ({
-  id, label: { camera: "Camera", motion: "Motion", gps: "GPS", microphone: "Microphone", link: "Link",
-               depth: "Depth camera", lidar: "Lidar", temperature: "Temperature" }[id],
-  state: "idle", reason: "", value: "",
-}));
+let bluetoothOn = null;    // true / false, or null when the browser cannot tell
+let audioRate = 48000;
 
-function render() {
-  grid.innerHTML = tiles.map((s) => tileHTML(s, false)).join("");
-}
-render();
+// The page shows the data path honestly: localhost means a USB cable (adb reverse), anything else
+// is the network.
+document.getElementById("path").textContent =
+  ["localhost", "127.0.0.1"].includes(location.hostname) ? "data path: USB cable" : "data path: Wi-Fi";
 
 // ---- connection
 
@@ -27,12 +23,12 @@ function connect() {
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     conn.textContent = "connected";
-    conn.className = "conn on";
+    conn.className = "chip";
     send({ type: "hello", caps: capabilities(), audio_rate: audioRate });
   };
   ws.onclose = () => {
     conn.textContent = "offline";
-    conn.className = "conn off";
+    conn.className = "chip off";
     setTimeout(connect, 1500);
   };
   ws.onmessage = (e) => {
@@ -56,34 +52,33 @@ function sendBinary(tag, payload) {
 
 // ---- what this browser has
 
-let audioRate = 48000;
-
 function capabilities() {
   const md = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const secure = window.isSecureContext;
   const needs = (ok, why) => ({ available: ok, why: ok ? "" : why });
+  const https = "Needs a secure page";
   return {
-    camera: needs(md && secure, secure ? "No camera access in this browser" : "Needs an HTTPS page"),
-    motion: needs("DeviceMotionEvent" in window && secure, secure ? "No motion sensor access" : "Needs an HTTPS page"),
-    gps: needs("geolocation" in navigator && secure, secure ? "No location access" : "Needs an HTTPS page"),
-    microphone: needs(md && secure, secure ? "No microphone access" : "Needs an HTTPS page"),
-    link: { available: true },
+    camera: needs(md && secure, secure ? "No camera access" : https),
+    motion: needs("DeviceMotionEvent" in window && secure, secure ? "No motion access" : https),
+    gps: needs("geolocation" in navigator && secure, secure ? "No location access" : https),
+    microphone: needs(md && secure, secure ? "No microphone access" : https),
+    wifi: needs(!!(navigator.connection && "type" in navigator.connection), "Browser cannot see the network type"),
+    bluetooth: needs("bluetooth" in navigator, "No Bluetooth access"),
   };
 }
 
-// ---- tile states come from the server; the phone only adds "tap to enable" help
+// ---- tiles come from the server; they are updated in place, so only a changed tile changes
 
 function onState(m) {
-  const byId = Object.fromEntries(m.sensors.map((s) => [s.id, s]));
-  tiles = tiles.map((t) => byId[t.id] || t);
-  render();
+  updateTiles(grid, m.sensors);
   const d = m.decision;
   const box = document.getElementById("device");
   const kind = d.stop ? "stopped" : d.mode === "TRACKS" ? "tracks" : d.speed < 1 ? "slow" : "wheels";
-  box.className = "device " + kind;
-  document.getElementById("mode").textContent =
-    d.stop ? "STOPPED" : d.mode + " · " + Math.round(d.speed * 100) + " %";
-  document.getElementById("why").textContent = d.reason;
+  const cls = "card device " + kind;
+  if (box.className !== cls) box.className = cls;
+  setText(document.getElementById("mode"),
+          d.stop ? "STOPPED" : d.mode + " · " + Math.round(d.speed * 100) + " %");
+  setText(document.getElementById("why"), d.reason);
   if (d.reason !== lastReason) {
     lastReason = d.reason;
     if (d.priority !== "INFO" && "speechSynthesis" in window) {
@@ -93,7 +88,7 @@ function onState(m) {
   }
 }
 
-// ---- link: a heartbeat every second, and the round trip it measured
+// ---- heartbeat: the round trip of the data path
 
 const sentAt = {};
 function heartbeat() {
@@ -107,6 +102,24 @@ function onPong(t) {
   send({ type: "rtt", ms: Math.round(performance.now()) - t });
 }
 setInterval(heartbeat, 1000);
+
+// ---- radios: what the browser says about Wi-Fi and Bluetooth, once a second
+
+async function watchBluetooth() {
+  if (!("bluetooth" in navigator) || !navigator.bluetooth.getAvailability) return;
+  try {
+    bluetoothOn = await navigator.bluetooth.getAvailability();
+    navigator.bluetooth.addEventListener("availabilitychanged", (e) => { bluetoothOn = e.value; });
+  } catch (_) { bluetoothOn = null; }
+}
+
+function reportRadios() {
+  const c = navigator.connection;
+  const wifi = c && typeof c.type === "string" ? c.type === "wifi" : null;
+  send({ type: "radio", wifi, bluetooth: bluetoothOn });
+}
+watchBluetooth();
+setInterval(reportRadios, 1000);
 
 // ---- motion
 
@@ -172,8 +185,7 @@ async function startMicrophone() {
   const src = ctx.createMediaStreamSource(stream);
   const proc = ctx.createScriptProcessor(4096, 1, 1);
   proc.onaudioprocess = (e) => {
-    const data = e.inputBuffer.getChannelData(0);
-    sendBinary(2, new Float32Array(data).buffer);
+    sendBinary(2, new Float32Array(e.inputBuffer.getChannelData(0)).buffer);
   };
   src.connect(proc);
   proc.connect(ctx.destination);
@@ -208,7 +220,7 @@ async function startAll() {
   }
 }
 
-if (location.hash === "#preview") document.getElementById("start").classList.add("hidden");  // for design review
+if (location.hash === "#preview") document.getElementById("start").classList.add("hidden");  // design review
 
 document.getElementById("startBtn").onclick = async () => {
   document.getElementById("start").classList.add("hidden");
