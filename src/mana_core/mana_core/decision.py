@@ -233,8 +233,9 @@ class DecisionCore:
 
         Ground reports come from the camera and the 3D camera. The ground classifier and the
         object detector both use the camera image, so together they are one sensor: on a phone
-        without depth a step is never confirmed, and the chair slows down instead. A report with an unknown distance can agree, but at least one of the agreeing
-        reports must give a distance within step_m.
+        without depth a step is never confirmed, and the chair slows down instead. A report with
+        an unknown distance can agree, but at least one of the agreeing reports must give a
+        distance within step_m.
         """
         agreeing = [r for r in self._grounds() if r.ground in STEPS]
         if len({SENSOR_OF.get(r.source, r.source) for r in agreeing}) < 2:
