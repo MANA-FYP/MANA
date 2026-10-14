@@ -187,13 +187,13 @@ def test_light_trust_factor_runs_from_dark_to_bright():
     assert camera_trust_factor(0.9) == 1.0
 
 
-def test_stairs_from_the_classifier_and_the_detector_change_to_tracks():
-    m = Middleware()
+def test_stairs_from_the_classifier_and_the_detector_only_slow_down():
+    m = Middleware()  # both models use the phone's one camera, so they count as one sensor
     m.on_ground(Source.CLASSIFIER, Ground.STAIRS_UP, 0.9, 1.5, now=1.0)
     m.on_ground(Source.DETECTOR, Ground.STAIRS_UP, 0.9, 1.5, now=1.0)
     flat(m, 1.0)
     d = m.tick(1.0)["decision"]
-    assert (d["mode"], d["fired"]) == ("TRACKS", "step")
+    assert d["mode"] == "WHEELS" and d["speed"] == pytest.approx(0.3)
 
 
 def test_one_vision_model_alone_does_not_change_mode():
