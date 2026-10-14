@@ -166,6 +166,42 @@ def test_wheel_slip_changes_to_tracks():
     assert (d.mode, d.reason) == (Mode.TRACKS, "Wheel slip, changing to tracks")
 
 
+# ---- 4b. tracks on a phone: no depth camera, so two vision models are the two sources
+
+CLS, DET = Source.CLASSIFIER, Source.DETECTOR
+
+
+def test_stairs_seen_by_the_classifier_and_the_detector_change_to_tracks():
+    d = core(ground(CLS, Ground.STAIRS_UP, 1.5), ground(DET, Ground.STAIRS_UP, 1.5)).decision
+    assert (d.mode, d.reason) == (Mode.TRACKS, "Stairs ahead, changing to tracks")
+
+
+def test_the_classifier_alone_is_not_enough_to_change_mode():
+    d = core(ground(CLS, Ground.STAIRS_UP, 1.5), ground(DET, Ground.FLAT)).decision
+    assert d.mode == Mode.WHEELS
+
+
+def test_agreeing_sources_need_only_one_known_distance():
+    d = core(ground(CLS, Ground.STAIRS_UP), ground(DET, Ground.STAIRS_UP, 1.2)).decision
+    assert d.mode == Mode.TRACKS
+
+
+def test_agreeing_sources_without_any_distance_do_not_change_mode():
+    d = core(ground(CLS, Ground.STAIRS_UP), ground(DET, Ground.STAIRS_UP)).decision
+    assert (d.mode, d.reason) == (Mode.WHEELS, "Possible step ahead, slowing down")
+
+
+def test_a_stale_source_cannot_confirm_a_step():
+    stale = ground(CLS, Ground.STAIRS_UP, 1.5, age=1.0)
+    d = core(stale, ground(DET, Ground.STAIRS_UP, 1.5)).decision
+    assert d.mode == Mode.WHEELS
+
+
+def test_a_phone_source_and_a_depth_camera_can_agree():
+    d = core(ground(DET, Ground.CURB, 1.0), ground(DEPTH, Ground.CURB, 1.0)).decision
+    assert (d.mode, d.reason) == (Mode.TRACKS, "Curb ahead, changing to tracks")
+
+
 # ---- back to wheels: level for 2 s
 
 

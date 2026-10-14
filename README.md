@@ -171,6 +171,7 @@ docker run --rm -it ghcr.io/mana-fyp/mana:v0.1.0-mid ros2 run mana_core core_nod
 ├── src/                 ROS 2 packages (colcon workspace)
 │   ├── mana_core/       decision core (M6)
 │   └── mana_msgs/       message types between modules, decision core and host
+├── demo/                phone demo: laptop server, phone page, dashboard
 ├── tests/               Python tests
 ├── tools/               set up and check a development machine
 ├── requirements-ml.txt  pinned packages for the model work
@@ -269,6 +270,20 @@ Watch one live, with the real core node on ROS 2 topics. The scenario node plays
 
 ```bash
 ros2 launch mana_core demo.launch.py scenario:=stairs
+```
+
+### Phone demo
+
+The decision layer driven by real data from a phone, shown on a laptop dashboard, with no ROS 2
+and no Gazebo. The phone page lists its sensors as eight small tiles, and a sensor the browser
+cannot read is shown as **N/A**; nothing is simulated. Both pages fit one screen, and the phone
+is connected with a USB cable. Stairs, ramps and drops that a phone
+cannot sense are verified by scripted scenarios and labelled as tests. See
+[`demo/README.md`](demo/README.md) for how to run it and what is real.
+
+```bash
+pip install -r demo/requirements.txt
+python -m demo.server
 ```
 
 ## 11. References

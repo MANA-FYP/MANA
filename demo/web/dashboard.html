@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MANA decision layer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dash">
+  <div class="ribbon"></div>
+  <header>
+    <div class="title">
+      <h1>MANA <span>decision layer</span></h1>
+      <div class="rule"></div>
+      <div class="subtitle">Live data from the phone, through the middleware, into the decision layer</div>
+    </div>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <main>
+    <!-- column 1: what the phone provides, and the switching rules on it -->
+    <div class="col">
+      <section class="card grow">
+        <h2>1 &middot; Inputs from the phone</h2>
+        <div class="hint">Real sensors only. N/A means the browser cannot read it.</div>
+        <div class="grid" id="inputs"></div>
+      </section>
+    </div>
+
+    <!-- column 2: the camera, as tall as the screen allows -->
+    <div class="col">
+      <section class="card grow">
+        <h2>Camera</h2>
+        <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
+        <div class="camera"><canvas id="cam"></canvas><div class="empty" id="camEmpty">Waiting for the phone camera.</div></div>
+      </section>
+    </div>
+
+    <!-- column 3: the decision as a sentence, what the user said, and a small middleware box -->
+    <div class="col">
+      <section class="card grow">
+        <h2>3 &middot; Decision layer</h2>
+        <div class="hint">The last action MANA took, in words.</div>
+        <div class="result" id="result">
+          <div class="mode" id="mode">&nbsp;</div>
+        </div>
+        <div class="row">
+          <button class="btn-danger" data-button="stop">Stop</button>
+          <button class="btn-primary" data-button="go">Go</button>
+          <button class="btn-secondary" data-button="automatic">Auto</button>
+          <button class="btn-secondary" data-button="manual">Manual</button>
+          <button class="btn-secondary" id="voice">Voice: on</button>
+        </div>
+      </section>
+      <section class="card small">
+        <h2>4 &middot; What you said</h2>
+        <ul class="inputs" id="userInputs"></ul>
+      </section>
+      <section class="card small">
+        <h2>2 &middot; Middleware</h2>
+        <table class="stream" id="stream"></table>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
