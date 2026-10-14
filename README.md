@@ -16,19 +16,19 @@ MANA is an autonomy layer for assistive mobility devices. It is software that re
 
 ## 1. The problem
 
-A wheelchair user looks at the path and decides what to do: keep moving on wheels, change to tracks for stairs, slow down, or stop. Today even wheelchairs that can climb stairs, such as the XSTO X12, are controlled by joystick, remote or app, so the human still makes that decision.
+A wheelchair user looks at the path and decides what to do: keep moving on wheels, change to tracks for stairs, slow down, or stop. Wheelchairs that climb stairs exist, and the XSTO X12 even switches between wheels and tracks by itself, but how it decides is not published and works only on that chair.
 
 Existing solutions only cover part of the problem:
 
 | System | What it does | What it lacks |
 |---|---|---|
-| XSTO X12 | Climbs stairs on tracks; joystick, remote or app control | No automatic choice of wheels or tracks |
+| XSTO X12 | Climbs stairs on tracks; switches between wheels and tracks by itself, using lidar and gyroscopes | Its rules are closed and work only on that chair |
 | LUCI | Stops a power chair at drop-offs and warns of tipping hazards | Cannot change how the chair moves |
 | WHILL | Self-drives on pre-mapped airport routes | No general terrain decisions |
 | Tomari et al. (2013) | Detects drops; manual or semi-autonomous; wheels only | No mode change |
 | Smart canes and apps | Scene descriptions and audio warnings | Warn only; no control |
 
-None of them chooses its way of moving from sensors, or manages position, network and user commands together. This is the gap MANA fills.
+Only the XSTO X12 chooses its way of moving from sensors, and its rules are closed. None of them manages position, network and user commands together, or publishes tests that others can run. This is the gap MANA fills: an open, tested decision layer for any device.
 
 ## 2. What MANA does
 
@@ -199,7 +199,7 @@ Each module is its own package, added by its owner in their own pull request:
 | Package | Part | Owner |
 |---|---|---|
 | `mana_msgs` | Message types (shared) | All |
-| `mana_vision` | M1 Vision | Waqas |
+| `mana_perception` | M1 Vision (perception) | Waqas |
 | `mana_position` | M2 Position and motion | Mushahid |
 | `mana_connectivity` | M3 Connectivity | Mushahid |
 | `mana_voice` | M4 Voice and audio | Komail |
