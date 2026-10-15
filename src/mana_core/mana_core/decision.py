@@ -26,6 +26,11 @@ class Source(IntEnum):
     DETECTOR = 4  # the object detector that runs on the camera image
 
 
+# The physical sensor behind each source. The classifier and the detector look at the camera's
+# image, so for agreement they are the camera, not two more sensors.
+SENSOR_OF = {Source.CLASSIFIER: Source.CAMERA, Source.DETECTOR: Source.CAMERA}
+
+
 class Ground(IntEnum):
     FLAT = 0
     RAMP = 1
@@ -224,14 +229,16 @@ class DecisionCore:
         )
 
     def _confirmed_step(self) -> GroundReport | None:
-        """The nearest report of a step that at least two different sources both see close ahead.
+        """The nearest report of a step that at least two different sensors both see close ahead.
 
-        The sources can be a camera and a 3D camera, or, on a phone without a depth sensor, the
-        ground classifier and the object detector. A report with an unknown distance can agree,
-        but at least one of the agreeing reports must give a distance within step_m.
+        Ground reports come from the camera and the 3D camera. The ground classifier and the
+        object detector both use the camera image, so together they are one sensor: on a phone
+        without depth a step is never confirmed, and the chair slows down instead. A report with
+        an unknown distance can agree, but at least one of the agreeing reports must give a
+        distance within step_m.
         """
         agreeing = [r for r in self._grounds() if r.ground in STEPS]
-        if len({r.source for r in agreeing}) < 2:
+        if len({SENSOR_OF.get(r.source, r.source) for r in agreeing}) < 2:
             return None
         known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)

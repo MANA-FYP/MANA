@@ -89,7 +89,8 @@ The server starts without any model and says which ones are missing.
   The decision layer needs ground reports (level, stairs, curb), and a plain phone does not
   provide them. The stairs classifier fills this gap once a model is trained.
 - **The COCO detector has no stairs or curb class.** It finds obstacles only. A step is confirmed
-  when two different sources agree, so stairs need the classifier and a second source.
+  when two different sensors agree. The classifier and the detector both use the camera image, so
+  they count as one sensor: on a phone without depth, stairs only slow the chair down.
 - **Distances from the camera are estimates**, made from the size of the box and a typical
   object height. Calibrate with `vision.calibrate_focal`.
 - **Drops and step height need depth.** They are verified by the scripted scenarios
