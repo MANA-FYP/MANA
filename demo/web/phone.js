@@ -81,11 +81,20 @@ function onState(m) {
 // ---- the message strip: the same message the laptop says, one at a time, the most urgent first
 
 const say = document.getElementById("say");
+let shown = 0;
+let sayTimer = null;
 function showSaid(heard) {
   if (!heard || !heard.length) return;
   const last = heard[heard.length - 1];
+  if (last.n === shown) return;   // the same message: keep its timer
+  shown = last.n;
   say.textContent = last.text;
   say.className = "say " + last.priority.toLowerCase();
+  clearTimeout(sayTimer);
+  sayTimer = setTimeout(() => {   // an old message fades, it is not kept for ever
+    say.textContent = "Waiting for MANA";
+    say.className = "say";
+  }, 8000);
 }
 
 // ---- heartbeat: the round trip of the data path
