@@ -34,6 +34,8 @@ To drive it with the decision core instead, start `ros2 run mana_core core_node`
 
 One straight course along +x, 3 m wide. The chair starts at x = 1 m.
 
+![The route from the side: the chair at the start, the ramp, the stairs, the curb and the drop](docs/route.png)
+
 | x (m) | What | What the core should do |
 |---|---|---|
 | -2 to 8 | level ground | wheels, full speed |
@@ -41,8 +43,8 @@ One straight course along +x, 3 m wide. The chair starts at x = 1 m.
 | 12 to 14 | plateau, 0.5 m high | |
 | 14 to 18 | ramp down | wheels, slow |
 | 18 to 22 | level ground | |
-| 22 to 23 | stairs up: 3 steps of 12 cm | tracks, slow |
-| 23 to 26 | top of the stairs, 36 cm high | stay on tracks until level for 2 s |
+| 22 to 23 | stairs up: 3 steps of 17 cm | tracks, slow |
+| 23 to 26 | top of the stairs, 51 cm high | stay on tracks until level for 2 s |
 | 26 to 27 | stairs down | stop and ask |
 | 27 to 31 | level ground | back on wheels |
 | 31 to 34 | curb, 12 cm high | tracks |
@@ -50,6 +52,8 @@ One straight course along +x, 3 m wide. The chair starts at x = 1 m.
 | 38 to 46 | a drop of 1 m (the ground ends) | stop 0.5 m before the edge |
 
 ## The host
+
+![The test host on its wheels, with the tracks lifted](docs/host.png)
 
 `mana_chair` has a chassis on two sets of undercarriage, each on a vertical slide: four driven wheels
 (wheels mode) and two tracks (tracks mode). Only one set touches the ground. `host.py` turns each
@@ -66,9 +70,8 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 
 ## Known limits
 
-- The steps are 12 cm high. The tracks climb them and the curb, but not yet a 17 cm step (the step
-  height of the scripted world). The front and rear of the tracks slope at 25 degrees; a longer
-  slope or flippers are the next things to try.
+- The tracks climb the 17 cm steps (the step height of the scripted world), the ramps and the curb at
+  up to 0.5 m/s. Faster, they have not been tried on the stairs.
 - The chair drives straight; there is no steering command yet.
 - No sensors yet (the next issue bridges them).
 
