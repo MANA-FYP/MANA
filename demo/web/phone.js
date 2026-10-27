@@ -69,12 +69,23 @@ function capabilities() {
 
 function onState(m) {
   updateTiles(grid, m.sensors);
+  showSaid(m.heard);
   laptopHasVoiceModel = !!(m.models && m.models.speech);
   // the mode buttons show which one is on
   document.querySelectorAll("[data-mode]").forEach((b) => {
     const on = (b.dataset.mode === "manual") === !!m.manual;
     b.classList.toggle("on", on);
   });
+}
+
+// ---- the message strip: the same message the laptop says, one at a time, the most urgent first
+
+const say = document.getElementById("say");
+function showSaid(heard) {
+  if (!heard || !heard.length) return;
+  const last = heard[heard.length - 1];
+  say.textContent = last.text;
+  say.className = "say " + last.priority.toLowerCase();
 }
 
 // ---- heartbeat: the round trip of the data path

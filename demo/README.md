@@ -50,11 +50,31 @@ decision and its spoken message are on the laptop dashboard (Chrome needs one cl
 before it will speak; the Voice button turns it off). Text sizes follow the screen height, so
 nothing scrolls.
 
+The strip under the tiles shows the message the laptop is saying now, the same one, in the same
+order (see "What the user hears" below).
+
 | State | Meaning |
 |---|---|
 | **Active** | the phone is streaming it now, with its live value and a trust bar |
 | **Tap** | the browser has it, but nothing is arriving yet (permission not given) |
 | **N/A** | a web page cannot read it, with the reason |
+
+## What the user hears
+
+The decision layer makes a message whenever something changes: a decision, the alert link, the
+position source, a sensor going on or off. Said as they come, an old line could be spoken before a
+new stop. They go through one queue (`mana_core.messages`), so the laptop and the phone show and
+say one message at a time:
+
+- the most urgent goes first (a stop, then warnings, then information); the same priority goes
+  oldest first;
+- a message waits until the one before it has been said; a stop does not wait for a lower message
+  and replaces the waiting ones, and it is answered every time it is pressed;
+- a message older than 6 s is dropped, and the same decision is not said twice in a row.
+
+Start the server with `--directions` for a smart cane or glasses host: it also says what is
+ahead ("Steps up ahead, 2 metres.", "Drop ahead, less than a metre. Stop.", "Person ahead, 1
+metre."), one direction at a time, only from reports the core trusts.
 
 ## The caregiver view
 

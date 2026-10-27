@@ -28,8 +28,10 @@ from mana_core.decision import (
     Mode,
     MotionReport,
     ObstacleReport,
+    Priority,
     Source,
 )
+from mana_core.messages import Message, MessageQueue, direction
 
 # ---- sensors the phone page lists
 
@@ -243,6 +245,14 @@ WORD_COMMANDS = {
 }
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
+# how urgent each kind of line is, when the core does not give a priority of its own
+KIND_PRIORITY = {
+    "link": Priority.WARNING,
+    "position": Priority.WARNING,
+    "mode": Priority.INFO,
+    "switch": Priority.INFO,
+    "coverage": Priority.INFO,
+}
 
 
 COMMAND_TEXT = {
@@ -330,8 +340,15 @@ class Middleware:
     LOG_EVERY_S = 0.5  # how often one source may add a line to the log
     VIBRATION_SLIP = 2.0  # m/s^2 of acceleration spread over one second counts as rough ground
 
-    def __init__(self, core: DecisionCore | None = None, clock=time.monotonic):
+    def __init__(
+        self, core: DecisionCore | None = None, clock=time.monotonic, directions: bool = False
+    ):
         self.core = core or DecisionCore()
+        # what the user hears: one message at a time, the most urgent first (mana_core.messages)
+        self.queue = MessageQueue()
+        self.directions = directions  # also say what is ahead, for a cane or glasses host
+        self.heard: deque = deque(maxlen=10)  # what the queue let out, newest last
+        self._heard_n = 0
         self.clock = clock
         self.sensors = {s.id: SensorState(s) for s in SENSORS}
         self.position = PositionSource()
@@ -388,9 +405,10 @@ class Middleware:
         st.last_seen, st.value, st.trust = now, value, round(trust, 2)
         st.stamps.append(now)
 
-    def _decide(self, now: float, kind: str, text: str) -> None:
+    def _decide(self, now: float, kind: str, text: str, priority: Priority | None = None) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
-        again within 10 s, so a radio that flickers does not repeat itself."""
+        again within 10 s, so a radio that flickers does not repeat itself. Everything but a
+        detection also goes into the message queue, which says one at a time, urgent first."""
         if kind in ("switch", "link", "position", "coverage"):  # stop and go may repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
@@ -405,6 +423,9 @@ class Middleware:
                 "text": text,
             }
         )
+        if kind != "detection":  # a detection is shown as a box, not said
+            level = priority if priority is not None else KIND_PRIORITY.get(kind, Priority.WARNING)
+            self.queue.push(Message(text, level, True, now), now)
 
     def _sentence(self, d, fired: str, now: float) -> tuple[str, bool]:
         """The decision as one sentence, and whether the stop came from the user."""
@@ -463,7 +484,7 @@ class Middleware:
         key = (user_stop, d.stop, d.mode.name, re.sub(r"[\d.]+", "#", d.reason))
         if key != self._decision_key:
             self._decision_key = key
-            self._decide(now, "decision", sentence)
+            self._decide(now, "decision", sentence, d.priority)
 
         if link != self._last_link:
             if link != "unknown":
@@ -705,7 +726,7 @@ class Middleware:
         if command == Command.STOP:
             self._stop_sent = now
             if already_stopped:  # answered again, so the user knows this stop was heard too
-                self._decide(now, "decision", USER_STOP_TEXT)
+                self._decide(now, "decision", USER_STOP_TEXT, Priority.URGENT)
         self._say(now, source, "command", command.name, trust)
         return command
 
@@ -817,6 +838,20 @@ class Middleware:
                 }
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
+        if self.directions and (ahead := direction(self.core, now)):
+            self.queue.push(ahead, now)
+        if said := self.queue.release(now):
+            self._heard_n += 1
+            self.heard.append(
+                {
+                    "n": self._heard_n,
+                    "t": round(self._since_start(now), 1),
+                    "text": said.text,
+                    "priority": said.priority.name,
+                    "speak": said.speak,
+                    "kind": said.kind,
+                }
+            )
         lines = self._standing(now, sentence, link, pos, sensors)
         speaking = ""
         if self._speaking is not None and now - self._speaking[1] < 4.0:
@@ -825,6 +860,7 @@ class Middleware:
             "time": round(self._since_start(now), 1),
             "sensors": sensors,
             "decisions": list(self.decisions),
+            "heard": list(self.heard),
             "speaking": speaking,
             "messages": list(self.log)[-12:],
             "inputs": list(self.inputs),

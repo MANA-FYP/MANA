@@ -191,6 +191,10 @@ body.phone {
 .phone .tile:active { transform: scale(0.98); }
 
 .phone .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; flex: none; margin-top: 0.5em; }
+.phone .say { flex: none; margin-top: 0.5em; padding: 0.7em 0.9em; border-radius: 0.8em; background: #fff;
+  border: 1px solid var(--border); font-weight: 600; text-align: center; color: #334155; }
+.phone .say.warning { border-color: #f59e0b; background: #fffbeb; }
+.phone .say.urgent { border-color: var(--danger); background: #fef2f2; color: #991b1b; }
 .phone .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; flex: none; margin-top: 0.3em; }
 .phone .mode-btn { border: 1.5px solid #cbd5e1; background: #fff; color: var(--ink); border-radius: 0.8em;
   padding: 0.55em; font-size: 0.95em; font-weight: 700; font-family: var(--font); cursor: pointer; }
