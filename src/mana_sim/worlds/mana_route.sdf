@@ -8,8 +8,8 @@
     12  to 14  plateau, 0.5 m high
     14  to 18  ramp down                              wheels, slow
     18  to 22  level ground
-    22  to 23  stairs up: 3 steps, each 12 cm high    tracks, slow, 1.5 m or more before the first step
-    23  to 26  top of the stairs, 36 cm high          stay on tracks until level for 2 s
+    22  to 23  stairs up: 3 steps, each 17 cm high    tracks, slow, 1.5 m or more before the first step
+    23  to 26  top of the stairs, 51 cm high          stay on tracks until level for 2 s
     26  to 27  stairs down: 2 steps and the ground    stop and ask
     27  to 31  level ground                           back on wheels
     31  to 34  curb, 12 cm high                       tracks
@@ -75,33 +75,33 @@
           <geometry><box><size>4.031 3 0.1</size></box></geometry>
           <material><ambient>0.7 0.6 0.2 1</ambient><diffuse>0.9 0.8 0.3 1</diffuse></material></visual>
 
-        <!-- stairs up: three steps, tread 0.33 m, rise 0.12 m; top 0.36 m from x = 23 to 26 -->
-        <collision name="step_up_1"><pose>24 0 0.06 0 0 0</pose>
-          <geometry><box><size>4 3 0.12</size></box></geometry></collision>
-        <visual name="step_up_1"><pose>24 0 0.06 0 0 0</pose>
-          <geometry><box><size>4 3 0.12</size></box></geometry>
+        <!-- stairs up: three steps, tread 0.33 m, rise 0.17 m; top 0.51 m from x = 23 to 26 -->
+        <collision name="step_up_1"><pose>24 0 0.085 0 0 0</pose>
+          <geometry><box><size>4 3 0.17</size></box></geometry></collision>
+        <visual name="step_up_1"><pose>24 0 0.085 0 0 0</pose>
+          <geometry><box><size>4 3 0.17</size></box></geometry>
           <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
-        <collision name="step_up_2"><pose>24.165 0 0.12 0 0 0</pose>
-          <geometry><box><size>3.67 3 0.24</size></box></geometry></collision>
-        <visual name="step_up_2"><pose>24.165 0 0.12 0 0 0</pose>
-          <geometry><box><size>3.67 3 0.24</size></box></geometry>
+        <collision name="step_up_2"><pose>24.165 0 0.17 0 0 0</pose>
+          <geometry><box><size>3.67 3 0.34</size></box></geometry></collision>
+        <visual name="step_up_2"><pose>24.165 0 0.17 0 0 0</pose>
+          <geometry><box><size>3.67 3 0.34</size></box></geometry>
           <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
-        <collision name="step_up_3"><pose>24.33 0 0.18 0 0 0</pose>
-          <geometry><box><size>3.34 3 0.36</size></box></geometry></collision>
-        <visual name="step_up_3"><pose>24.33 0 0.18 0 0 0</pose>
-          <geometry><box><size>3.34 3 0.36</size></box></geometry>
+        <collision name="step_up_3"><pose>24.33 0 0.255 0 0 0</pose>
+          <geometry><box><size>3.34 3 0.51</size></box></geometry></collision>
+        <visual name="step_up_3"><pose>24.33 0 0.255 0 0 0</pose>
+          <geometry><box><size>3.34 3 0.51</size></box></geometry>
           <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
 
-        <!-- stairs down: x 26 to 27, steps 0.24 m and 0.12 m after the top -->
-        <collision name="step_down_1"><pose>26.165 0 0.12 0 0 0</pose>
-          <geometry><box><size>0.33 3 0.24</size></box></geometry></collision>
-        <visual name="step_down_1"><pose>26.165 0 0.12 0 0 0</pose>
-          <geometry><box><size>0.33 3 0.24</size></box></geometry>
+        <!-- stairs down: x 26 to 27, steps 0.34 m and 0.17 m after the top -->
+        <collision name="step_down_1"><pose>26.165 0 0.17 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.34</size></box></geometry></collision>
+        <visual name="step_down_1"><pose>26.165 0 0.17 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.34</size></box></geometry>
           <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
-        <collision name="step_down_2"><pose>26.495 0 0.06 0 0 0</pose>
-          <geometry><box><size>0.33 3 0.12</size></box></geometry></collision>
-        <visual name="step_down_2"><pose>26.495 0 0.06 0 0 0</pose>
-          <geometry><box><size>0.33 3 0.12</size></box></geometry>
+        <collision name="step_down_2"><pose>26.495 0 0.085 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.17</size></box></geometry></collision>
+        <visual name="step_down_2"><pose>26.495 0 0.085 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.17</size></box></geometry>
           <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
 
         <!-- curb: x 31 to 34, 12 cm high -->

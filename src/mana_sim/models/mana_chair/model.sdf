@@ -9,8 +9,7 @@
   15 cm; in tracks mode it is the other way round. The host node (mana_sim/host_node.py) follows
   the core's DriveRequest: it moves the slides and drives the set that is down.
 
-  Wheels (r = 0.15 m) cannot climb a step of 12 cm; the tracks can. That is the point of the mode.
-  The tracks do not yet climb a 17 cm step (the step height of the scripted world); see the README.
+  Wheels (r = 0.15 m) cannot climb a step of 17 cm; the tracks can. That is the point of the mode.
 
   Topics (gz transport, bridged to ROS 2 by the launch file):
     /model/mana_chair/wheels_cmd_vel      Twist for the wheels (DiffDrive)
@@ -171,7 +170,7 @@
     </joint>
 
     <!-- ===== tracks: one link per side, each on its own slide. The belt is flat; the front and the
-         rear end slope up at 25 degrees, so the track can ride up a step. ===== -->
+         rear end slope up at 20 degrees, so the track can ride up a step. ===== -->
     <link name="left_track">
       <pose>0 0.24 -0.28 0 0 0</pose>
       <inertial>
@@ -184,13 +183,13 @@
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <collision name="front_incline">
-        <pose>0.601 0 0.082 0 -0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>0.7088 0 0.0938 0 -0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <collision name="rear_incline">
-        <pose>-0.601 0 0.082 0 0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>-0.7088 0 0.0938 0 0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <visual name="belt_visual">
@@ -199,13 +198,13 @@
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
       <visual name="front_incline_visual">
-        <pose>0.601 0 0.082 0 -0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>0.7088 0 0.0938 0 -0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
       <visual name="rear_incline_visual">
-        <pose>-0.601 0 0.082 0 0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>-0.7088 0 0.0938 0 0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
     </link>
@@ -229,13 +228,13 @@
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <collision name="front_incline">
-        <pose>0.601 0 0.082 0 -0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>0.7088 0 0.0938 0 -0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <collision name="rear_incline">
-        <pose>-0.601 0 0.082 0 0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>-0.7088 0 0.0938 0 0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <surface><friction><ode><mu>0.8</mu><mu2>150</mu2><fdir1>0 1 0</fdir1></ode></friction></surface>
       </collision>
       <visual name="belt_visual">
@@ -244,13 +243,13 @@
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
       <visual name="front_incline_visual">
-        <pose>0.601 0 0.082 0 -0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>0.7088 0 0.0938 0 -0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
       <visual name="rear_incline_visual">
-        <pose>-0.601 0 0.082 0 0.44 0</pose>
-        <geometry><box><size>0.6 0.1 0.1</size></box></geometry>
+        <pose>-0.7088 0 0.0938 0 0.3491 0</pose>
+        <geometry><box><size>0.8 0.1 0.1</size></box></geometry>
         <material><ambient>0.7 0.4 0.05 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
       </visual>
     </link>
