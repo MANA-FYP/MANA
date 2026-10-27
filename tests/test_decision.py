@@ -457,3 +457,46 @@ def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
 
 def test_stairs_up_still_change_to_tracks_without_asking():
     assert core(*stairs()).decision.reason == "Stairs ahead, changing to tracks"
+
+
+def test_mixed_step_labels_with_stairs_down_still_ask():
+    d = core(ground(CAM, Ground.STAIRS_DOWN, 0.5), ground(DEPTH, Ground.CURB, 1.0)).decision
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+def test_a_no_after_the_yes_takes_it_back():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    c.on_command(Command.NO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.2).reason == ASK_DOWN
+
+
+def test_a_yes_lapses_once_the_stairs_are_out_of_sight_even_without_level_ground():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    for i in range(1, 20):  # no motion reports, so level ground is never confirmed
+        t = NOW + i / 10
+        for r in flat:
+            c.on_ground(GroundReport(t, r.trust, r.source, r.ground, r.distance_m))
+        c.tick(t)
+    assert fed(c, stairs_down(), NOW + 2.0).reason == ASK_DOWN
+
+
+def test_stop_then_go_asks_again():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    c.on_command(Command.STOP, 0.9)
+    c.on_command(Command.GO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+
+
+@pytest.mark.parametrize(
+    "command", [Command.SPEED_UP, Command.SLOW_DOWN, Command.WHEELS, Command.MANUAL]
+)
+def test_a_driving_command_at_the_question_does_not_drive_on(command):
+    c = core(*stairs_down())
+    c.on_command(command, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.1)
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
