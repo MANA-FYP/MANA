@@ -11,7 +11,9 @@ from mana_core.decision import (
     Priority,
     Source,
 )
+from mana_core.evaluate import run
 from mana_core.messages import DECISION, DIRECTION, Message, MessageQueue, direction, metres
+from mana_core.scenarios import SCENARIOS
 
 INFO, WARNING, URGENT = Priority.INFO, Priority.WARNING, Priority.URGENT
 
@@ -261,3 +263,89 @@ def test_reports_that_are_old_or_not_trusted_are_not_told():
     doubtful = ground(Ground.STAIRS_UP, 1.0, trust=0.3)
     assert direction(core_with(ground=[doubtful]), 1.0) is None
     assert direction(core_with(obstacles=[obstacle(1.0, trust=0.2)]), 1.0) is None
+
+
+# ---- in the scripted scenarios: what the user hears, in what order
+
+
+def told(name, cane=False):
+    return run(SCENARIOS[name], cane=cane).heard
+
+
+def texts(name, cane=False):
+    return [m.text for _, m in told(name, cane)]
+
+
+def test_stairs_are_told_in_order_and_each_once():
+    assert texts("stairs") == [
+        "Level ground",
+        "Possible step ahead, slowing down",
+        "Stairs ahead, changing to tracks",
+        "On tracks until the ground is level",
+        "Level ground",
+    ]
+
+
+def test_the_stop_is_urgent_and_heard_the_moment_it_is_made():
+    ((t, m),) = [(t, m) for t, m in told("stop") if m.text == "Stopped by you"]
+    assert m.priority == URGENT and t - m.stamp < 0.2
+
+
+def test_a_drop_is_slowed_for_then_stopped_for_in_that_order():
+    assert texts("drop")[-2:] == ["Drop ahead, slowing down", "Drop ahead, stopping"]
+    assert texts("manual_drop")[-1] == "Drop ahead, stopping"
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+@pytest.mark.parametrize("cane", [False, True])
+def test_one_message_at_a_time(name, cane):
+    heard_ = told(name, cane)
+    for (t0, a), (t1, b) in zip(heard_, heard_[1:], strict=False):
+        assert t1 - t0 >= 1.5 or b.priority == URGENT and a.priority < URGENT, (a.text, b.text)
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+@pytest.mark.parametrize("cane", [False, True])
+def test_nothing_old_is_said(name, cane):
+    assert all(t - m.stamp <= 6.0 for t, m in told(name, cane))
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_a_chair_gets_no_step_directions(name):
+    assert all(m.kind == DECISION for _, m in told(name))
+
+
+def test_a_cane_is_told_what_is_ahead_as_it_comes_closer():
+    said = texts("stairs", cane=True)
+    steps = [t for t in said if t.startswith("Steps up ahead")]
+    assert steps == [
+        "Steps up ahead.",
+        "Steps up ahead, 2 metres.",
+        "Steps up ahead, 1 metre.",
+        "Steps up ahead, less than a metre.",
+    ]
+    assert said.index("Steps up ahead, 2 metres.") < said.index("Steps up ahead, 1 metre.")
+
+
+def test_a_cane_is_told_about_a_curb_a_ramp_a_drop_and_a_person():
+    assert "Curb ahead, 2 metres." in texts("curb", cane=True)
+    assert "Ramp ahead, 2 metres." in texts("ramp", cane=True)
+    assert "Drop ahead, 2 metres. Stop." in texts("drop", cane=True)
+    assert "Person ahead, 2 metres." in texts("dark", cane=True)
+
+
+def test_a_cane_never_hears_the_same_direction_twice_in_a_row():
+    for name in SCENARIOS:
+        said = [m.text for _, m in told(name, cane=True) if m.kind == DIRECTION]
+        assert all(a != b for a, b in zip(said, said[1:], strict=False)), name
+
+
+def test_a_cane_hears_no_step_direction_for_flat_ground():
+    assert all(m.kind == DECISION for _, m in told("level", cane=True))
+
+
+def test_the_stop_is_never_held_back_by_a_direction():
+    for name in SCENARIOS:
+        for t, m in told(name, cane=True):
+            if m.kind == DECISION and m.priority == URGENT:
+                assert t - m.stamp < 0.2, (name, m.text)
