@@ -126,10 +126,10 @@ def test_furniture_gets_a_distance_but_a_door_does_not():
     assert [o.label for o in to_obstacles([couch, door], 640, 480)] == ["couch"]
 
 
-def test_the_open_vocabulary_list_has_forty_names_and_no_repeats():
+def test_the_open_vocabulary_list_has_42_names_and_no_repeats():
     from demo.build_detector import NAMES
 
-    assert len(NAMES) == 40 and len(set(NAMES)) == 40
+    assert len(NAMES) == 42 and len(set(NAMES)) == 42
 
 
 def test_build_detector_saves_the_model_told_the_names(monkeypatch, tmp_path, capsys):
@@ -154,5 +154,5 @@ def test_build_detector_saves_the_model_told_the_names(monkeypatch, tmp_path, ca
     saved = []
     monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLOE=FakeYOLOE))
     build_detector.main(["--out", str(tmp_path / "m.pt")])
-    assert saved == [("yoloe-26n-seg.pt", build_detector.NAMES, "pe:40", str(tmp_path / "m.pt"))]
-    assert "40 object names" in capsys.readouterr().out
+    assert saved == [("yoloe-26n-seg.pt", build_detector.NAMES, "pe:42", str(tmp_path / "m.pt"))]
+    assert "42 object names" in capsys.readouterr().out
