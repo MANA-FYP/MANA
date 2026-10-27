@@ -460,7 +460,8 @@ def test_stairs_up_still_change_to_tracks_without_asking():
 
 
 def test_mixed_step_labels_with_stairs_down_still_ask():
-    d = core(ground(CAM, Ground.STAIRS_DOWN, 0.5), ground(DEPTH, Ground.CURB, 1.0)).decision
+    # the camera names the ground but measures no distance
+    d = core(ground(CAM, Ground.STAIRS_DOWN), ground(DEPTH, Ground.CURB, 1.0)).decision
     assert (d.stop, d.reason) == (True, ASK_DOWN)
 
 
