@@ -15,12 +15,13 @@ setup(
     zip_safe=True,
     maintainer="Muhammad Waqas",
     maintainer_email="waqasmalik0007@users.noreply.github.com",
-    description="MANA perception (M1 Vision): ground from the 3D camera, and a scripted stub.",
+    description="MANA perception (M1 Vision): obstacles from the camera, ground from the 3D camera",
     license="AGPL-3.0-only",
     entry_points={
         "console_scripts": [
             "stub_node = mana_perception.stub_node:main",
             "depth_node = mana_perception.depth_node:main",
+            "detector_node = mana_perception.detector_node:main",
         ]
     },
 )
