@@ -56,6 +56,26 @@ nothing scrolls.
 | **Tap** | the browser has it, but nothing is arriving yet (permission not given) |
 | **N/A** | a web page cannot read it, with the reason |
 
+## The caregiver view
+
+A caregiver (the secondary user, UC-9) follows the user from their own phone at
+**http://localhost:8000/caregiver**. It shows whether MANA is moving, slowing down, stopped or
+driven by the user in manual mode, what it is doing in one sentence, the mode, the speed limit,
+where the position comes from, which radio carries alerts, and the last eight events (decisions,
+and sensors and links coming and going), newest first. Sentences written to the user are reworded
+for a helper ("Stopped by the user. They are in control."). It updates every 0.1 s from the same
+state as the dashboard.
+
+It is **read-only**: the page has no controls, and the server ignores anything sent on its socket
+(`/ws/caregiver`), so it cannot stop or drive the chair even by hand. It leaves out the camera
+image and the raw sensor stream, which a helper does not need. If the user's phone stops sending
+for 3 s, the view says MANA is offline and asks the caregiver to check on them, and it shows the
+last known values under **Last known**. `/api/status` gives the same view once as JSON.
+
+For a caregiver on another phone on the same Wi-Fi, start the server with `--host 0.0.0.0` and
+open `http://<laptop IP>:8000/caregiver`. That also opens the dashboard, which **does** have
+STOP and GO, to that network, so do it only on a network you trust.
+
 ## What is real
 
 | Tile | In the demo | What the decision layer does with it |
