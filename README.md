@@ -241,6 +241,20 @@ The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decide
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
+### Position source (`mana_position`)
+
+```bash
+ros2 run mana_position position_node
+```
+
+The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisation) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
+
+- GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
+- GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
+- away from GPS the lidar map is used while the lidar localisation reports, and odometry, which drifts, only while it does not.
+
+The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
+
 ### Scenarios, pass marks and the live demo
 
 Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:
