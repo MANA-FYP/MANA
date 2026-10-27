@@ -267,6 +267,20 @@ The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisat
 
 GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
 
+### Alert link (`mana_connectivity`)
+
+```bash
+ros2 run mana_connectivity link_node
+```
+
+Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
+
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (once #58 is merged, the core then slows down);
+- while Bluetooth carries the alerts, Wi-Fi must answer steadily for 5 s before they return to it, so a fading signal gives one switch away and one back; at start, or with Bluetooth down too, Wi-Fi takes them as soon as it answers;
+- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost. Ids carry a token for this boot, so a late answer from an earlier run cannot clear a new alert. Something at the other end, such as the caregiver view (#50), must answer; past 100 unanswered alerts the oldest is dropped and logged.
+
+`src/mana_connectivity/test` tests the rule and the outbox, and fades Wi-Fi through ROS while an alert is waiting.
+
 ### Scenarios, pass marks and the live demo
 
 Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:
