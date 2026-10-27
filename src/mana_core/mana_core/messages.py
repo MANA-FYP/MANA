@@ -1,15 +1,16 @@
-"""What the user hears: one message at a time, the most urgent first.
+"""What the user hears: one message at a time, the most urgent first, and step directions.
 
 The decision core makes a message every time its reason changes. Said as they come, an old
 "Level ground" could be spoken before a new "Drop ahead, stopping", and two warnings could talk over
 each other. The queue fixes that: it lets one message out at a time, urgent ones first, and it drops
-what is no longer true. Pure Python, no ROS.
+what is no longer true. `direction` adds a short sentence about what is ahead, for a host with no
+chair to drive, such as a smart cane or glasses. Pure Python, no ROS.
 """
 
 import math
 from dataclasses import dataclass
 
-from mana_core.decision import Priority
+from mana_core.decision import STEPS, DecisionCore, Ground, Priority
 
 DECISION = "decision"
 DIRECTION = "direction"
@@ -92,3 +93,66 @@ class MessageQueue:
         if best.priority == Priority.URGENT:
             self._last_urgent_at = now
         return best
+
+
+def metres(distance_m: float) -> str:
+    """A distance a person can use: whole metres, and "less than a metre" when it is closer."""
+    if distance_m < 1.0:
+        return "less than a metre"
+    d = round(distance_m)
+    return "1 metre" if d == 1 else f"{d} metres"
+
+
+def direction(core: DecisionCore, now: float) -> Message | None:
+    """The one thing most worth telling the user about what is ahead, or None.
+
+    Only reports the core trusts and that are not too old count. A drop or an obstacle at stopping
+    distance is URGENT; anything else on the way within the core's reaction distances is a WARNING.
+    The nearest of the most urgent hazards wins.
+    """
+    lim = core.limits
+
+    def good(report) -> bool:
+        return now - report.stamp <= lim.max_age_s and report.trust >= lim.min_trust
+
+    found: list[tuple[Priority, float, str]] = []  # priority, distance, sentence
+    for r in (r for r in core.ground.values() if good(r)):
+        near = not r.distance_m > lim.step_m  # an unknown distance counts as near
+        if not near or r.ground not in STEPS | {Ground.DROP, Ground.RAMP}:
+            continue
+        known = not math.isnan(r.distance_m)
+        where = f", {metres(r.distance_m)}" if known else ""
+        if r.ground == Ground.DROP:
+            urgent = known and r.distance_m <= lim.edge_m
+            found.append(
+                (
+                    Priority.URGENT if urgent else Priority.WARNING,
+                    r.distance_m,
+                    f"Drop ahead{where}. Stop.",
+                )
+            )
+        elif r.ground == Ground.STAIRS_DOWN:
+            found.append((Priority.WARNING, r.distance_m, f"Steps down ahead{where}. Stop."))
+        elif r.ground == Ground.STAIRS_UP:
+            found.append((Priority.WARNING, r.distance_m, f"Steps up ahead{where}."))
+        elif r.ground == Ground.CURB:
+            found.append((Priority.WARNING, r.distance_m, f"Curb ahead{where}."))
+        else:
+            found.append((Priority.WARNING, r.distance_m, f"Ramp ahead{where}."))
+    for r in (r for r in core.obstacles.values() if good(r)):
+        if r.distance_m > lim.obstacle_slow_m:
+            continue
+        label = (r.label or "obstacle").capitalize()
+        if r.distance_m <= lim.obstacle_stop_m:
+            found.append(
+                (Priority.URGENT, r.distance_m, f"Stop. {label} ahead, {metres(r.distance_m)}.")
+            )
+        else:
+            found.append(
+                (Priority.WARNING, r.distance_m, f"{label} ahead, {metres(r.distance_m)}.")
+            )
+    if not found:
+        return None
+    # most urgent first, then the nearest; an unknown distance (NaN) sorts last
+    priority, _, text = min(found, key=lambda f: (-f[0], math.inf if math.isnan(f[1]) else f[1]))
+    return Message(text, priority, True, now, DIRECTION)
