@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#065f46">
+  <title>MANA caregiver view</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/caregiver.css">
+</head>
+<body class="care">
+  <div class="ribbon"></div>
+  <header class="care-head">
+    <h1>MANA <span>caregiver view</span></h1>
+    <div class="care-note">Status only. This page cannot control the chair.</div>
+  </header>
+
+  <main class="care-main">
+    <section class="card care-status offline" id="status" aria-live="polite">
+      <div class="care-state" id="state">Connecting</div>
+      <p class="care-sentence" id="sentence">Waiting for MANA.</p>
+      <div class="care-updated" id="updated"></div>
+    </section>
+
+    <section class="card">
+      <h2 id="facts-title">Now</h2>
+      <dl class="care-facts">
+        <div><dt>Mode</dt><dd id="mode">-</dd></div>
+        <div><dt>Speed limit</dt><dd id="speed">-</dd></div>
+        <div><dt>Position from</dt><dd id="position">-</dd></div>
+        <div><dt>Alerts sent by</dt><dd id="link">-</dd></div>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Recent events</h2>
+      <ol class="care-events" id="events"><li class="empty">Nothing yet.</li></ol>
+    </section>
+  </main>
+
+  <script src="/static/caregiver.js"></script>
+</body>
+</html>

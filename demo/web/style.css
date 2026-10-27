@@ -298,6 +298,9 @@ body.dash {
 
 .result .mode p { margin: 0; }
 .result .mode p.main { font-size: 1.1em; font-weight: 700; color: var(--primary); line-height: 1.3; }
+.result .mode ul.earlier { list-style: none; margin: 0.8em 0 0; padding: 0; display: grid; gap: 0.35em;
+  font-size: 0.78em; font-weight: 500; color: var(--muted); line-height: 1.35; }
+.result .mode ul.earlier .when { display: inline-block; min-width: 3.2em; font-variant-numeric: tabular-nums; }
 .result .mode p.extra { font-size: 0.95em; font-weight: 600; color: var(--ink); margin-top: 0.45em; line-height: 1.3; }
 .dash .card.grow .result { flex: 1; min-height: 0; overflow: hidden; }
 .inputs .live .said { color: var(--primary); }
