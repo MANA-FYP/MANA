@@ -56,6 +56,26 @@ nothing scrolls.
 | **Tap** | the browser has it, but nothing is arriving yet (permission not given) |
 | **N/A** | a web page cannot read it, with the reason |
 
+## The caregiver view
+
+A caregiver (the secondary user, UC-9) follows the user from their own phone at
+**http://localhost:8000/caregiver**. It shows whether MANA is moving, slowing down, stopped or
+driven by the user in manual mode, what it is doing in one sentence, the mode, the speed limit,
+where the position comes from, which radio carries alerts, and the last eight events (decisions,
+and sensors and links coming and going), newest first. Sentences written to the user are reworded
+for a helper ("Stopped by the user. They are in control."). It updates every 0.1 s from the same
+state as the dashboard.
+
+It is **read-only**: the page has no controls, and the server ignores anything sent on its socket
+(`/ws/caregiver`), so it cannot stop or drive the chair even by hand. It leaves out the camera
+image and the raw sensor stream, which a helper does not need. If the user's phone stops sending
+for 3 s, the view says MANA is offline and asks the caregiver to check on them, and it shows the
+last known values under **Last known**. `/api/status` gives the same view once as JSON.
+
+For a caregiver on another phone on the same Wi-Fi, start the server with `--host 0.0.0.0` and
+open `http://<laptop IP>:8000/caregiver`. That also opens the dashboard, which **does** have
+STOP and GO, to that network, so do it only on a network you trust.
+
 ## What is real
 
 | Tile | In the demo | What the decision layer does with it |
@@ -79,7 +99,8 @@ The server starts without any model and says which ones are missing.
 
 | Model | Install | What it adds |
 |---|---|---|
-| Object detector (COCO) | `pip install ultralytics`, then `--weights yolo26n.pt` | obstacles from the camera: person, car, bicycle and so on, with an **estimated** distance |
+| Object detector (COCO) | `pip install ultralytics`, then `--weights yolo26n.pt` (or `yolo26s.pt`, slower and finds more) | the 80 COCO classes: person, chair, bottle, laptop and so on; obstacles get an **estimated** distance |
+| Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 40 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
 | Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included.** |
 

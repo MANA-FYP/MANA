@@ -128,6 +128,15 @@ bash tools/check_env.sh           # one PASS or FAIL line per item
 
 The ML packages are pinned in `requirements-ml.txt`. The setup installs the CPU build of PyTorch; train on a GPU machine with the matching CUDA build. The `Setup check` workflow runs both scripts on a fresh Ubuntu 24.04 runner whenever they change, so the setup is tested on a clean machine.
 
+### Get the datasets
+
+```bash
+tools/fetch_datasets.sh           # StairNet, SANPO, COCO val2017, Speech Commands v2, UrbanSound8K
+tools/fetch_datasets.sh --list    # sizes, and which one needs a login
+```
+
+The data goes to `datasets/`, which git ignores. Sources, licences and splits are in [`docs/datasets.md`](docs/datasets.md), and the licences are also listed in [`NOTICE`](NOTICE).
+
 ## 7. Team
 
 | Member | Roll no. | Main responsibility |
@@ -173,14 +182,15 @@ docker run --rm -it ghcr.io/mana-fyp/mana:v0.1.0-mid ros2 run mana_core core_nod
 │   └── mana_msgs/       message types between modules, decision core and host
 ├── demo/                phone demo: laptop server, phone page, dashboard
 ├── tests/               Python tests
-├── tools/               set up and check a development machine
+├── tools/               set up a development machine, fetch the datasets
 ├── requirements-ml.txt  pinned packages for the model work
 ├── ruff.toml            lint settings
 ├── pytest.ini           test settings
-├── docs/diagrams/       system diagrams
+├── docs/                datasets (datasets.md) and system diagrams
 ├── Dockerfile           release image: the ROS 2 workspace, built
 ├── README.md
 ├── CONTRIBUTING.md
+├── NOTICE               dataset licences
 └── LICENSE
 ```
 

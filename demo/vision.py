@@ -1,8 +1,11 @@
-"""Camera vision for the phone demo: obstacles from a lightweight COCO detector, and the ground
-classifier hook. The maths is pure Python and testable; the models load lazily and are optional.
+"""Camera vision for the phone demo: obstacles from an object detector, and the ground classifier
+hook. The maths is pure Python and testable; the models load lazily and are optional.
 
 Honest limits, which the dashboard repeats:
-- The detector knows only its COCO classes. It does not know stairs or curbs.
+- The default detector (YOLO26n) knows only its COCO classes, not stairs or curbs. The
+  open-vocabulary YOLOE-26 from build_detector.py also names stairs, doors and poles, but only as
+  labels: a distance is estimated only for the classes in OBSTACLE_HEIGHT_M, and only those reach
+  the decision core.
 - The distance is estimated from the size of the box and a typical height for the class. It is an
   estimate, not a measurement, and it depends on the camera calibration below.
 - If a model is not installed, nothing is invented: the loader returns None and the caller marks
@@ -27,6 +30,20 @@ OBSTACLE_HEIGHT_M = {
     "dog": 0.5,
     "chair": 0.9,
     "bench": 0.85,
+    "dining table": 0.75,
+    "couch": 0.85,
+    "bed": 0.6,
+    "potted plant": 0.6,
+    "suitcase": 0.65,
+    "refrigerator": 1.7,
+    "toilet": 0.75,
+    "fire hydrant": 0.75,
+    "table": 0.75,  # names from the open-vocabulary list in build_detector.py; "door" is left
+    # out on purpose: a door that fills the frame always looks about 2 m away, at every doorway
+    "desk": 0.75,
+    "wheelchair": 1.0,
+    "trash can": 0.7,
+    "traffic cone": 0.7,
 }
 
 # Defaults for a typical phone camera held upright. They are assumptions: calibrate once with
@@ -111,19 +128,22 @@ def to_obstacles(
 
 
 class Detector:
-    """A lightweight COCO object detector (Ultralytics YOLO, nano size)."""
+    """An Ultralytics object detector: YOLO26 on the COCO classes, or the open-vocabulary YOLOE
+    built by build_detector.py. imgsz is the size each frame is scaled to: 416 by default, as at the
+    mid-evaluation; 640 finds small objects best and is slower on a laptop CPU."""
 
-    def __init__(self, model):
+    def __init__(self, model, imgsz: int = 416):
         self.model = model
+        self.imgsz = imgsz
 
     @classmethod
-    def load(cls, weights: str = "yolo26n.pt") -> Detector | None:
+    def load(cls, weights: str = "yolo26n.pt", imgsz: int = 416) -> Detector | None:
         try:
             ultralytics = importlib.import_module("ultralytics")
         except ImportError:
             return None
         try:
-            return cls(ultralytics.YOLO(weights))
+            return cls(ultralytics.YOLO(weights), imgsz)
         except Exception:  # the weights cannot be found or downloaded
             return None
 
@@ -132,7 +152,7 @@ class Detector:
         from PIL import Image
 
         image = Image.open(io.BytesIO(jpeg)).convert("RGB")
-        result = self.model(image, imgsz=416, conf=conf, verbose=False)[0]
+        result = self.model(image, imgsz=self.imgsz, conf=conf, verbose=False)[0]
         names = result.names
         found = []
         for box in result.boxes:
