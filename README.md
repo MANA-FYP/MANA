@@ -233,12 +233,13 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
 3. Manual mode: follow the user's mode and speed
-4. Stairs or a curb seen by both cameras, or wheel slip: tracks, slow
-5. On tracks and not yet level for 2 s: stay on tracks
-6. No trusted ground report: slow down
-7. An obstacle, drop, ramp or possible step ahead: slow down
-8. No link could carry an alert, or no position source is fresh and trusted: slow down (only when the host runs a link or position module)
-9. Otherwise: wheels, full speed
+4. Stairs down seen by both cameras: stop and ask; go down on tracks only after the user says yes
+5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
+6. On tracks and not yet level for 2 s: stay on tracks
+7. No trusted ground report: slow down
+8. An obstacle, drop, ramp or possible step ahead: slow down
+9. No link could carry an alert, or no position source is fresh and trusted: slow down (only when the host runs a link or position module)
+10. Otherwise: wheels, full speed
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
