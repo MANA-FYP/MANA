@@ -1,0 +1,133 @@
+<?xml version="1.0"?>
+<!--
+  MANA test route: one straight course along +x, 3 m wide. The chair starts at x = 1 m.
+
+    x (m)      what                                   what the core should do
+    -2  to  8  level ground                           wheels, full speed
+     8  to 12  ramp up, 0.5 m rise (7 degrees)        wheels, slow
+    12  to 14  plateau, 0.5 m high
+    14  to 18  ramp down                              wheels, slow
+    18  to 22  level ground
+    22  to 23  stairs up: 3 steps, each 12 cm high    tracks, slow, 1.5 m or more before the first step
+    23  to 26  top of the stairs, 36 cm high          stay on tracks until level for 2 s
+    26  to 27  stairs down: 2 steps and the ground    stop and ask
+    27  to 31  level ground                           back on wheels
+    31  to 34  curb, 12 cm high                       tracks
+    34  to 38  level ground
+    38  to 46  a drop of 1 m (the ground ends)        stop 0.5 m before the edge
+
+  The scripted world (mana_core/scenarios.py) has the same pieces in separate routes. This one has
+  them all in a row. Sensors, faults and the scenarios come in later steps.
+-->
+<sdf version="1.9">
+  <world name="mana_route">
+    <physics name="4ms" type="dart">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
+    <gravity>0 0 -9.81</gravity>
+    <scene>
+      <ambient>0.6 0.6 0.6 1</ambient>
+      <background>0.75 0.85 0.95 1</background>
+      <shadows>true</shadows>
+    </scene>
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 20 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <model name="route">
+      <static>true</static>
+      <link name="terrain">
+
+        <!-- level ground from x = -2 to 38, top at z = 0 -->
+        <collision name="ground"><pose>18 0 -0.05 0 0 0</pose>
+          <geometry><box><size>40 3 0.1</size></box></geometry></collision>
+        <visual name="ground"><pose>18 0 -0.05 0 0 0</pose>
+          <geometry><box><size>40 3 0.1</size></box></geometry>
+          <material><ambient>0.55 0.6 0.55 1</ambient><diffuse>0.6 0.7 0.6 1</diffuse></material></visual>
+
+        <!-- ramp up: x 8 to 12, 0.5 m rise (angle 0.1244 rad) -->
+        <collision name="ramp_up"><pose>10.006 0 0.2002 0 -0.1244 0</pose>
+          <geometry><box><size>4.031 3 0.1</size></box></geometry></collision>
+        <visual name="ramp_up"><pose>10.006 0 0.2002 0 -0.1244 0</pose>
+          <geometry><box><size>4.031 3 0.1</size></box></geometry>
+          <material><ambient>0.7 0.6 0.2 1</ambient><diffuse>0.9 0.8 0.3 1</diffuse></material></visual>
+
+        <!-- plateau: x 12 to 14, top at 0.5 m -->
+        <collision name="plateau"><pose>13 0 0.2 0 0 0</pose>
+          <geometry><box><size>2 3 0.6</size></box></geometry></collision>
+        <visual name="plateau"><pose>13 0 0.2 0 0 0</pose>
+          <geometry><box><size>2 3 0.6</size></box></geometry>
+          <material><ambient>0.6 0.55 0.2 1</ambient><diffuse>0.8 0.75 0.3 1</diffuse></material></visual>
+
+        <!-- ramp down: x 14 to 18 -->
+        <collision name="ramp_down"><pose>15.994 0 0.2002 0 0.1244 0</pose>
+          <geometry><box><size>4.031 3 0.1</size></box></geometry></collision>
+        <visual name="ramp_down"><pose>15.994 0 0.2002 0 0.1244 0</pose>
+          <geometry><box><size>4.031 3 0.1</size></box></geometry>
+          <material><ambient>0.7 0.6 0.2 1</ambient><diffuse>0.9 0.8 0.3 1</diffuse></material></visual>
+
+        <!-- stairs up: three steps, tread 0.33 m, rise 0.12 m; top 0.36 m from x = 23 to 26 -->
+        <collision name="step_up_1"><pose>24 0 0.06 0 0 0</pose>
+          <geometry><box><size>4 3 0.12</size></box></geometry></collision>
+        <visual name="step_up_1"><pose>24 0 0.06 0 0 0</pose>
+          <geometry><box><size>4 3 0.12</size></box></geometry>
+          <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
+        <collision name="step_up_2"><pose>24.165 0 0.12 0 0 0</pose>
+          <geometry><box><size>3.67 3 0.24</size></box></geometry></collision>
+        <visual name="step_up_2"><pose>24.165 0 0.12 0 0 0</pose>
+          <geometry><box><size>3.67 3 0.24</size></box></geometry>
+          <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
+        <collision name="step_up_3"><pose>24.33 0 0.18 0 0 0</pose>
+          <geometry><box><size>3.34 3 0.36</size></box></geometry></collision>
+        <visual name="step_up_3"><pose>24.33 0 0.18 0 0 0</pose>
+          <geometry><box><size>3.34 3 0.36</size></box></geometry>
+          <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
+
+        <!-- stairs down: x 26 to 27, steps 0.24 m and 0.12 m after the top -->
+        <collision name="step_down_1"><pose>26.165 0 0.12 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.24</size></box></geometry></collision>
+        <visual name="step_down_1"><pose>26.165 0 0.12 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.24</size></box></geometry>
+          <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
+        <collision name="step_down_2"><pose>26.495 0 0.06 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.12</size></box></geometry></collision>
+        <visual name="step_down_2"><pose>26.495 0 0.06 0 0 0</pose>
+          <geometry><box><size>0.33 3 0.12</size></box></geometry>
+          <material><ambient>0.5 0.3 0.3 1</ambient><diffuse>0.7 0.4 0.4 1</diffuse></material></visual>
+
+        <!-- curb: x 31 to 34, 12 cm high -->
+        <collision name="curb"><pose>32.5 0 0.06 0 0 0</pose>
+          <geometry><box><size>3 3 0.12</size></box></geometry></collision>
+        <visual name="curb"><pose>32.5 0 0.06 0 0 0</pose>
+          <geometry><box><size>3 3 0.12</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient><diffuse>0.6 0.6 0.65 1</diffuse></material></visual>
+
+        <!-- the drop: the ground ends at x = 38; the floor is 1 m lower from x = 38 to 46 -->
+        <collision name="pit_floor"><pose>42 0 -1.05 0 0 0</pose>
+          <geometry><box><size>8 3 0.1</size></box></geometry></collision>
+        <visual name="pit_floor"><pose>42 0 -1.05 0 0 0</pose>
+          <geometry><box><size>8 3 0.1</size></box></geometry>
+          <material><ambient>0.3 0.15 0.15 1</ambient><diffuse>0.5 0.2 0.2 1</diffuse></material></visual>
+        <visual name="edge_stripe"><pose>37.9 0 0.002 0 0 0</pose>
+          <geometry><box><size>0.2 3 0.004</size></box></geometry>
+          <material><ambient>0.9 0.1 0.1 1</ambient><diffuse>1 0.1 0.1 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- the test host, 1 m from the start of the route -->
+    <include>
+      <uri>model://mana_chair</uri>
+      <name>mana_chair</name>
+      <pose>1 0 0.38 0 0 0</pose>
+    </include>
+  </world>
+</sdf>
