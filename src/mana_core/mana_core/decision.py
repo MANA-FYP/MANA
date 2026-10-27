@@ -2,11 +2,14 @@
 
 The node feeds in the latest module reports and asks for a decision at a fixed rate. The tree
 checks, highest priority first: the user's stop, safety (a drop or an obstacle close ahead), the
-user's control in manual mode, then MANA's own choice of wheels or tracks and speed.
+user's control in manual mode, then MANA's own choice of wheels or tracks and speed. Losing the
+position or the alert link also slows MANA down: without them a call for help could not say where
+the user is, or could not be sent.
 
 Two rules from the design: a change of motion mode needs two independent sources to agree, and a
-stop needs none. Reports that are too old or not trusted enough are ignored. The thresholds are
-defaults, to be tuned in simulation.
+stop needs none. Stairs going down are the one change MANA does not make on its own: it stops at
+the top and goes down on tracks only after the user says yes. Reports that are too old or not
+trusted enough are ignored. The thresholds are defaults, to be tuned in simulation.
 """
 
 import math
@@ -29,6 +32,17 @@ class Source(IntEnum):
 # The physical sensor behind each source. The classifier and the detector look at the camera's
 # image, so for agreement they are the camera, not two more sensors.
 SENSOR_OF = {Source.CLASSIFIER: Source.CAMERA, Source.DETECTOR: Source.CAMERA}
+
+
+class PositionSource(IntEnum):
+    GPS = 0
+    LIDAR_MAP = 1
+    ODOMETRY = 2
+
+
+class Link(IntEnum):
+    WIFI = 0
+    BLUETOOTH = 1
 
 
 class Ground(IntEnum):
@@ -69,6 +83,7 @@ class Priority(IntEnum):
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
+ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 
 
 @dataclass(frozen=True)
@@ -100,6 +115,23 @@ class MotionReport:
 
 
 @dataclass(frozen=True)
+class PositionReport:
+    stamp: float
+    trust: float
+    source: PositionSource
+    error_m: float = math.nan  # estimated horizontal error
+
+
+@dataclass(frozen=True)
+class LinkReport:
+    stamp: float
+    trust: float
+    link: Link
+    connected: bool
+    missed_heartbeats: int = 0  # in a row
+
+
+@dataclass(frozen=True)
 class Limits:
     min_trust: float = 0.5  # reports below this trust are ignored
     max_age_s: float = 0.5  # reports older than this are ignored
@@ -109,7 +141,11 @@ class Limits:
     step_m: float = 2.0  # react to a step, ramp or drop this close
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
+    down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
+    missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
+    link_max_age_s: float = 2.5  # link and position reports come about once a second
+    position_max_age_s: float = 2.5
 
 
 @dataclass(frozen=True)
@@ -150,12 +186,17 @@ class DecisionCore:
         self.ground: dict[Source, GroundReport] = {}
         self.obstacles: dict[Source, ObstacleReport] = {}
         self.motion: MotionReport | None = None
+        self.positions: dict[PositionSource, PositionReport] = {}
+        self.links: dict[Link, LinkReport] = {}
         self.automatic = True
         self.stopped_by_user = False
         self.user_mode = Mode.WHEELS
         self.user_speed = 1.0
         self.mode = Mode.WHEELS
         self.level_since: float | None = None
+        self.asking_down = False  # stopped at the top of stairs down, waiting for a yes
+        self.down_ok = False  # the user said yes to the stairs down in sight
+        self.down_seen_at = -math.inf
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
         self.tree = self._build()
@@ -171,12 +212,25 @@ class DecisionCore:
     def on_motion(self, report: MotionReport) -> None:
         self.motion = report
 
+    def on_position(self, report: PositionReport) -> None:
+        self.positions[report.source] = report
+
+    def on_link(self, report: LinkReport) -> None:
+        self.links[report.link] = report
+
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
-        control to the user (manual) until they choose automatic again. LEFT, RIGHT, YES and NO
-        are not part of this decision."""
+        control to the user (manual) until they choose automatic again. YES answers the question
+        at the top of stairs down; at any other time it does nothing, so an early yes cannot
+        approve stairs not yet seen. A NO or a STOP takes the yes back at any trust, since taking
+        it back is always safe, so MANA asks again. Once the user says yes, the stairs are gone
+        down on tracks whatever the mode. LEFT and RIGHT are not part of this decision."""
         if command == Command.STOP:
             self.stopped_by_user = True
+            self.down_ok = False
+            return
+        if command == Command.NO:
+            self.down_ok = False
             return
         if trust < self.limits.min_trust:
             return
@@ -187,6 +241,8 @@ class DecisionCore:
         elif command in (Command.WHEELS, Command.TRACKS):
             self.automatic = False
             self.user_mode = Mode.WHEELS if command == Command.WHEELS else Mode.TRACKS
+        elif command == Command.YES and self.asking_down:
+            self.down_ok = True
         elif command in (Command.SPEED_UP, Command.SLOW_DOWN):
             self.automatic = False
             step = SPEED_STEP if command == Command.SPEED_UP else -SPEED_STEP
@@ -204,16 +260,22 @@ class DecisionCore:
         self.level_since = (
             (now if self.level_since is None else self.level_since) if level else None
         )
+        if self._stairs_down():
+            self.down_seen_at = now
+        elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
+            self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         self.tree.tick_once()
         self.mode = self.decision.mode
+        self.asking_down = self.decision.reason == ASK_DOWN
         return self.decision
 
     # ---- what the reports say
 
-    def _ok(self, report) -> bool:
+    def _ok(self, report, max_age_s: float | None = None) -> bool:
         return (
             report is not None
-            and self.now - report.stamp <= self.limits.max_age_s
+            and self.now - report.stamp
+            <= (self.limits.max_age_s if max_age_s is None else max_age_s)
             and report.trust >= self.limits.min_trust
         )
 
@@ -223,9 +285,12 @@ class DecisionCore:
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
-    def _drop_at_edge(self) -> bool:  # a stop needs a measured distance
+    def _drop_at_edge(self) -> bool:
+        """A drop, or stairs going down, at the edge, seen by any one sensor: a fall needs no
+        second opinion. A stop needs a measured distance."""
         return any(
-            r.ground == Ground.DROP and r.distance_m <= self.limits.edge_m for r in self._grounds()
+            r.ground in (Ground.DROP, Ground.STAIRS_DOWN) and r.distance_m <= self.limits.edge_m
+            for r in self._grounds()
         )
 
     def _confirmed_step(self) -> GroundReport | None:
@@ -242,6 +307,33 @@ class DecisionCore:
             return None
         known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)
+
+    def _stairs_down(self) -> bool:
+        """A step two sensors agree on, where any of them sees stairs going down. One sensor
+        saying stairs down and the other a curb still asks: it never goes down unasked."""
+        return self._confirmed_step() is not None and any(
+            r.ground == Ground.STAIRS_DOWN for r in self._grounds()
+        )
+
+    def _position_lost(self) -> bool:
+        """A position module reports, but neither GPS nor the lidar map has a recent, trusted
+        position. Odometry does not count: it drifts, so it cannot tell a helper where the user
+        is. A host without a position module is not slowed down for it."""
+        return bool(self.positions) and not any(
+            self._ok(r, self.limits.position_max_age_s)
+            for r in self.positions.values()
+            if r.source != PositionSource.ODOMETRY
+        )
+
+    def _link_lost(self) -> bool:
+        """A link module reports, but neither Wi-Fi nor Bluetooth could carry an alert now."""
+        lim = self.limits
+        return bool(self.links) and not any(
+            self._ok(r, lim.link_max_age_s)
+            and r.connected
+            and r.missed_heartbeats < lim.missed_heartbeats
+            for r in self.links.values()
+        )
 
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
@@ -274,15 +366,13 @@ class DecisionCore:
         self._set(self.mode, True, 0.0, reason, Priority.URGENT)
 
     def _tracks(self):
-        step = self._confirmed_step()
-        what = "Curb" if step.ground == Ground.CURB else "Stairs"
-        self._set(
-            Mode.TRACKS,
-            False,
-            self.limits.slow,
-            f"{what} ahead, changing to tracks",
-            Priority.WARNING,
-        )
+        if self._stairs_down():
+            reason = "Going down the stairs on tracks"
+        elif self._confirmed_step().ground == Ground.CURB:
+            reason = "Curb ahead, changing to tracks"
+        else:
+            reason = "Stairs ahead, changing to tracks"
+        self._set(Mode.TRACKS, False, self.limits.slow, reason, Priority.WARNING)
 
     def _build(self):
         lim = self.limits
@@ -304,6 +394,16 @@ class DecisionCore:
                     "obstacle",
                     lambda: self._nearest_obstacle() <= lim.obstacle_stop_m,
                     lambda: self._stop("Obstacle ahead, stopping"),
+                ),
+                branch(  # above manual: a driving command at the question does not drive on
+                    "stairs down",
+                    lambda: self._stairs_down() and not self.down_ok,
+                    lambda: self._stop(ASK_DOWN),
+                ),
+                branch(  # and after the yes, down on tracks whatever the mode
+                    "going down",
+                    lambda: self._stairs_down() and self.down_ok,
+                    self._tracks,
                 ),
                 branch(
                     "manual",
@@ -351,6 +451,28 @@ class DecisionCore:
                     lambda: self._slow_reason() is not None,
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                    ),
+                ),
+                branch(
+                    "no alert link",
+                    self._link_lost,
+                    lambda: self._set(
+                        Mode.WHEELS,
+                        False,
+                        lim.slow,
+                        "No alert link, slowing down",
+                        Priority.WARNING,
+                    ),
+                ),
+                branch(
+                    "no position",
+                    self._position_lost,
+                    lambda: self._set(
+                        Mode.WHEELS,
+                        False,
+                        lim.slow,
+                        "Position unknown, slowing down",
+                        Priority.WARNING,
                     ),
                 ),
                 _Act(
