@@ -126,7 +126,7 @@ def test_furniture_gets_a_distance_but_a_door_does_not():
     assert [o.label for o in to_obstacles([couch, door], 640, 480)] == ["couch"]
 
 
-def test_the_open_vocabulary_list_has_forty_names_and_no_repeats():
+def test_the_open_vocabulary_list_has_42_names_and_no_repeats():
     from demo.build_detector import NAMES
 
     assert len(NAMES) == 42 and len(set(NAMES)) == 42
