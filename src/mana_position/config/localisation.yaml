@@ -1,6 +1,11 @@
 # robot_localization for MANA (M2): two EKFs and navsat_transform, as in robot_localization's
 # documentation. See docs/decisions.md (D2). Each *_config is the 15 values robot_localization
 # fuses, in this order: x y z, roll pitch yaw, vx vy vz, vroll vpitch vyaw, ax ay az.
+#
+# Heading: each filter has exactly one absolute yaw source, the IMU's orientation. Gazebo's IMU
+# gives it in the world (ENU) frame; a real device needs a magnetometer-backed IMU for this.
+# Height: with two_d_mode off, z must be measured or its variance grows without bound, so the
+# wheels give vz = 0 in the device's own frame, which is still true on a ramp.
 
 ekf_local:  # wheels and IMU in the odom frame: smooth, drifts; the ODOMETRY source
   ros__parameters:
@@ -14,12 +19,12 @@ ekf_local:  # wheels and IMU in the odom frame: smooth, drifts; the ODOMETRY sou
     odom0: wheel/odometry
     odom0_config: [false, false, false,
                    false, false, false,
-                   true, true, false,
+                   true, true, true,
                    false, false, true,
                    false, false, false]
     imu0: imu/data
     imu0_config: [false, false, false,
-                  true, true, false,
+                  true, true, true,
                   false, false, false,
                   true, true, true,
                   true, false, false]
@@ -29,7 +34,7 @@ ekf_global:  # the same, plus GPS through navsat_transform, in the map frame
   ros__parameters:
     frequency: 30.0
     two_d_mode: false
-    publish_tf: true  # map -> odom
+    publish_tf: true  # map -> odom is this filter's; slam_toolbox's is turned off (D2)
     map_frame: map
     odom_frame: odom
     base_link_frame: base_link
@@ -37,7 +42,7 @@ ekf_global:  # the same, plus GPS through navsat_transform, in the map frame
     odom0: wheel/odometry
     odom0_config: [false, false, false,
                    false, false, false,
-                   true, true, false,
+                   true, true, true,
                    false, false, true,
                    false, false, false]
     odom1: odometry/gps
@@ -48,7 +53,7 @@ ekf_global:  # the same, plus GPS through navsat_transform, in the map frame
                    false, false, false]
     imu0: imu/data
     imu0_config: [false, false, false,
-                  true, true, false,
+                  true, true, true,
                   false, false, false,
                   true, true, true,
                   true, false, false]
@@ -61,5 +66,5 @@ navsat_transform:  # GPS fixes to positions in the map frame
     yaw_offset: 0.0
     zero_altitude: true
     publish_filtered_gps: true
-    use_odometry_yaw: true  # no magnetometer: heading comes from the EKF
+    use_odometry_yaw: false  # the heading comes from the IMU, as in both filters
     wait_for_datum: false
