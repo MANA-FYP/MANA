@@ -5,7 +5,8 @@ camera: flat, ramp, curb, stairs up, stairs down or a drop, with the distance to
 changes and the step height. The work is in mana_perception.depth; this node only moves messages.
 
 Topics (remap them to the camera's):
-  depth/image        sensor_msgs/Image, 32FC1 in metres or 16UC1 in millimetres (REP 118)
+  depth/image        sensor_msgs/Image, 32FC1 in metres or 16UC1 in millimetres (REP 118); a
+                     frame stamped 0 gets the time it arrived, or the core would see it as stale
   depth/camera_info  sensor_msgs/CameraInfo, for the focal lengths and the principal point
   ground             mana_msgs/GroundReport, source DEPTH_CAMERA
 
@@ -72,7 +73,10 @@ class DepthNode(Node):
             distance_m=r.distance_m,
             step_height_m=r.step_height_m,
         )
-        msg.header = m.header
+        msg.header.frame_id = m.header.frame_id
+        stamped = m.header.stamp.sec or m.header.stamp.nanosec
+        # a frame stamped 0 (1970) would make the core drop every report as stale
+        msg.header.stamp = m.header.stamp if stamped else now.to_msg()
         self.ground.publish(msg)
 
 

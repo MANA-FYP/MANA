@@ -23,12 +23,15 @@ def stairs_depth():
 
 @pytest.fixture
 def ros():
-    rclpy.init()
+    # its own namespace: colcon runs the packages' tests side by side, and the scenario node test
+    # publishes on ground too
+    rclpy.init(args=["--ros-args", "-r", "__ns:=/depth_node_test"])
     yield
     rclpy.shutdown()
 
 
-def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros):
+@pytest.mark.parametrize("stamped", [True, False], ids=["stamped", "stamp-0"])
+def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros, stamped):
     node, probe = DepthNode(), rclpy.create_node("probe")
     reports = []
     probe.create_subscription(GroundReport, "ground", reports.append, 10)
@@ -45,6 +48,8 @@ def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros):
     image.step = syn.COLS * 2
     image.data = frame.astype("<u2").tobytes()
     image.header.frame_id = "depth_camera"
+    if stamped:
+        image.header.stamp.sec, image.header.stamp.nanosec = 1_700_000_000, 5
 
     end = time.monotonic() + 5.0
     while not reports and time.monotonic() < end:
@@ -61,3 +66,7 @@ def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros):
     assert abs(r.distance_m - 1.5) < 0.1
     assert r.trust == pytest.approx(0.9)
     assert r.header.frame_id == "depth_camera"
+    if stamped:  # the frame's own stamp is kept
+        assert (r.header.stamp.sec, r.header.stamp.nanosec) == (1_700_000_000, 5)
+    else:  # a camera that leaves the stamp at 0 still gives reports the core will not drop
+        assert r.header.stamp.sec > 0
