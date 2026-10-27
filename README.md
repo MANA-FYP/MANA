@@ -259,7 +259,7 @@ The distances and times are defaults, set as ROS parameters, to be tuned in simu
 ros2 run mana_position position_node
 ```
 
-The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisation) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
+The node listens on `gps/fix` (NavSatFix), `lidar/odometry` or `lidar/pose` (the lidar localisation; slam_toolbox publishes the second) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
 
 - GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, counted from the last good fix even when the GPS simply falls silent, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
 - GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
@@ -274,6 +274,20 @@ ros2 launch mana_position localisation.launch.py wheel_odometry:=/chair/odom imu
 ```
 
 The lidar map source is slam_toolbox's localisation mode on a saved map of the building. Its pose goes to `lidar/pose`. Why slam_toolbox and not FAST-LIO2 or KISS-ICP is in [`docs/decisions.md`](docs/decisions.md).
+
+### Alert link (`mana_connectivity`)
+
+```bash
+ros2 run mana_connectivity link_node
+```
+
+Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
+
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (the core then slows down);
+- while Bluetooth carries the alerts, Wi-Fi must answer steadily for 5 s before they return to it, so a fading signal gives one switch away and one back; at start, or with Bluetooth down too, Wi-Fi takes them as soon as it answers;
+- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost. Ids carry a token for this boot, so a late answer from an earlier run cannot clear a new alert. Something at the other end, such as the caregiver view (#50), must answer; past 100 unanswered alerts the oldest is dropped and logged.
+
+`src/mana_connectivity/test` tests the rule and the outbox, and fades Wi-Fi through ROS while an alert is waiting.
 
 ### Scenarios, pass marks and the live demo
 
@@ -299,6 +313,14 @@ Check every scenario in fast time (CI runs the same as `tests/test_scenarios.py`
 ```bash
 ros2 run mana_core evaluate              # or one or more by name: ros2 run mana_core evaluate stairs dark
 ```
+
+Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The baseline uses the same thresholds and messages and the same stops and slow-downs, but every report counts however old or doubtful it is, one source is enough to change to tracks, a tilt steeper than any accessible ramp means tracks, and it returns to wheels as soon as the tilt is small:
+
+```bash
+ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
+```
+
+In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
 
 Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
 
