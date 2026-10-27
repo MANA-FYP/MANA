@@ -525,3 +525,10 @@ def test_an_unsure_no_still_takes_the_yes_back():
     c.on_command(Command.YES, 0.9)
     c.on_command(Command.NO, 0.2)
     assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+
+
+def test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop():
+    # StairNet has no stairs down, so often only the 3D camera sees them: a fall needs no second
+    # opinion, so they stop at the edge instead of rolling on slowly
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
