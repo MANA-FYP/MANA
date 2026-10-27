@@ -3,11 +3,11 @@
 // for a chair that is standing still.
 
 const $ = (id) => document.getElementById(id);
-const STATE_TEXT = { moving: "Moving", slow: "Slowing down", stopped: "Stopped", offline: "MANA offline" };
+const STATE_TEXT = { moving: "Moving", slow: "Slowing down", driving: "User driving", stopped: "Stopped", offline: "MANA offline" };
 const LINK_CLASS = { wifi: "", bluetooth: "warn", none: "bad", unknown: "warn" };
 const QUIET_MS = 3000;
 let lastUpdate = 0;
-let alertsKey = "";
+let eventsKey = "";
 
 function setText(el, text) {
   if (el.textContent !== text) el.textContent = text;
@@ -40,12 +40,12 @@ function render(v) {
   setText($("link"), v.link.text);
   $("link").className = LINK_CLASS[v.link.state] || "";
 
-  const key = JSON.stringify(v.alerts);
-  if (key !== alertsKey) {
-    alertsKey = key;
-    $("alerts").innerHTML = v.alerts.length
-      ? v.alerts.map((a) => '<li><span class="t">' + clock(a.t) + "</span><span>" + escapeHTML(a.text) + "</span></li>").join("")
-      : '<li class="empty">No alerts yet.</li>';
+  const key = JSON.stringify(v.events);
+  if (key !== eventsKey) {
+    eventsKey = key;
+    $("events").innerHTML = v.events.length
+      ? v.events.map((a) => '<li><span class="t">' + clock(a.t) + "</span><span>" + escapeHTML(a.text) + "</span></li>").join("")
+      : '<li class="empty">Nothing yet.</li>';
   }
 }
 

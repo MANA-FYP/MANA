@@ -26,7 +26,7 @@ def snapshot(stop=False, speed=1.0, mode="WHEELS", decisions=(), position="gps",
     }
 
 
-def alert(n, text, kind="decision"):
+def event(n, text, kind="decision"):
     return {"n": n, "t": float(n), "kind": kind, "text": text}
 
 
@@ -36,6 +36,13 @@ def test_the_state_says_moving_slowing_down_or_stopped():
     assert caregiver.view(snapshot(stop=True, speed=0.0), True, 0.1)["state"] == "stopped"
 
 
+def test_in_manual_mode_the_user_is_driving_not_mana_slowing_down():
+    v = caregiver.view(snapshot(speed=0.75) | {"manual": True}, True, 0.1)
+    assert v["state"] == "driving" and v["manual"]
+    stopped = snapshot(stop=True, speed=0.0) | {"manual": True}
+    assert caregiver.view(stopped, True, 0.1)["state"] == "stopped"  # a stop still shows
+
+
 def test_mana_is_offline_when_the_phone_is_gone_or_has_gone_quiet():
     assert caregiver.view(snapshot(), False, 0.1)["state"] == "offline"
     assert caregiver.view(snapshot(), True, None)["state"] == "offline"
@@ -43,13 +50,13 @@ def test_mana_is_offline_when_the_phone_is_gone_or_has_gone_quiet():
     assert v["state"] == "offline" and not v["online"]
 
 
-def test_the_newest_alerts_come_first_and_camera_sightings_are_left_out():
-    log = [alert(i, f"alert {i}") for i in range(1, 12)] + [
-        alert(12, "Camera sees: person", kind="detection")
+def test_the_newest_events_come_first_and_camera_sightings_are_left_out():
+    log = [event(i, f"event {i}") for i in range(1, 12)] + [
+        event(12, "Camera sees: person", kind="detection")
     ]
-    alerts = caregiver.view(snapshot(decisions=log), True, 0.1)["alerts"]
-    assert [a["text"] for a in alerts] == [f"alert {i}" for i in range(11, 3, -1)]
-    assert len(alerts) == caregiver.ALERTS
+    events = caregiver.view(snapshot(decisions=log), True, 0.1)["events"]
+    assert [a["text"] for a in events] == [f"event {i}" for i in range(11, 3, -1)]
+    assert len(events) == caregiver.EVENTS
 
 
 def test_mode_position_and_link_are_in_words():
@@ -61,12 +68,42 @@ def test_mode_position_and_link_are_in_words():
 
 
 def test_sentences_to_the_user_are_reworded_for_the_caregiver():
-    snap = snapshot(decisions=[alert(1, "Manual mode. You are in control of the device.")])
+    snap = snapshot(decisions=[event(1, "Manual mode. You are in control of the device.")])
     snap["decision"]["sentence"] = "MANA deactivated. You are fully in control."
     v = caregiver.view(snap, True, 0.1)
     assert v["status"] == "Stopped by the user. They are in control."
-    assert v["alerts"][0]["text"] == "Manual mode. The user is driving."
+    assert v["events"][0]["text"] == "Manual mode. The user is driving."
     assert caregiver.for_caregiver("Stopped by you") == "Stopped by the user"
+
+
+def test_the_user_stop_sentence_is_reworded_whatever_the_phone_offers():
+    for said in (
+        "MANA deactivated. You are fully in control.",
+        "MANA deactivated. Press GO or say go to restart.",  # the sentence after #57
+    ):
+        assert caregiver.for_caregiver(said) == "Stopped by the user. They are in control."
+
+
+def test_a_real_stop_and_manual_mode_never_reach_the_caregiver_as_you_or_press():
+    """Runs the real middleware, so a reworded sentence there cannot slip past the caregiver."""
+    pytest.importorskip("py_trees")
+    from mana_core.decision import Command
+
+    from demo.middleware import Middleware
+
+    clock = iter(i * 0.1 for i in range(10_000))
+    mw = Middleware(clock=lambda: next(clock))
+    mw.on_motion(0.0, 0.0, 9.81)
+    texts = []
+    for command in (Command.STOP, Command.GO, Command.MANUAL, Command.SLOW_DOWN, Command.STOP):
+        mw.on_command(command, 1.0, source="phone")
+        for _ in range(5):
+            v = caregiver.view(mw.tick(), True, 0.1)
+            texts += [v["status"]] + [e["text"] for e in v["events"]]
+    assert "Stopped by the user. They are in control." in texts
+    for text in texts:
+        words = text.lower().replace(".", " ").replace(",", " ").split()
+        assert "you" not in words and "your" not in words and "press" not in words, text
 
 
 def test_the_view_has_no_camera_image_or_raw_sensor_stream():
@@ -128,7 +165,7 @@ def test_the_view_updates_live_from_the_dashboard_stream():
         await phone.send_json({"type": "button", "name": "stop"})
         v = await receive_where(care, "caregiver", lambda v: v["state"] == "stopped")
         assert v["status"] == "Stopped by the user. They are in control."
-        assert v["alerts"][0]["text"] == "Stopped by the user. They are in control."
+        assert v["events"][0]["text"] == "Stopped by the user. They are in control."
 
     run(with_client(go))
 
@@ -161,6 +198,6 @@ def test_the_status_endpoint_gives_the_same_view_as_json():
         assert resp.status == 200
         v = await resp.json()
         assert v["type"] == "caregiver" and v["state"] == "offline"
-        assert {"mode", "position", "link", "alerts", "status"} <= v.keys()
+        assert {"mode", "position", "link", "events", "status"} <= v.keys()
 
     run(with_client(go))
