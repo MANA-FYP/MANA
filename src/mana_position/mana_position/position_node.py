@@ -96,8 +96,11 @@ class PositionNode(Node):
         now = stamp.nanoseconds / 1e9
         fix = self.fix if self.fresh(self.fix, now) else None
         error = gps_error_m(fix, self.unknown_error_m) if fix else None
+        # only a silent GPS is timed from its last good fix; a fresh bad reading starts the timer
+        # itself, so one blip on a 1 Hz receiver does not switch
+        lost_since = self.last_good_at if fix is None else None
         before = self.selector.source
-        source = self.selector.update(error, self.fresh(self.lidar, now), now, self.last_good_at)
+        source = self.selector.update(error, self.fresh(self.lidar, now), now, lost_since)
         if source != before:
             self.get_logger().info(f"position source: {NAMES[before]} -> {NAMES[source]}")
 

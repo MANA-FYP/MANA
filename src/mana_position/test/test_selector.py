@@ -105,3 +105,17 @@ def test_lost_since_does_not_hurry_the_way_back_to_gps():
     s = PositionSelector()
     run(s, [(3, None)])
     assert s.update(3.0, True, 3.1, lost_since=0.0) == Source.LIDAR_MAP
+
+
+def test_one_bad_reading_on_a_1_hz_gps_does_not_switch():
+    # called as the node calls it: lost_since only while the last fix is stale (older than 1.5 s)
+    s, last_good, last_fix, error, seen = PositionSelector(), None, None, None, []
+    for i in range(200):
+        t = round(i * DT, 2)
+        if abs(t - round(t)) < 1e-9:  # one fix a second; the one at 10 s has no fix
+            last_fix, error = t, (None if round(t) == 10 else 3.0)
+            last_good = t if error is not None else last_good
+        stale = last_fix is None or t - last_fix > 1.5
+        reading = None if stale else error
+        seen.append((t, s.update(reading, True, t, lost_since=last_good if stale else None)))
+    assert not switches(seen)
