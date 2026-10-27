@@ -285,9 +285,12 @@ class DecisionCore:
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
-    def _drop_at_edge(self) -> bool:  # a stop needs a measured distance
+    def _drop_at_edge(self) -> bool:
+        """A drop, or stairs going down, at the edge, seen by any one sensor: a fall needs no
+        second opinion. A stop needs a measured distance."""
         return any(
-            r.ground == Ground.DROP and r.distance_m <= self.limits.edge_m for r in self._grounds()
+            r.ground in (Ground.DROP, Ground.STAIRS_DOWN) and r.distance_m <= self.limits.edge_m
+            for r in self._grounds()
         )
 
     def _confirmed_step(self) -> GroundReport | None:
