@@ -25,18 +25,28 @@ profile along the path. Read from near to far:
 - ground the camera should see but does not, with nothing after it, is a **drop** of unknown
   height (a ledge with the floor out of sight);
 - a rise taller than 0.25 m is a wall or an object, not a step: the obstacle sensors handle it;
-- a steady slope above 5 % seen over at least 30 cm is a **ramp**.
+- a steady slope above 5 % seen over at least 30 cm is a **ramp**;
+- the camera cannot see the ground right in front of the chair (its **blind zone**, where the
+  bottom row of the image meets the ground: about 0.5 m with a D435-like camera, 0.37 m with the
+  test camera). If the nearest ground it does see is more than 6 cm lower or higher than the
+  ground the chair stands on, the edge is somewhere in that zone, and it is reported **at 0 m**
+  with its measured height, the worst case. If it sees nothing near but valid depth far beyond,
+  the floor is out of range: a **drop** at 0 m.
+
+The 3D camera is where stairs down and drops come from: the camera classifier is trained on
+StairNet, which has only stairs going up. The core stops at a drop or stairs down within 0.5 m
+even when only this sensor sees it (#60).
 
 | Topic | Type | Meaning |
 |---|---|---|
-| `depth/image` (in) | `sensor_msgs/Image` | depth, 32FC1 in metres or 16UC1 in millimetres (REP 118) |
+| `depth/image` (in) | `sensor_msgs/Image` | depth, 32FC1 in metres or 16UC1 in millimetres (REP 118); a frame stamped 0 gets the time it arrived |
 | `depth/camera_info` (in) | `sensor_msgs/CameraInfo` | focal lengths and principal point |
 | `ground` (out) | `mana_msgs/GroundReport` | one report per frame, source `DEPTH_CAMERA` |
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `camera_height_m` | `1.0` | optical centre above the ground |
-| `camera_pitch_rad` | `0.6` | tilt below level (34 degrees); it must be right to about 1 degree |
+| `camera_height_m` | `1.0` | optical centre above the ground; it must be right to about 5 cm |
+| `camera_pitch_rad` | `0.6` | tilt below level (34 degrees); it must be right to about 2 degrees |
 | `max_range_m` | `3.0` | farthest ground read |
 | `rate_hz` | `10.0` | most reports per second |
 | `trust` | `0.9` | trust of a reading; `UNKNOWN` (no ground in view) is sent with trust 0 |
@@ -44,17 +54,22 @@ profile along the path. Read from near to far:
 **Tested on rendered frames.** Until the Gazebo world exists (#13, #14), `mana_perception/synthetic.py`
 renders depth frames of known ground by casting a ray for every pixel, and both the tests and
 `python3 tools/evaluate_depth_ground.py` use it, with 1 % depth noise and 10 % of pixels missing.
-Over 852 frames (distances 0.8 to 2.4 m, tilts 0.5 to 0.7 rad, step heights 0.10 to 0.35 m):
+Over 1,104 frames (distances 0.1 to 2.4 m, tilts 0.5 to 0.7 rad, step heights 0.10 to 0.35 m).
+The right distance is within 15 cm, or, for an edge in the blind zone, no farther than the edge:
 
-| Ground | Right type | Found as a step or drop at the right distance (within 15 cm) |
+| Ground | Right type | Found as a step or drop at the right distance |
 |---|---|---|
 | Flat | 60 / 60 | no false steps |
-| Ramp up or down, 8 % | 120 / 120 | |
-| Curb, 0.10 to 0.19 m | 132 / 153 | 153 / 153 (the rest read as stairs up, also a step for the core) |
-| Stairs up | 153 / 153 | 153 / 153 |
-| Stairs down | 68 / 153 | 153 / 153 (the rest read as a drop) |
-| Drop, 0.30 to 0.35 m | 153 / 153 | 153 / 153 |
-| Slope of 30 % (17 degrees) | 46 / 60 | the rest read as a step far along the slope |
+| Ramp up or down, 8 % | 120 / 120 | no false steps |
+| Curb, 0.10 to 0.19 m | 193 / 216 | 211 / 216 (most of the rest read as stairs up, also a step for the core) |
+| Stairs up | 210 / 216 | 210 / 216 |
+| Stairs down | 129 / 216 | 214 / 216 (most of the rest read as a drop) |
+| Drop, 0.30 to 0.35 m | 215 / 216 | 215 / 216 |
+| Slope of 30 % (17 degrees) | 52 / 60 | the rest read as a step far along the slope |
+
+**No step or drop is ever missed, or put more than 15 cm past where it really is.** All 108 edges
+in the blind zone are reported no farther than they are. The few misses above are edges a few
+centimetres past the blind zone, reported at 0 m: closer than they are, which is safe.
 
 Known limits:
 
@@ -66,8 +81,17 @@ Known limits:
   (building codes allow up to 8.3 %).
 - **Glass, black or shiny floors** give no depth reading; a large missing stretch is read as a
   drop, which stops the chair rather than letting it drive on.
+- **A frame with no depth at all** reads `UNKNOWN`, sent with trust 0. That is what a covered lens
+  gives, and also a ledge whose floor is beyond the sensor's own range (about 10 m for a D435), so
+  the two cannot be told apart from one frame. The core then has no 3D camera report and acts on
+  the other sensor alone.
 - The camera tilt must be set right: an error of 2 degrees looks like a 3.5 % slope, under the
-  5 % ramp limit.
+  5 % ramp limit. The mounting height must be right to about 5 cm, or level ground just past the
+  blind zone looks like a step there.
+- The tilt is a fixed parameter. On a ramp, or on tracks on the stairs, the chair's own pitch
+  changes it; adding the IMU pitch from `motion` to it is a follow-up.
+- **Stairs up that start in the blind zone** are told from a wall only by risers climbing behind
+  the first one in view; a single tall rise right in front is left to the obstacle sensors.
 
 ## The stub
 
