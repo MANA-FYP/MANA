@@ -1,4 +1,5 @@
-"""End to end: when the GPS fix is lost, the node reports the lidar map within 2 s."""
+"""End to end: when the GPS fix is lost, or the GPS falls silent, the node reports the lidar map
+within 2 s."""
 
 import time
 
@@ -14,12 +15,16 @@ from mana_msgs.msg import PositionReport
 
 @pytest.fixture
 def ros():
-    rclpy.init()
+    # a namespace of its own: colcon tests the packages in parallel
+    rclpy.init(args=["--ros-args", "-r", "__ns:=/position_node_test"])
     yield
     rclpy.shutdown()
 
 
-def test_lost_gps_switches_to_the_lidar_map_within_two_seconds(ros):
+def run(gps_after_loss):
+    """Good fixes for 1.5 s, then gps_after_loss: "no fix" sends NO_FIX, "silent" sends nothing.
+    The lidar localisation reports all along. Returns the reports before and after the loss,
+    and how long after the last good fix the lidar map was reported."""
     node, probe = PositionNode(), rclpy.create_node("probe")
     reports = []
     probe.create_subscription(PositionReport, "position", reports.append, 10)
@@ -29,34 +34,43 @@ def test_lost_gps_switches_to_the_lidar_map_within_two_seconds(ros):
     executor.add_node(node)
     executor.add_node(probe)
 
-    def spin(seconds, fix_status):
+    def spin(seconds, fix_status=None):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             stamp = node.get_clock().now().to_msg()
-            fix = NavSatFix(latitude=33.6844, longitude=73.0479)
-            fix.status.status = fix_status
-            fix.position_covariance = [9.0, 0, 0, 0, 9.0, 0, 0, 0, 9.0]
-            fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+            if fix_status is not None:
+                fix = NavSatFix(latitude=33.6844, longitude=73.0479)
+                fix.status.status = fix_status
+                fix.position_covariance = [9.0, 0, 0, 0, 9.0, 0, 0, 0, 9.0]
+                fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+                fix.header.stamp = stamp
+                gps.publish(fix)
             odom = Odometry()
             odom.pose.pose.position.x = 4.0
-            for msg in (fix, odom):
-                msg.header.stamp = stamp
-            gps.publish(fix)
+            odom.header.stamp = stamp
             lidar.publish(odom)
             executor.spin_once(timeout_sec=0.05)
 
     spin(1.5, NavSatStatus.STATUS_FIX)
-    lost_at = len(reports)
-    started = time.monotonic()
-    while time.monotonic() - started < 4.0 and not any(
+    lost_at, last_good = len(reports), time.monotonic()
+    while time.monotonic() - last_good < 4.0 and not any(
         r.source == PositionReport.LIDAR_MAP for r in reports[lost_at:]
     ):
-        spin(0.1, NavSatStatus.STATUS_NO_FIX)
-    took = time.monotonic() - started
+        spin(0.1, NavSatStatus.STATUS_NO_FIX if gps_after_loss == "no fix" else None)
+    took = time.monotonic() - last_good
     for n in (node, probe):
         n.destroy_node()
+    return reports[:lost_at], reports[lost_at:], took
 
-    assert reports[lost_at - 1].source == PositionReport.GPS
-    assert reports[lost_at - 1].error_m == pytest.approx(3.0)
-    switched = next(r for r in reports[lost_at:] if r.source == PositionReport.LIDAR_MAP)
-    assert switched.position.x == 4.0 and took <= 2.0
+
+@pytest.mark.parametrize("gps_after_loss", ["no fix", "silent"])
+def test_lost_gps_switches_to_the_lidar_map_within_two_seconds(ros, gps_after_loss):
+    before, after, took = run(gps_after_loss)
+
+    assert before, "no report arrived while the fix was good"
+    assert before[-1].source == PositionReport.GPS and before[-1].error_m == pytest.approx(3.0)
+    assert before[-1].header.frame_id == "gps_origin"
+    switched = next(i for i, r in enumerate(after) if r.source == PositionReport.LIDAR_MAP)
+    assert all(r.source == PositionReport.GPS for r in after[:switched])  # never odometry
+    assert after[switched].position.x == 4.0 and after[switched].header.frame_id == "map"
+    assert took <= 2.0

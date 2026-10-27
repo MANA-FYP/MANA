@@ -26,12 +26,17 @@ class PositionSelector:
         self.source = Source.GPS
         self._since: float | None = None  # when the condition to leave or come back began
 
-    def update(self, gps_error_m: float | None, lidar_ok: bool, now: float) -> Source:
-        """gps_error_m is None (or NaN) when there is no fix."""
+    def update(
+        self, gps_error_m: float | None, lidar_ok: bool, now: float, lost_since: float | None = None
+    ) -> Source:
+        """gps_error_m is None (or NaN) when there is no fix. lost_since is when the last good fix
+        came: a GPS that falls silent is only noticed once its last fix is too old, so the time
+        to leave GPS counts from that fix, not from when the silence was noticed."""
         error = math.inf if gps_error_m is None or math.isnan(gps_error_m) else gps_error_m
         on_gps = self.source == Source.GPS
         changing = error > self.out_m if on_gps else error < self.back_m
-        self._since = (now if self._since is None else self._since) if changing else None
+        start = min(now, lost_since) if on_gps and lost_since is not None else now
+        self._since = (start if self._since is None else self._since) if changing else None
         if self._since is not None and now - self._since >= (self.out_s if on_gps else self.back_s):
             self._since, on_gps = None, not on_gps
         self.source = Source.GPS if on_gps else Source.LIDAR_MAP if lidar_ok else Source.ODOMETRY

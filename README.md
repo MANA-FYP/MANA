@@ -249,11 +249,11 @@ ros2 run mana_position position_node
 
 The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisation) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
 
-- GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
+- GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, counted from the last good fix even when the GPS simply falls silent, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
 - GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
 - away from GPS the lidar map is used while the lidar localisation reports, and odometry, which drifts, only while it does not.
 
-The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
+GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
 
 ### Scenarios, pass marks and the live demo
 

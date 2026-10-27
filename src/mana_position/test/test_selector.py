@@ -86,3 +86,22 @@ def constants(field):
 @pytest.mark.parametrize("field", ["source"])
 def test_codes_match_the_message_type(field):
     assert constants(field) == {e.name: e.value for e in Source}
+
+
+def test_a_gps_that_falls_silent_switches_within_two_seconds_of_its_last_good_fix():
+    # the node only notices silence once the last fix is max_age_s old (1.5 s), so it passes
+    # the time of that fix and the selector counts from there
+    s, last_fix, max_age = PositionSelector(), 5.0, 1.5
+    t, switched = last_fix, None
+    while switched is None and t < 10.0:
+        error = 3.0 if t - last_fix <= max_age else None
+        if s.update(error, True, t, lost_since=last_fix) == Source.LIDAR_MAP:
+            switched = t
+        t = round(t + DT, 2)
+    assert switched is not None and switched - last_fix <= 2.0
+
+
+def test_lost_since_does_not_hurry_the_way_back_to_gps():
+    s = PositionSelector()
+    run(s, [(3, None)])
+    assert s.update(3.0, True, 3.1, lost_since=0.0) == Source.LIDAR_MAP

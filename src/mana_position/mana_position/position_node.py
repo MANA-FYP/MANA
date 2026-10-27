@@ -6,7 +6,9 @@ published while the chosen source has no recent data, so the core then sees the 
 
 The GPS position is in metres east and north of the first fix, a flat-earth approximation that is
 good over a building's grounds; aligning it with the lidar map is the job of robot_localization's
-navsat_transform (#43). Trust is fixed per source: odometry drifts, so it is trusted less.
+navsat_transform (#43), so GPS reports carry their own frame (gps_frame) and the position jumps
+at a switch until then. Trust is fixed per source: odometry drifts, so it is trusted less. An
+odometry or lidar report with no covariance (FAST-LIO sends zeros) gets unknown_error_m.
 """
 
 import math
@@ -35,9 +37,9 @@ def gps_error_m(fix: NavSatFix, unknown_m: float) -> float | None:
     return math.sqrt(max(fix.position_covariance[0], fix.position_covariance[4]))
 
 
-def odometry_error_m(odom: Odometry) -> float:
+def odometry_error_m(odom: Odometry, unknown_m: float) -> float:
     c = odom.pose.covariance
-    return math.sqrt(max(c[0], c[7])) if c[0] or c[7] else math.nan
+    return math.sqrt(max(c[0], c[7])) if c[0] or c[7] else unknown_m
 
 
 class PositionNode(Node):
@@ -53,13 +55,12 @@ class PositionNode(Node):
                 ("max_age_s", 1.5),  # GPS fixes come at 1 to 10 Hz
                 ("unknown_error_m", 5.0),  # for a fix that gives no covariance
                 ("map_frame", "map"),
+                ("gps_frame", "gps_origin"),  # metres east and north of the first fix
             )
         }
-        self.max_age_s, self.unknown_error_m, self.map_frame = (
-            p["max_age_s"],
-            p["unknown_error_m"],
-            p["map_frame"],
-        )
+        self.max_age_s, self.unknown_error_m = p["max_age_s"], p["unknown_error_m"]
+        self.map_frame, self.gps_frame, self.out_m = p["map_frame"], p["gps_frame"], p["out_m"]
+        self.last_good_at: float | None = None  # stamp of the last fix good enough to stay on
         self.selector = PositionSelector(p["out_m"], p["out_s"], p["back_m"], p["back_s"])
         self.fix: NavSatFix | None = None
         self.origin: tuple[float, float] | None = None
@@ -73,8 +74,11 @@ class PositionNode(Node):
 
     def on_fix(self, m: NavSatFix) -> None:
         self.fix = m
-        if self.origin is None and gps_error_m(m, self.unknown_error_m) is not None:
+        error = gps_error_m(m, self.unknown_error_m)
+        if error is not None and self.origin is None:
             self.origin = (m.latitude, m.longitude)
+        if error is not None and error <= self.out_m:
+            self.last_good_at = Time.from_msg(m.header.stamp).nanoseconds / 1e9
 
     def on_lidar(self, m: Odometry) -> None:
         self.lidar = m
@@ -93,7 +97,7 @@ class PositionNode(Node):
         fix = self.fix if self.fresh(self.fix, now) else None
         error = gps_error_m(fix, self.unknown_error_m) if fix else None
         before = self.selector.source
-        source = self.selector.update(error, self.fresh(self.lidar, now), now)
+        source = self.selector.update(error, self.fresh(self.lidar, now), now, self.last_good_at)
         if source != before:
             self.get_logger().info(f"position source: {NAMES[before]} -> {NAMES[source]}")
 
@@ -110,9 +114,9 @@ class PositionNode(Node):
             if source == Source.GPS or not self.fresh(odom, now):
                 return  # nothing recent from the chosen source
             out.position = odom.pose.pose.position
-            out.error_m = odometry_error_m(odom)
+            out.error_m = odometry_error_m(odom, self.unknown_error_m)
         out.header.stamp = stamp.to_msg()
-        out.header.frame_id = self.map_frame
+        out.header.frame_id = self.gps_frame if source == Source.GPS else self.map_frame
         self.report.publish(out)
 
 
