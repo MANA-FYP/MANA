@@ -241,6 +241,20 @@ The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decide
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
+### Alert link (`mana_connectivity`)
+
+```bash
+ros2 run mana_connectivity link_node
+```
+
+Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
+
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row they go over Bluetooth, if it is up, and with neither there is no link (the core then slows down);
+- Wi-Fi must answer steadily for 5 s before alerts return to it, so a fading signal gives one switch away and one back;
+- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost.
+
+`src/mana_connectivity/test` tests the rule and the outbox, and fades Wi-Fi through ROS while an alert is waiting.
+
 ### Scenarios, pass marks and the live demo
 
 Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:
