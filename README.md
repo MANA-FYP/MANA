@@ -128,6 +128,15 @@ bash tools/check_env.sh           # one PASS or FAIL line per item
 
 The ML packages are pinned in `requirements-ml.txt`. The setup installs the CPU build of PyTorch; train on a GPU machine with the matching CUDA build. The `Setup check` workflow runs both scripts on a fresh Ubuntu 24.04 runner whenever they change, so the setup is tested on a clean machine.
 
+### Get the datasets
+
+```bash
+tools/fetch_datasets.sh           # StairNet, SANPO, COCO val2017, Speech Commands v2, UrbanSound8K
+tools/fetch_datasets.sh --list    # sizes, and which one needs a login
+```
+
+The data goes to `datasets/`, which git ignores. Sources, licences and splits are in [`docs/datasets.md`](docs/datasets.md), and the licences are also listed in [`NOTICE`](NOTICE).
+
 ## 7. Team
 
 | Member | Roll no. | Main responsibility |
@@ -173,14 +182,15 @@ docker run --rm -it ghcr.io/mana-fyp/mana:v0.1.0-mid ros2 run mana_core core_nod
 │   └── mana_msgs/       message types between modules, decision core and host
 ├── demo/                phone demo: laptop server, phone page, dashboard
 ├── tests/               Python tests
-├── tools/               set up and check a development machine
+├── tools/               set up a development machine, fetch the datasets
 ├── requirements-ml.txt  pinned packages for the model work
 ├── ruff.toml            lint settings
 ├── pytest.ini           test settings
-├── docs/diagrams/       system diagrams
+├── docs/                datasets (datasets.md) and system diagrams
 ├── Dockerfile           release image: the ROS 2 workspace, built
 ├── README.md
 ├── CONTRIBUTING.md
+├── NOTICE               dataset licences
 └── LICENSE
 ```
 
@@ -228,18 +238,34 @@ Every report to the core starts with the same two fields: `header` (its stamp is
 ros2 run mana_core core_node
 ```
 
-The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
-3. Manual mode: follow the user's mode and speed
-4. Stairs or a curb seen by both cameras, or wheel slip: tracks, slow
-5. On tracks and not yet level for 2 s: stay on tracks
-6. No trusted ground report: slow down
-7. An obstacle, drop, ramp or possible step ahead: slow down
-8. Otherwise: wheels, full speed
+3. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
+4. Manual mode: follow the user's mode and speed
+5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
+6. On tracks and not yet level for 2 s: stay on tracks
+7. No trusted ground report: slow down
+8. An obstacle, drop, ramp or possible step ahead: slow down
+9. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
+10. Otherwise: wheels, full speed
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
+
+### Position source (`mana_position`)
+
+```bash
+ros2 run mana_position position_node
+```
+
+The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisation) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
+
+- GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, counted from the last good fix even when the GPS simply falls silent, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
+- GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
+- away from GPS the lidar map is used while the lidar localisation reports, and odometry, which drifts, only while it does not.
+
+GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
 
 ### Alert link (`mana_connectivity`)
 

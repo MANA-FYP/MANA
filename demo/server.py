@@ -4,7 +4,8 @@
     python -m demo.usb                         # the phone then opens http://localhost:8000/phone
 
 The phone page opens /phone and streams its real sensors over a WebSocket. The dashboard opens
-/dashboard and watches. Everything between them is the middleware and the decision layer.
+/dashboard and watches. Everything between them is the middleware and the decision layer. A
+caregiver opens /caregiver on their own phone: a read-only status view (demo/caregiver.py).
 
 Phone to laptop, text messages (JSON):
   hello   {"type": "hello", "caps": {"camera": {"available": true}, ...}, "audio_rate": 48000}
@@ -41,7 +42,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, Source  # noqa: E402
 
-from demo import speech, vision  # noqa: E402
+from demo import caregiver, speech, vision  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
 warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)  # plain string keys are fine here
@@ -78,15 +79,19 @@ def build_app(mw=None, detector=None, classifier=None, recognizer=None) -> web.A
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
-    app["phones"], app["dashboards"] = set(), set()
-    app["live"] = {"audio_rate": 48000, "busy": False}
+    app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
+    app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
+    app["snapshot"] = None  # the last tick's state, for /api/status
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard_page)
     app.router.add_get("/phone", phone_page)
+    app.router.add_get("/caregiver", caregiver_page)
     app.router.add_get("/ws/phone", ws_phone)
     app.router.add_get("/ws/dashboard", ws_dashboard)
+    app.router.add_get("/ws/caregiver", ws_caregiver)
+    app.router.add_get("/api/status", status)
     app.router.add_get("/frame.jpg", frame_jpg)
     app.router.add_get("/api/evidence", evidence)
     app.router.add_static("/static/", WEB, show_index=False)
@@ -110,6 +115,10 @@ async def phone_page(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEB / "phone.html")
 
 
+async def caregiver_page(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(WEB / "caregiver.html")
+
+
 # ---- the phone
 
 
@@ -120,6 +129,7 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
     app["phones"].add(ws)
     try:
         async for msg in ws:
+            app["live"]["phone_seen"] = app["mw"].clock()
             if msg.type == WSMsgType.TEXT:
                 await on_text(app, ws, msg.data)
             elif msg.type == WSMsgType.BINARY:
@@ -191,7 +201,9 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
     except Exception:  # not a decodable frame
         return
     frame = app["frame"]
-    frame.update(seq=frame["seq"] + 1, jpeg=jpeg, boxes=[])
+    # the last boxes stay until the next detection replaces them; frames arrive faster than the
+    # detector runs, so clearing them here left most frames without boxes
+    frame.update(seq=frame["seq"] + 1, jpeg=jpeg)
     if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
     app["live"]["busy"] = True
@@ -211,8 +223,11 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         mw.latency["detector_ms"] = round((mw.clock() - started) * 1000, 1)
         frame.update(w=w, h=h)
         found = vision.to_obstacles(detections, w, h)
-        for ob in found:
+        nearest: dict[str, float] = {}
+        for ob in found:  # nearest first
             mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
+            nearest.setdefault(ob.label, ob.distance_m)
+        mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
              "x2": d.x2, "y2": d.y2} for d in detections
@@ -245,6 +260,37 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
     finally:
         app["dashboards"].discard(ws)
     return ws
+
+
+# ---- the caregiver: read-only
+
+
+def caregiver_view(app: web.Application, snap: dict) -> dict:
+    seen = app["live"]["phone_seen"]
+    age = None if seen is None else app["mw"].clock() - seen
+    return caregiver.view(snap, bool(app["phones"]), age)
+
+
+async def ws_caregiver(request: web.Request) -> web.WebSocketResponse:
+    """The caregiver's status, pushed every tick. Anything the page sends is ignored."""
+    app = request.app
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    app["caregivers"].add(ws)
+    try:
+        async for _ in ws:
+            pass  # read-only: no command is taken from a caregiver
+    finally:
+        app["caregivers"].discard(ws)
+    return ws
+
+
+async def status(request: web.Request) -> web.Response:
+    """The caregiver's status once, as JSON, from the last tick (it does not tick the core)."""
+    app = request.app
+    if app["snapshot"] is None:
+        raise web.HTTPServiceUnavailable(text="starting up")
+    return web.json_response(caregiver_view(app, app["snapshot"]))
 
 
 async def frame_jpg(request: web.Request) -> web.Response:
@@ -287,11 +333,17 @@ async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
     snap["models"] = models_status(app)
+    app["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
     for ws in list(app["dashboards"]):
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_json({"type": "snapshot", **snap})
+    if app["caregivers"]:
+        care = caregiver_view(app, snap)
+        for ws in list(app["caregivers"]):
+            with contextlib.suppress(ConnectionError, RuntimeError):
+                await ws.send_json(care)
     state = {"type": "state", "sensors": snap["sensors"], "decision": snap["decision"],
              "link": snap["link"], "position": snap["position"],
              "manual": snap["manual"], "models": snap["models"]}  # fmt: skip
@@ -324,18 +376,20 @@ def main(argv=None) -> None:
     p.add_argument("--host", default="127.0.0.1", help="the phone arrives through the USB cable")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--weights", default="yolo26n.pt", help="object detector weights (Ultralytics)")
+    p.add_argument("--imgsz", type=int, default=416, help="detector input size; 640 finds more")
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     a = p.parse_args(argv)
 
-    detector = None if a.no_detector else vision.Detector.load(a.weights)
+    detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     app = build_app(detector=detector, classifier=classifier, recognizer=recognizer)
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
+    print(f"caregiver: http://localhost:{a.port}/caregiver   (read-only)")
     for name, on in models_status(app).items():
         print(f"model {name}: {'loaded' if on else 'not available'}")
     web.run_app(app, host=a.host, port=a.port, print=None)

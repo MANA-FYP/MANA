@@ -1,4 +1,5 @@
-"""End to end: a spoken stop reaches the host as a stop request and the user as a message."""
+"""End to end: a spoken stop reaches the host as a stop request and the user as a message, and a
+lost alert link reaches the user as a warning."""
 
 import time
 
@@ -7,7 +8,7 @@ import rclpy
 from mana_core.core_node import CoreNode
 from rclpy.executors import SingleThreadedExecutor
 
-from mana_msgs.msg import DriveRequest, UserCommand, UserMessage
+from mana_msgs.msg import DriveRequest, GroundReport, LinkReport, UserCommand, UserMessage
 
 
 @pytest.fixture
@@ -44,3 +45,35 @@ def test_spoken_stop_reaches_the_host_and_the_user(ros):
     assert stopped
     spoken = next(m for m in messages if m.text == "Stopped by you")
     assert spoken.speak and spoken.priority == UserMessage.URGENT
+
+
+def test_a_lost_alert_link_slows_down_and_warns_the_user(ros):
+    core, probe = CoreNode(), rclpy.create_node("probe")
+    drives, messages = [], []
+    probe.create_subscription(DriveRequest, "drive_request", drives.append, 10)
+    probe.create_subscription(UserMessage, "user_message", messages.append, 10)
+    link = probe.create_publisher(LinkReport, "link", 10)
+    ground = probe.create_publisher(GroundReport, "ground", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    end = time.monotonic() + 5.0
+    while time.monotonic() < end and not any(
+        m.text == "No alert link, slowing down" for m in messages
+    ):
+        stamp = core.get_clock().now().to_msg()
+        for source in (GroundReport.CAMERA, GroundReport.DEPTH_CAMERA):  # level ground ahead
+            flat = GroundReport(source=source, ground=GroundReport.FLAT, trust=0.9)
+            flat.header.stamp = stamp
+            ground.publish(flat)
+        report = LinkReport(link=LinkReport.WIFI, connected=False, trust=0.9)
+        report.header.stamp = stamp
+        link.publish(report)
+        executor.spin_once(timeout_sec=0.05)
+    for node in (core, probe):
+        node.destroy_node()
+
+    warned = [m for m in messages if m.text == "No alert link, slowing down"]
+    assert warned and warned[0].speak and warned[0].priority == UserMessage.WARNING
+    slowed = [d for d in drives if d.reason == "No alert link, slowing down"]
+    assert slowed and all(d.speed_limit == pytest.approx(0.3) and not d.stop for d in slowed)

@@ -92,3 +92,67 @@ def test_preprocess_gives_a_normalised_batch():
     image = pytest.importorskip("PIL.Image").new("RGB", (64, 48), (128, 128, 128))
     x = vision.preprocess(image, size=32)
     assert x.shape == (1, 3, 32, 32) and x.dtype == np.float32
+
+
+class FakeModel:
+    """Stands in for an Ultralytics model and records what it was called with."""
+
+    def __init__(self, weights):
+        self.weights, self.calls = weights, []
+
+    def __call__(self, image, **kwargs):
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        return [SimpleNamespace(names={}, boxes=[])]
+
+
+def test_the_detector_passes_its_input_size_to_the_model(monkeypatch):
+    from types import SimpleNamespace
+
+    image = pytest.importorskip("PIL.Image")
+    monkeypatch.setattr(importlib, "import_module", lambda name: SimpleNamespace(YOLO=FakeModel))
+    detector = Detector.load("yoloe-26n-mana.pt", 480)
+    buf = __import__("io").BytesIO()
+    image.new("RGB", (64, 48)).save(buf, "JPEG")
+    assert detector.detect(buf.getvalue()) == ([], 64, 48)
+    assert detector.model.weights == "yoloe-26n-mana.pt"
+    assert detector.model.calls == [{"imgsz": 480, "conf": 0.3, "verbose": False}]
+
+
+def test_furniture_gets_a_distance_but_a_door_does_not():
+    couch = Detection("couch", 0.9, 0.0, 100.0, 200.0, 300.0)
+    door = Detection("door", 0.9, 0.0, 0.0, 200.0, 480.0)
+    assert [o.label for o in to_obstacles([couch, door], 640, 480)] == ["couch"]
+
+
+def test_the_open_vocabulary_list_has_forty_names_and_no_repeats():
+    from demo.build_detector import NAMES
+
+    assert len(NAMES) == 40 and len(set(NAMES)) == 40
+
+
+def test_build_detector_saves_the_model_told_the_names(monkeypatch, tmp_path, capsys):
+    import sys
+    from types import SimpleNamespace
+
+    from demo import build_detector
+
+    class FakeYOLOE:
+        def __init__(self, base):
+            self.base = base
+
+        def get_text_pe(self, names):
+            return f"pe:{len(names)}"
+
+        def set_classes(self, names, pe):
+            self.names, self.pe = names, pe
+
+        def save(self, out):
+            saved.append((self.base, self.names, self.pe, out))
+
+    saved = []
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLOE=FakeYOLOE))
+    build_detector.main(["--out", str(tmp_path / "m.pt")])
+    assert saved == [("yoloe-26n-seg.pt", build_detector.NAMES, "pe:40", str(tmp_path / "m.pt"))]
+    assert "40 object names" in capsys.readouterr().out
