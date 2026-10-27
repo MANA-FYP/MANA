@@ -32,6 +32,23 @@ fetch() {  # fetch <url> <file>: download with resume, into the downloads folder
   curl -fL# --retry 3 -C - -o "$DOWNLOADS/$2" "$1"
 }
 
+check_zip() {  # check_zip <file>: every member's CRC, so a cut-off download is never unpacked
+  echo "  checking $(basename "$1")"
+  unzip -tq "$1" >/dev/null || { echo "  $1 is damaged; delete it and fetch again" >&2; return 1; }
+}
+
+check_gz() {  # check_gz <file> [md5]: the gzip stream, and the checksum when the owner gives one
+  echo "  checking $(basename "$1")"
+  gzip -t "$1" || { echo "  $1 is damaged; delete it and fetch again" >&2; return 1; }
+  [ -z "${2:-}" ] && return 0
+  local sum
+  sum=$(python3 -c 'import hashlib,sys;h=hashlib.md5()
+with open(sys.argv[1],"rb") as f:
+    for b in iter(lambda:f.read(1<<20),b""): h.update(b)
+print(h.hexdigest())' "$1") || return 1
+  [ "$sum" = "$2" ] || { echo "  $1: md5 $sum, expected $2" >&2; return 1; }
+}
+
 done_mark() { [ -f "$ROOT/$1/.done" ]; }
 mark_done() { touch "$ROOT/$1/.done"; echo "  ready in $ROOT/$1"; }
 
@@ -47,7 +64,8 @@ stairnet: needs a manual download (an IEEE DataPort subscription; IEEE student m
 EOF
     return 1
   fi
-  echo "stairnet: unpacking"
+  echo "stairnet: checking and unpacking (the check reads all 92 GB once)"
+  check_zip "$zip" || return 1
   mkdir -p "$ROOT/stairnet" || return 1
   unzip -q -n "$zip" -d "$ROOT/stairnet" || return 1
   mark_done stairnet
@@ -66,6 +84,8 @@ coco() {
   echo "coco: val2017 subset"
   fetch http://images.cocodataset.org/zips/val2017.zip val2017.zip || return 1
   fetch http://images.cocodataset.org/annotations/annotations_trainval2017.zip annotations_2017.zip || return 1
+  check_zip "$DOWNLOADS/val2017.zip" || return 1  # COCO is plain http only
+  check_zip "$DOWNLOADS/annotations_2017.zip" || return 1
   mkdir -p "$ROOT/coco" || return 1
   unzip -q -n "$DOWNLOADS/val2017.zip" -d "$ROOT/coco" || return 1
   unzip -q -n "$DOWNLOADS/annotations_2017.zip" -d "$ROOT/coco" || return 1
@@ -78,6 +98,8 @@ speech() {
   local base=https://storage.googleapis.com/download.tensorflow.org/data
   fetch "$base/speech_commands_v0.02.tar.gz" speech_commands_v0.02.tar.gz || return 1
   fetch "$base/speech_commands_test_set_v0.02.tar.gz" speech_commands_test_set_v0.02.tar.gz || return 1
+  check_gz "$DOWNLOADS/speech_commands_v0.02.tar.gz" || return 1
+  check_gz "$DOWNLOADS/speech_commands_test_set_v0.02.tar.gz" || return 1
   mkdir -p "$ROOT/speech_commands/test_set" || return 1
   tar -xzf "$DOWNLOADS/speech_commands_v0.02.tar.gz" -C "$ROOT/speech_commands" || return 1
   tar -xzf "$DOWNLOADS/speech_commands_test_set_v0.02.tar.gz" -C "$ROOT/speech_commands/test_set" || return 1
@@ -88,6 +110,7 @@ urbansound() {
   done_mark UrbanSound8K && { echo "urbansound: already here"; return; }
   echo "urbansound: UrbanSound8K"
   fetch "https://zenodo.org/records/1203745/files/UrbanSound8K.tar.gz" UrbanSound8K.tar.gz || return 1
+  check_gz "$DOWNLOADS/UrbanSound8K.tar.gz" 9aa69802bbf37fb986f71ec1483a196e || return 1  # Zenodo's
   tar -xzf "$DOWNLOADS/UrbanSound8K.tar.gz" -C "$ROOT" || return 1  # makes $ROOT/UrbanSound8K
   mark_done UrbanSound8K
 }
@@ -99,13 +122,16 @@ fi
 
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=(stairnet sanpo coco speech urbansound)
+for name in "${names[@]}"; do  # every name is checked before anything is downloaded
+  case $name in
+    stairnet | sanpo | coco | speech | urbansound) ;;
+    *) echo "unknown dataset: $name (try --list)" >&2; exit 2 ;;
+  esac
+done
 mkdir -p "$ROOT"
 failed=()
 for name in "${names[@]}"; do
-  case $name in
-    stairnet | sanpo | coco | speech | urbansound) "$name" || failed+=("$name") ;;
-    *) echo "unknown dataset: $name (try --list)" >&2; exit 2 ;;
-  esac
+  "$name" || failed+=("$name")
 done
 if [ ${#failed[@]} -gt 0 ]; then
   echo "not fetched: ${failed[*]}" >&2
