@@ -259,13 +259,21 @@ The distances and times are defaults, set as ROS parameters, to be tuned in simu
 ros2 run mana_position position_node
 ```
 
-The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisation) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
+The node listens on `gps/fix` (NavSatFix), `lidar/odometry` or `lidar/pose` (the lidar localisation; slam_toolbox publishes the second) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
 
 - GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, counted from the last good fix even when the GPS simply falls silent, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
 - GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
 - away from GPS the lidar map is used while the lidar localisation reports, and odometry, which drifts, only while it does not.
 
 GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
+
+The whole position stack starts with one launch file: robot_localization's two EKFs (wheels and IMU in `odom`, plus GPS in `map`), navsat_transform, and the position node. The topic names are launch arguments:
+
+```bash
+ros2 launch mana_position localisation.launch.py wheel_odometry:=/chair/odom imu:=/chair/imu gps:=/chair/gps
+```
+
+The lidar map source is slam_toolbox's localisation mode on a saved map of the building. Its pose goes to `lidar/pose`. Why slam_toolbox and not FAST-LIO2 or KISS-ICP is in [`docs/decisions.md`](docs/decisions.md).
 
 ### Alert link (`mana_connectivity`)
 
@@ -275,7 +283,7 @@ ros2 run mana_connectivity link_node
 
 Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
 
-- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (once #58 is merged, the core then slows down);
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (the core then slows down);
 - while Bluetooth carries the alerts, Wi-Fi must answer steadily for 5 s before they return to it, so a fading signal gives one switch away and one back; at start, or with Bluetooth down too, Wi-Fi takes them as soon as it answers;
 - urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost. Ids carry a token for this boot, so a late answer from an earlier run cannot clear a new alert. Something at the other end, such as the caregiver view (#50), must answer; past 100 unanswered alerts the oldest is dropped and logged.
 
