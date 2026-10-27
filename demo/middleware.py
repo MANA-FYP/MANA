@@ -838,8 +838,11 @@ class Middleware:
                 }
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
-        if self.directions and (ahead := direction(self.core, now)):
-            self.queue.push(ahead, now)
+        if self.directions:
+            if ahead := direction(self.core, now):
+                self.queue.push(ahead, now)
+            else:
+                self.queue.direction_gone()
         if said := self.queue.release(now):
             self._heard_n += 1
             self.heard.append(

@@ -124,8 +124,11 @@ class CoreNode(Node):
             speak = dec.priority >= d.Priority.WARNING
             self.queue.push(Message(dec.reason, dec.priority, speak, seconds), seconds)
             self.last_reason = dec.reason
-        if self.directions and (ahead := direction(self.core, seconds)):
-            self.queue.push(ahead, seconds)
+        if self.directions:
+            if ahead := direction(self.core, seconds):
+                self.queue.push(ahead, seconds)
+            else:
+                self.queue.direction_gone()
         if said := self.queue.release(seconds):
             msg = UserMessage(priority=int(said.priority), text=said.text, speak=said.speak)
             msg.header.stamp = out.header.stamp

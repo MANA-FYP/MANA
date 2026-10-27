@@ -46,8 +46,11 @@ def run(scenario: Scenario, limits: Limits | None = None, cane: bool = False) ->
             speak = d.priority >= Priority.WARNING
             trace.messages.append(Message(t, d.reason, speak))
             queue.push(Heard(d.reason, d.priority, speak, t), t)
-        if cane and (ahead := direction(core, t)):
-            queue.push(ahead, t)
+        if cane:
+            if ahead := direction(core, t):
+                queue.push(ahead, t)
+            else:
+                queue.direction_gone()
         if out := queue.release(t):
             trace.heard.append((t, out))
         trace.samples.append(Sample(t, world.x, d.mode, d.stop, d.speed_limit, d.reason))
