@@ -1,0 +1,41 @@
+MANA - Multimodal Assistance for Navigation and Accessibility
+Final Year Project F26-049, FAST NUCES Islamabad: Mushahid Hussain, Muhammad Waqas, Komail Raza
+
+The MANA source code is licensed under the GNU Affero General Public License v3.0 (see LICENSE).
+
+The datasets below are NOT part of this repository and are never included in a release.
+tools/fetch_datasets.sh downloads them from their owners, and each stays under its own licence.
+Models trained on them must respect those licences. Details and splits are in docs/datasets.md.
+
+StairNet
+  Kurbis, Kuzmenko, Ivanyuk-Skulskiy, Mihailidis and Laschowski, "StairNet: visual recognition
+  of stairs for human-robot locomotion", BioMedical Engineering OnLine 23:20, 2024.
+  https://ieee-dataport.org/documents/stairnet-computer-vision-dataset-stair-recognition
+  DOI 10.21227/12jm-e336
+  Licence: not stated by the authors; access through an IEEE DataPort subscription.
+  Used for academic research only, with citation. Not redistributed.
+
+SANPO
+  Waghmare et al., "SANPO: A Scene Understanding, Accessibility, Navigation, Pathfinding,
+  Obstacle Avoidance Dataset", arXiv:2309.12172, 2023.
+  https://github.com/google-research-datasets/sanpo_dataset
+  Licence: Creative Commons Attribution 4.0 (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+
+COCO 2017
+  Lin et al., "Microsoft COCO: Common Objects in Context", ECCV 2014. https://cocodataset.org
+  Licence: annotations under CC BY 4.0; each image under the Flickr licence given for it in the
+  annotation file.
+
+Speech Commands v2
+  Warden, "Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition",
+  arXiv:1804.03209, 2018.
+  Licence: Creative Commons Attribution 4.0 (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+
+UrbanSound8K
+  Salamon, Jacoby and Bello, "A Dataset and Taxonomy for Urban Sound Research",
+  ACM Multimedia 2014. https://zenodo.org/records/1203745
+  Licence: Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)
+  https://creativecommons.org/licenses/by-nc/4.0/
+  Non-commercial use only. This limit also applies to models fine-tuned on it.
