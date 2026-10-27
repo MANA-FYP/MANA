@@ -249,9 +249,9 @@ ros2 run mana_connectivity link_node
 
 Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
 
-- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row they go over Bluetooth, if it is up, and with neither there is no link (the core then slows down);
-- Wi-Fi must answer steadily for 5 s before alerts return to it, so a fading signal gives one switch away and one back;
-- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost.
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (once #58 is merged, the core then slows down);
+- while Bluetooth carries the alerts, Wi-Fi must answer steadily for 5 s before they return to it, so a fading signal gives one switch away and one back; at start, or with Bluetooth down too, Wi-Fi takes them as soon as it answers;
+- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost. Ids carry a token for this boot, so a late answer from an earlier run cannot clear a new alert. Something at the other end, such as the caregiver view (#50), must answer; past 100 unanswered alerts the oldest is dropped and logged.
 
 `src/mana_connectivity/test` tests the rule and the outbox, and fades Wi-Fi through ROS while an alert is waiting.
 

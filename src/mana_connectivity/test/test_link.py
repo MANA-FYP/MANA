@@ -29,7 +29,8 @@ def test_heartbeats_count_the_ones_missed_in_a_row():
     beat = Heartbeat(period_s=1.0)
     assert beat.missed(5.0) == MAX_MISSED  # never answered
     beat.beat(10.0)
-    assert [beat.missed(t) for t in (10.5, 11.0, 13.2)] == [0, 1, 3]
+    # a beat counts as missed half a period after it was due
+    assert [beat.missed(t) for t in (10.5, 11.0, 11.6, 13.2)] == [0, 0, 1, 2]
 
 
 def test_steady_wifi_carries_the_alerts():
@@ -94,3 +95,39 @@ def test_codes_match_the_message_type():
     msg = Path(__file__).parents[2] / "mana_msgs/msg/LinkReport.msg"
     codes = dict(re.findall(r"^uint8 (\w+)=(\d+)", msg.read_text(), re.M))
     assert {k: int(v) for k, v in codes.items()} == {e.name: e.value for e in Link}
+
+
+def test_one_lost_beat_and_a_late_one_do_not_switch():
+    beat, s = Heartbeat(1.0), LinkSelector()
+    s.update(0, 0, 9.0)
+    beat.beat(10.0)  # the beat due at 11.0 is lost; the next comes late, at 12.05
+    assert s.update(beat.missed(12.0), 0, 12.0) == Link.WIFI
+
+
+def test_at_start_the_first_radio_to_answer_takes_the_alerts_at_once():
+    s = LinkSelector()
+    assert s.update(MAX_MISSED, MAX_MISSED, 0.0) is None
+    assert s.update(0, 0, 0.1) == Link.WIFI
+
+
+def test_wifi_takes_the_alerts_at_once_when_bluetooth_is_down_too():
+    s = LinkSelector()
+    s.update(0, 0, 0.0)
+    assert s.update(MAX_MISSED, MAX_MISSED, 1.0) is None
+    assert s.update(0, MAX_MISSED, 1.1) == Link.WIFI  # no hold: nothing else carries them
+
+
+def test_alert_ids_differ_between_boots_so_a_late_answer_cannot_clear_a_new_alert():
+    old, new = Outbox(boot="aaaaaa"), Outbox(boot="bbbbbb")
+    stale = old.add("Stopped by you")
+    fresh = new.add("Drop ahead, stopping")
+    new.ack(stale)
+    assert stale != fresh and fresh in new.pending
+
+
+def test_the_oldest_unanswered_alert_is_dropped_past_the_cap():
+    box = Outbox(max_pending=2)
+    first = box.add("one")
+    box.add("two")
+    box.add("three")
+    assert first not in box.pending and len(box.pending) == 2 and box.dropped == 1

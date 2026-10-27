@@ -6,13 +6,15 @@ alerts with LinkSelector, and logs every switch.
 
 Urgent messages from the core (`user_message`) become alerts for the caregiver. They go out on
 `alert/wifi` or `alert/bluetooth` as "<id>|<text>" and stay in the outbox until their id comes
-back on `alert/ack`, so an alert sent just before Wi-Fi fades is sent again over Bluetooth.
+back on `alert/ack`, so an alert sent just before Wi-Fi fades is sent again over Bluetooth. Ids
+look like "3fa91c-7": a token for this boot, then a count. Something at the other end (the
+caregiver view, #50) must acknowledge alerts; until then they are resent every resend_s.
 """
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from std_msgs.msg import Header, String, UInt32
+from std_msgs.msg import Header, String
 
 from mana_connectivity.link import Heartbeat, Link, LinkSelector, Outbox
 from mana_msgs.msg import LinkReport, UserMessage
@@ -32,17 +34,18 @@ class LinkNode(Node):
                 ("missed_to_leave", 2),
                 ("back_s", 5.0),
                 ("resend_s", 1.0),
+                ("max_pending", 100),
             )
         }
         self.beats = {link: Heartbeat(p["period_s"]) for link in Link}
         self.selector = LinkSelector(p["missed_to_leave"], p["back_s"])
-        self.outbox = Outbox(p["resend_s"])
+        self.outbox = Outbox(p["resend_s"], p["max_pending"])
         for link, name in TOPIC.items():
             self.create_subscription(
                 Header, f"link/{name}/heartbeat", lambda _, link=link: self.on_beat(link), 10
             )
         self.create_subscription(UserMessage, "user_message", self.on_message, 10)
-        self.create_subscription(UInt32, "alert/ack", lambda m: self.outbox.ack(m.data), 10)
+        self.create_subscription(String, "alert/ack", lambda m: self.outbox.ack(m.data), 10)
         self.report = self.create_publisher(LinkReport, "link", 10)
         self.alerts = {
             link: self.create_publisher(String, f"alert/{name}", 10) for link, name in TOPIC.items()
@@ -57,7 +60,10 @@ class LinkNode(Node):
 
     def on_message(self, m: UserMessage) -> None:
         if m.priority == UserMessage.URGENT:
+            dropped = self.outbox.dropped
             self.outbox.add(m.text)
+            if self.outbox.dropped > dropped:
+                self.get_logger().warning("no answer to the oldest alert; dropped it")
 
     def tick(self) -> None:
         stamp = self.get_clock().now()
