@@ -2,10 +2,60 @@
 
 Perception for MANA (M1 Vision). It holds:
 
+- **`detector_node`**: the nearest obstacle in the camera image (a person, a chair, a car...),
+  from the same object detector as the phone demo.
 - **`depth_node`**: the ground ahead from the 3D camera (flat, ramp, curb, stairs up, stairs down
   or a drop), the second ground source the decision core's two-sensor rule needs.
 - **`stub_node`**: scripted ground and obstacle reports on the real message interface, so the
   decision core can be run and tested before the other models exist.
+
+## Obstacles from the camera
+
+```bash
+pip install ultralytics      # not a rosdep key; the CPU build of PyTorch is enough to run it
+ros2 run mana_perception detector_node --ros-args   -r camera/image:=/camera/image_raw -r camera/camera_info:=/camera/camera_info   -p weights:=yolo26n.pt -p imgsz:=416
+```
+
+The detector and its maths are in `mana_perception/detection.py`, which the phone demo also uses
+(`demo/vision.py` imports it), so the phone and ROS 2 give the same obstacles from the same
+picture. For each frame the node runs the detector, keeps the classes with a typical height
+(`OBSTACLE_HEIGHT_M`), estimates each one's distance from its box height and the camera's focal
+length, and its bearing from the camera's field of view, both from the camera info. It publishes
+only the **nearest** obstacle, because the core keeps one report per source. With nothing in view
+it publishes nothing, and the core lets the last report age out after 0.5 s. The detector and the
+ground classifier both look through the camera, so the core counts them as one sensor.
+
+| Topic | Type | Meaning |
+|---|---|---|
+| `camera/image` (in) | `sensor_msgs/Image` | rgb8, bgr8, rgba8 or bgra8; a frame stamped 0 gets the time it arrived |
+| `camera/camera_info` (in) | `sensor_msgs/CameraInfo` | focal length (distance) and field of view (bearing) |
+| `obstacle` (out) | `mana_msgs/ObstacleReport` | the nearest obstacle, source `DETECTOR`, trust = the detector's confidence |
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `weights` | `yolo26n.pt` | `yolo26n.pt` (COCO, as at the mid-evaluation), `yoloe-26n-mana.pt` (YOLOE-26 told the 40 names in `demo/build_detector.py`, including stairs, doors and poles), and later the fine-tuned YOLO26s from #49, with no code change |
+| `imgsz` | `416` | size each frame is scaled to |
+| `conf` | `0.3` | lowest confidence the detector keeps |
+| `min_confidence` | `0.4` | lowest confidence that becomes an obstacle |
+| `rate_hz` | `10.0` | most frames per second; frames in between are skipped |
+
+**Time per frame** (`python3 tools/time_detector.py --weights yolo26n.pt yoloe-26n-mana.pt
+--imgsz 480 416`): on an AMD Ryzen 7 7730U laptop (8 cores, 16 GB, CPU only, PyTorch 2.14.1 and
+Ultralytics 8.4.176 from `requirements-ml.txt`), 40 frames of the two Ultralytics sample pictures
+after a warm-up, through the same `Detector.detect_image` call the node makes:
+
+| Weights | Image size | Median | 90th percentile | Frames per second |
+|---|---|---|---|---|
+| `yolo26n.pt` (COCO) | 480 | 53 ms | 59 ms | 19 |
+| `yolo26n.pt` (COCO) | 416 | 47 ms | 50 ms | 21 |
+| `yoloe-26n-mana.pt` (40 names) | 480 | 73 ms | 87 ms | 14 |
+| `yoloe-26n-mana.pt` (40 names) | 416 | 62 ms | 68 ms | 16 |
+
+Both keep up with the node's 10 frames per second on this laptop. On the same street picture both
+find the same person at the same estimated distance (3.5 m with a phone-like camera). **YOLOE-26n
+knows only its 40 names, and they do not include `bus` or `truck`**, so with those weights a bus
+is not an obstacle; the COCO model finds it. Add them to `NAMES` in `demo/build_detector.py`
+before using YOLOE outdoors.
 
 ## Ground from the 3D camera
 
@@ -133,6 +183,6 @@ ros2 run mana_perception stub_node --ros-args -p scenario:=stairs
 ## Tests
 
 ```bash
-python -m pytest tests/test_depth_ground.py tests/test_perception_stub.py   # no ROS needed
-colcon test --packages-select mana_perception    # the depth node end to end, in ROS 2
+python -m pytest tests/test_detection.py tests/test_depth_ground.py tests/test_perception_stub.py
+colcon test --packages-select mana_perception    # the detector and depth nodes end to end, in ROS 2
 ```
