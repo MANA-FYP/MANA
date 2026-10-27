@@ -1,8 +1,9 @@
 """ROS 2 node for the decision core.
 
-Listens to the module reports, decides at 10 Hz, and publishes a drive request for the host every
-tick and a message for the user whenever the reason for the decision changes. The thresholds in
-Limits are ROS parameters with the same names.
+Listens to the module reports (ground, obstacle, motion, position and link) and the user's
+commands, decides at 10 Hz, and publishes a drive request for the host every tick and a message
+for the user whenever the reason for the decision changes. The thresholds in Limits are ROS
+parameters with the same names.
 """
 
 from dataclasses import fields
@@ -16,8 +17,10 @@ from mana_core import decision as d
 from mana_msgs.msg import (
     DriveRequest,
     GroundReport,
+    LinkReport,
     MotionReport,
     ObstacleReport,
+    PositionReport,
     UserCommand,
     UserMessage,
 )
@@ -34,6 +37,8 @@ class CoreNode(Node):
         self.create_subscription(GroundReport, "ground", self.on_ground, 10)
         self.create_subscription(ObstacleReport, "obstacle", self.on_obstacle, 10)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
+        self.create_subscription(PositionReport, "position", self.on_position, 10)
+        self.create_subscription(LinkReport, "link", self.on_link, 10)
         self.create_subscription(UserCommand, "user_command", self.on_command, 10)
         self.drive = self.create_publisher(DriveRequest, "drive_request", 10)
         self.message = self.create_publisher(UserMessage, "user_message", 10)
@@ -72,6 +77,22 @@ class CoreNode(Node):
     def on_motion(self, m: MotionReport) -> None:
         self.core.on_motion(
             d.MotionReport(self.measured(m), m.trust, m.pitch_rad, m.roll_rad, m.wheel_slip)
+        )
+
+    def on_position(self, m: PositionReport) -> None:
+        try:
+            source = d.PositionSource(m.source)
+        except ValueError:
+            return self.ignore("position report", m)
+        self.core.on_position(d.PositionReport(self.measured(m), m.trust, source, m.error_m))
+
+    def on_link(self, m: LinkReport) -> None:
+        try:
+            link = d.Link(m.link)
+        except ValueError:
+            return self.ignore("link report", m)
+        self.core.on_link(
+            d.LinkReport(self.measured(m), m.trust, link, m.connected, m.missed_heartbeats)
         )
 
     def on_command(self, m: UserCommand) -> None:
