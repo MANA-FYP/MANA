@@ -75,3 +75,5 @@ def test_a_lost_alert_link_slows_down_and_warns_the_user(ros):
 
     warned = [m for m in messages if m.text == "No alert link, slowing down"]
     assert warned and warned[0].speak and warned[0].priority == UserMessage.WARNING
+    slowed = [d for d in drives if d.reason == "No alert link, slowing down"]
+    assert slowed and all(d.speed_limit == pytest.approx(0.3) and not d.stop for d in slowed)

@@ -141,6 +141,8 @@ class Limits:
     level_hold_s: float = 2.0  # level this long before going back to wheels
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
+    link_max_age_s: float = 2.5  # link and position reports come about once a second
+    position_max_age_s: float = 2.5
 
 
 @dataclass(frozen=True)
@@ -249,10 +251,11 @@ class DecisionCore:
 
     # ---- what the reports say
 
-    def _ok(self, report) -> bool:
+    def _ok(self, report, max_age_s: float | None = None) -> bool:
         return (
             report is not None
-            and self.now - report.stamp <= self.limits.max_age_s
+            and self.now - report.stamp
+            <= (self.limits.max_age_s if max_age_s is None else max_age_s)
             and report.trust >= self.limits.min_trust
         )
 
@@ -283,14 +286,22 @@ class DecisionCore:
         return min(known, key=lambda r: r.distance_m, default=None)
 
     def _position_lost(self) -> bool:
-        """A position module reports, but no source has a recent, trusted position. A host
-        without a position module is not slowed down for it."""
-        return bool(self.positions) and not any(map(self._ok, self.positions.values()))
+        """A position module reports, but neither GPS nor the lidar map has a recent, trusted
+        position. Odometry does not count: it drifts, so it cannot tell a helper where the user
+        is. A host without a position module is not slowed down for it."""
+        return bool(self.positions) and not any(
+            self._ok(r, self.limits.position_max_age_s)
+            for r in self.positions.values()
+            if r.source != PositionSource.ODOMETRY
+        )
 
     def _link_lost(self) -> bool:
         """A link module reports, but neither Wi-Fi nor Bluetooth could carry an alert now."""
+        lim = self.limits
         return bool(self.links) and not any(
-            self._ok(r) and r.connected and r.missed_heartbeats < self.limits.missed_heartbeats
+            self._ok(r, lim.link_max_age_s)
+            and r.connected
+            and r.missed_heartbeats < lim.missed_heartbeats
             for r in self.links.values()
         )
 
