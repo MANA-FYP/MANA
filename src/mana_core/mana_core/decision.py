@@ -2,7 +2,9 @@
 
 The node feeds in the latest module reports and asks for a decision at a fixed rate. The tree
 checks, highest priority first: the user's stop, safety (a drop or an obstacle close ahead), the
-user's control in manual mode, then MANA's own choice of wheels or tracks and speed.
+user's control in manual mode, then MANA's own choice of wheels or tracks and speed. Losing the
+position or the alert link also slows MANA down: without them a call for help could not say where
+the user is, or could not be sent.
 
 Two rules from the design: a change of motion mode needs two independent sources to agree, and a
 stop needs none. Reports that are too old or not trusted enough are ignored. The thresholds are
@@ -29,6 +31,17 @@ class Source(IntEnum):
 # The physical sensor behind each source. The classifier and the detector look at the camera's
 # image, so for agreement they are the camera, not two more sensors.
 SENSOR_OF = {Source.CLASSIFIER: Source.CAMERA, Source.DETECTOR: Source.CAMERA}
+
+
+class PositionSource(IntEnum):
+    GPS = 0
+    LIDAR_MAP = 1
+    ODOMETRY = 2
+
+
+class Link(IntEnum):
+    WIFI = 0
+    BLUETOOTH = 1
 
 
 class Ground(IntEnum):
@@ -100,6 +113,23 @@ class MotionReport:
 
 
 @dataclass(frozen=True)
+class PositionReport:
+    stamp: float
+    trust: float
+    source: PositionSource
+    error_m: float = math.nan  # estimated horizontal error
+
+
+@dataclass(frozen=True)
+class LinkReport:
+    stamp: float
+    trust: float
+    link: Link
+    connected: bool
+    missed_heartbeats: int = 0  # in a row
+
+
+@dataclass(frozen=True)
 class Limits:
     min_trust: float = 0.5  # reports below this trust are ignored
     max_age_s: float = 0.5  # reports older than this are ignored
@@ -110,6 +140,7 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
+    missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
 
 
 @dataclass(frozen=True)
@@ -150,6 +181,8 @@ class DecisionCore:
         self.ground: dict[Source, GroundReport] = {}
         self.obstacles: dict[Source, ObstacleReport] = {}
         self.motion: MotionReport | None = None
+        self.positions: dict[PositionSource, PositionReport] = {}
+        self.links: dict[Link, LinkReport] = {}
         self.automatic = True
         self.stopped_by_user = False
         self.user_mode = Mode.WHEELS
@@ -170,6 +203,12 @@ class DecisionCore:
 
     def on_motion(self, report: MotionReport) -> None:
         self.motion = report
+
+    def on_position(self, report: PositionReport) -> None:
+        self.positions[report.source] = report
+
+    def on_link(self, report: LinkReport) -> None:
+        self.links[report.link] = report
 
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
@@ -242,6 +281,18 @@ class DecisionCore:
             return None
         known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)
+
+    def _position_lost(self) -> bool:
+        """A position module reports, but no source has a recent, trusted position. A host
+        without a position module is not slowed down for it."""
+        return bool(self.positions) and not any(map(self._ok, self.positions.values()))
+
+    def _link_lost(self) -> bool:
+        """A link module reports, but neither Wi-Fi nor Bluetooth could carry an alert now."""
+        return bool(self.links) and not any(
+            self._ok(r) and r.connected and r.missed_heartbeats < self.limits.missed_heartbeats
+            for r in self.links.values()
+        )
 
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
@@ -351,6 +402,28 @@ class DecisionCore:
                     lambda: self._slow_reason() is not None,
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                    ),
+                ),
+                branch(
+                    "no alert link",
+                    self._link_lost,
+                    lambda: self._set(
+                        Mode.WHEELS,
+                        False,
+                        lim.slow,
+                        "No alert link, slowing down",
+                        Priority.WARNING,
+                    ),
+                ),
+                branch(
+                    "no position",
+                    self._position_lost,
+                    lambda: self._set(
+                        Mode.WHEELS,
+                        False,
+                        lim.slow,
+                        "Position unknown, slowing down",
+                        Priority.WARNING,
                     ),
                 ),
                 _Act(

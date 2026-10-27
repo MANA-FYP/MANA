@@ -228,7 +228,7 @@ Every report to the core starts with the same two fields: `header` (its stamp is
 ros2 run mana_core core_node
 ```
 
-The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
@@ -237,7 +237,8 @@ The node listens on `ground`, `obstacle`, `motion` and `user_command`. It decide
 5. On tracks and not yet level for 2 s: stay on tracks
 6. No trusted ground report: slow down
 7. An obstacle, drop, ramp or possible step ahead: slow down
-8. Otherwise: wheels, full speed
+8. No link could carry an alert, or no position source is fresh and trusted: slow down (only when the host runs a link or position module)
+9. Otherwise: wheels, full speed
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 

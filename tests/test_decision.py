@@ -12,9 +12,13 @@ from mana_core.decision import (
     Ground,
     GroundReport,
     Limits,
+    Link,
+    LinkReport,
     Mode,
     MotionReport,
     ObstacleReport,
+    PositionReport,
+    PositionSource,
     Priority,
     Source,
 )
@@ -264,6 +268,75 @@ def test_ramp_slows_down_on_wheels():
     assert (d.mode, d.reason) == (Mode.WHEELS, "Ramp ahead, slowing down")
 
 
+# ---- position and alert link
+
+
+def gps(age=0.0, trust=0.9):
+    return PositionReport(NOW - age, trust, PositionSource.GPS, 3.0)
+
+
+def wifi(connected=True, missed=0, age=0.0):
+    return LinkReport(NOW - age, 0.9, Link.WIFI, connected, missed)
+
+
+def with_reports(*reports, ground_reports=()):
+    c = DecisionCore()
+    for r in ground_reports or (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)):
+        c.on_ground(r)
+    for r in reports:
+        (c.on_position if isinstance(r, PositionReport) else c.on_link)(r)
+    c.on_motion(level())
+    c.tick(NOW)
+    return c.decision
+
+
+def test_a_host_without_position_or_link_modules_is_not_slowed_down():
+    assert with_reports().reason == "Level ground"
+
+
+def test_a_fresh_position_and_a_working_link_keep_full_speed():
+    d = with_reports(gps(), wifi())
+    assert (d.speed_limit, d.reason) == (1.0, "Level ground")
+
+
+@pytest.mark.parametrize("position", [gps(age=2.0), gps(trust=0.2)], ids=["stale", "untrusted"])
+def test_a_lost_position_slows_down(position):
+    d = with_reports(position, wifi())
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.WHEELS, False, LIM.slow)
+    assert (d.reason, d.priority) == ("Position unknown, slowing down", Priority.WARNING)
+
+
+def test_any_one_fresh_position_source_is_enough():
+    lidar_map = PositionReport(NOW, 0.9, PositionSource.LIDAR_MAP, 0.5)
+    assert with_reports(gps(age=2.0), lidar_map, wifi()).reason == "Level ground"
+
+
+@pytest.mark.parametrize(
+    "link",
+    [wifi(connected=False), wifi(missed=LIM.missed_heartbeats), wifi(age=2.0)],
+    ids=["disconnected", "missed heartbeats", "stale"],
+)
+def test_no_alert_link_slows_down(link):
+    d = with_reports(gps(), link)
+    assert (d.speed_limit, d.reason) == (LIM.slow, "No alert link, slowing down")
+
+
+def test_bluetooth_carries_the_alerts_when_wifi_is_gone():
+    bluetooth = LinkReport(NOW, 0.9, Link.BLUETOOTH, True, 0)
+    assert with_reports(gps(), wifi(connected=False), bluetooth).reason == "Level ground"
+
+
+def test_a_hazard_is_named_before_a_lost_link():
+    ramp = (ground(CAM, Ground.RAMP), ground(DEPTH, Ground.RAMP, 1.0))
+    d = with_reports(gps(age=2.0), wifi(connected=False), ground_reports=ramp)
+    assert d.reason == "Ramp ahead, slowing down"
+
+
+def test_a_lost_link_and_position_never_stop_the_device():
+    d = with_reports(gps(age=2.0), wifi(connected=False))
+    assert not d.stop and d.reason == "No alert link, slowing down"
+
+
 # ---- the codes match mana_msgs
 
 
@@ -288,6 +361,8 @@ def constants(msg, field):
     [
         ("GroundReport", "ground", Ground),
         ("ObstacleReport", "source", Source),
+        ("PositionReport", "source", PositionSource),
+        ("LinkReport", "link", Link),
         ("UserCommand", "command", Command),
         ("DriveRequest", "mode", Mode),
         ("UserMessage", "priority", Priority),
