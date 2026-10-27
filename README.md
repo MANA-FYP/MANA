@@ -232,13 +232,13 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
-3. Manual mode: follow the user's mode and speed
-4. Stairs down seen by both cameras: stop and ask; go down on tracks only after the user says yes
+3. Stairs down seen by two sensors: stop and ask; go down on tracks only after the user says yes (a no, a stop or a new staircase asks again)
+4. Manual mode: follow the user's mode and speed
 5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
 6. On tracks and not yet level for 2 s: stay on tracks
 7. No trusted ground report: slow down
 8. An obstacle, drop, ramp or possible step ahead: slow down
-9. No link could carry an alert, or no position source is fresh and trusted: slow down (only when the host runs a link or position module)
+9. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
 10. Otherwise: wheels, full speed
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
