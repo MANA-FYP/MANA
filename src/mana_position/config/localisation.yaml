@@ -1,0 +1,65 @@
+# robot_localization for MANA (M2): two EKFs and navsat_transform, as in robot_localization's
+# documentation. See docs/decisions.md (D2). Each *_config is the 15 values robot_localization
+# fuses, in this order: x y z, roll pitch yaw, vx vy vz, vroll vpitch vyaw, ax ay az.
+
+ekf_local:  # wheels and IMU in the odom frame: smooth, drifts; the ODOMETRY source
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: false  # the device tilts on ramps and stairs
+    publish_tf: true
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+    odom0: wheel/odometry
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true, true, false,
+                   false, false, true,
+                   false, false, false]
+    imu0: imu/data
+    imu0_config: [false, false, false,
+                  true, true, false,
+                  false, false, false,
+                  true, true, true,
+                  true, false, false]
+    imu0_remove_gravitational_acceleration: true
+
+ekf_global:  # the same, plus GPS through navsat_transform, in the map frame
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: false
+    publish_tf: true  # map -> odom
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: map
+    odom0: wheel/odometry
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true, true, false,
+                   false, false, true,
+                   false, false, false]
+    odom1: odometry/gps
+    odom1_config: [true, true, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    imu0: imu/data
+    imu0_config: [false, false, false,
+                  true, true, false,
+                  false, false, false,
+                  true, true, true,
+                  true, false, false]
+    imu0_remove_gravitational_acceleration: true
+
+navsat_transform:  # GPS fixes to positions in the map frame
+  ros__parameters:
+    frequency: 30.0
+    magnetic_declination_radians: 0.0
+    yaw_offset: 0.0
+    zero_altitude: true
+    publish_filtered_gps: true
+    use_odometry_yaw: true  # no magnetometer: heading comes from the EKF
+    wait_for_datum: false

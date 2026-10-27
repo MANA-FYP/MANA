@@ -255,6 +255,14 @@ The node listens on `gps/fix` (NavSatFix), `lidar/odometry` (the lidar localisat
 
 GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
 
+The whole position stack starts with one launch file: robot_localization's two EKFs (wheels and IMU in `odom`, plus GPS in `map`), navsat_transform, and the position node. The topic names are launch arguments:
+
+```bash
+ros2 launch mana_position localisation.launch.py wheel_odometry:=/chair/odom imu:=/chair/imu gps:=/chair/gps
+```
+
+The lidar map source is slam_toolbox's localisation mode on a saved map of the building. Its pose goes to `lidar/pose`. Why slam_toolbox and not FAST-LIO2 or KISS-ICP is in [`docs/decisions.md`](docs/decisions.md).
+
 ### Scenarios, pass marks and the live demo
 
 Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a chair on a straight route, and the reports its sensors would send. The camera names the ground but cannot measure distance, the 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt. Faults lower a sensor's trust or cut its reports. `mana_core/scenarios.py` defines the scenarios and their pass marks:

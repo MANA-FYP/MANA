@@ -9,6 +9,8 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        ("share/" + package_name + "/config", ["config/localisation.yaml"]),
+        ("share/" + package_name + "/launch", ["launch/localisation.launch.py"]),
     ],
     install_requires=["setuptools"],
     extras_require={"test": ["pytest"]},  # tells colcon to run the tests with pytest

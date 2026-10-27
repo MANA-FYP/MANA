@@ -5,6 +5,7 @@ import time
 
 import pytest
 import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from mana_position.position_node import PositionNode
 from nav_msgs.msg import Odometry
 from rclpy.executors import SingleThreadedExecutor
@@ -21,7 +22,7 @@ def ros():
     rclpy.shutdown()
 
 
-def run(gps_after_loss):
+def run(gps_after_loss, lidar_type=Odometry):
     """Good fixes for 1.5 s, then gps_after_loss: "no fix" sends NO_FIX, "silent" sends nothing.
     The lidar localisation reports all along. Returns the reports before and after the loss,
     and how long after the last good fix the lidar map was reported."""
@@ -29,7 +30,8 @@ def run(gps_after_loss):
     reports = []
     probe.create_subscription(PositionReport, "position", reports.append, 10)
     gps = probe.create_publisher(NavSatFix, "gps/fix", 10)
-    lidar = probe.create_publisher(Odometry, "lidar/odometry", 10)
+    topic = "lidar/odometry" if lidar_type is Odometry else "lidar/pose"
+    lidar = probe.create_publisher(lidar_type, topic, 10)
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     executor.add_node(probe)
@@ -45,7 +47,7 @@ def run(gps_after_loss):
                 fix.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
                 fix.header.stamp = stamp
                 gps.publish(fix)
-            odom = Odometry()
+            odom = lidar_type()
             odom.pose.pose.position.x = 4.0
             odom.header.stamp = stamp
             lidar.publish(odom)
@@ -63,9 +65,13 @@ def run(gps_after_loss):
     return reports[:lost_at], reports[lost_at:], took
 
 
-@pytest.mark.parametrize("gps_after_loss", ["no fix", "silent"])
-def test_lost_gps_switches_to_the_lidar_map_within_two_seconds(ros, gps_after_loss):
-    before, after, took = run(gps_after_loss)
+@pytest.mark.parametrize(
+    ("gps_after_loss", "lidar_type"),
+    [("no fix", Odometry), ("silent", Odometry), ("silent", PoseWithCovarianceStamped)],
+    ids=["no fix", "silent", "silent, slam_toolbox pose"],
+)
+def test_lost_gps_switches_to_the_lidar_map_within_two_seconds(ros, gps_after_loss, lidar_type):
+    before, after, took = run(gps_after_loss, lidar_type)
 
     assert before, "no report arrived while the fix was good"
     assert before[-1].source == PositionReport.GPS and before[-1].error_m == pytest.approx(3.0)

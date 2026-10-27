@@ -1,8 +1,10 @@
 """ROS 2 node for the position source (M2).
 
-Listens to the GPS fix, the lidar localisation and the fused odometry, chooses one source 10 times
-a second with PositionSelector, and publishes a PositionReport for it on `position`. Nothing is
-published while the chosen source has no recent data, so the core then sees the position as lost.
+Listens to the GPS fix, the lidar localisation (`lidar/odometry` as Odometry, or `lidar/pose` as
+PoseWithCovarianceStamped, which slam_toolbox's localisation mode publishes) and the fused
+odometry. It chooses one source 10 times a second with PositionSelector, and publishes a
+PositionReport for it on `position`. Nothing is published while the chosen source has no recent
+data, so the core then sees the position as lost.
 
 The GPS position is in metres east and north of the first fix, a flat-earth approximation that is
 good over a building's grounds; aligning it with the lidar map is the job of robot_localization's
@@ -14,6 +16,7 @@ odometry or lidar report with no covariance (FAST-LIO sends zeros) gets unknown_
 import math
 
 import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -68,6 +71,8 @@ class PositionNode(Node):
         self.odometry: Odometry | None = None
         self.create_subscription(NavSatFix, "gps/fix", self.on_fix, 10)
         self.create_subscription(Odometry, "lidar/odometry", self.on_lidar, 10)
+        # same header and pose.pose / pose.covariance fields as Odometry, so one handler serves both
+        self.create_subscription(PoseWithCovarianceStamped, "lidar/pose", self.on_lidar, 10)
         self.create_subscription(Odometry, "odometry/filtered", self.on_odometry, 10)
         self.report = self.create_publisher(PositionReport, "position", 10)
         self.create_timer(0.1, self.tick)
@@ -80,7 +85,7 @@ class PositionNode(Node):
         if error is not None and error <= self.out_m:
             self.last_good_at = Time.from_msg(m.header.stamp).nanoseconds / 1e9
 
-    def on_lidar(self, m: Odometry) -> None:
+    def on_lidar(self, m: Odometry | PoseWithCovarianceStamped) -> None:
         self.lidar = m
 
     def on_odometry(self, m: Odometry) -> None:
