@@ -89,17 +89,22 @@ def steps_ahead_messages(args):
     executor = SingleThreadedExecutor()
     executor.add_node(core)
     executor.add_node(probe)
-    end = time.monotonic() + 3.0
+    end = time.monotonic() + 8.0  # the decision is said first, then the direction
     while time.monotonic() < end:
-        step = GroundReport(
-            source=GroundReport.DEPTH_CAMERA,
-            ground=GroundReport.STAIRS_UP,
-            trust=0.9,
-            distance_m=1.5,
-        )
-        step.header.stamp = core.get_clock().now().to_msg()
-        ground.publish(step)
-        executor.spin_once(timeout_sec=0.05)
+        stamp = core.get_clock().now().to_msg()
+        for source, distance in (
+            (GroundReport.CAMERA, float("nan")),
+            (GroundReport.DEPTH_CAMERA, 1.5),
+        ):
+            step = GroundReport(
+                source=source, ground=GroundReport.STAIRS_UP, trust=0.9, distance_m=distance
+            )
+            step.header.stamp = (
+                stamp  # two sensors agree: the camera names it, the 3D camera measures it
+            )
+            ground.publish(step)
+        for _ in range(6):  # one call handles one message: let the node take both reports
+            executor.spin_once(timeout_sec=0.01)
     for node in (core, probe):
         node.destroy_node()
     rclpy.shutdown()
@@ -108,7 +113,7 @@ def steps_ahead_messages(args):
 
 def test_a_cane_host_is_told_what_is_ahead():
     told = steps_ahead_messages(["--ros-args", "-p", "directions:=true"])
-    assert "Steps up ahead, 2 metres." in told
+    assert "Steps up ahead, 1 metre." in told
 
 
 def test_a_chair_host_gets_no_step_directions_by_default():

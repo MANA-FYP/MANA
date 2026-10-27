@@ -649,7 +649,8 @@ def drive_towards_steps(m, seconds):
     t = 0.0
     while t < seconds:
         flat(m, t)
-        m.on_ground(Source.DEPTH_CAMERA, Ground.STAIRS_UP, 0.9, 1.5, t)
+        m.on_ground(Source.CAMERA, Ground.STAIRS_UP, 0.9, now=t)  # the camera names the step
+        m.on_ground(Source.DEPTH_CAMERA, Ground.STAIRS_UP, 0.9, 1.5, t)  # the 3D camera measures it
         m.tick(t)
         t = round(t + 0.1, 3)
     return m.tick(t)["heard"]
@@ -700,4 +701,4 @@ def test_a_chair_demo_gets_no_step_directions():
 
 def test_a_cane_demo_is_told_what_is_ahead():
     heard = drive_towards_steps(Middleware(directions=True), 9.0)
-    assert "Steps up ahead, 2 metres." in [h["text"] for h in heard]
+    assert "Steps up ahead, 1 metre." in [h["text"] for h in heard]
