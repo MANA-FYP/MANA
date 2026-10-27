@@ -8,6 +8,7 @@ from mana_core.decision import Command, Ground, Mode, Source
 
 from demo.middleware import (
     SENSORS,
+    SOLO_TEXT,
     LinkSelector,
     Middleware,
     PositionSource,
@@ -393,8 +394,66 @@ def test_the_decision_log_says_stop_and_go_in_words():
     m.on_command(Command.GO, now=2.0, source="button")
     m.tick(2.1)
     log = texts(m, "decision")
-    assert "MANA deactivated. You are fully in control." in log
+    assert "MANA deactivated. Press GO or say go to restart." in log
     assert any(t.startswith("MANA reactivated.") for t in log)
+
+
+def test_a_person_in_view_does_not_fill_the_decision_log():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    for t in range(20):  # a person stays in view, further than the slow-down distance
+        m.on_obstacle("person", 3.0, 0.9, now=float(t))
+        m.tick(t + 0.1)
+    assert not any("person" in e["text"] for e in m.decisions)
+
+
+def detection_lines(m):
+    return [e["text"] for e in m.decisions if e["kind"] == "detection"]
+
+
+def test_what_the_camera_sees_is_written_once_when_it_changes():
+    m = Middleware(clock=lambda: 10.0)
+    for t in (1.0, 1.2, 1.4):  # the same view for three frames: written once
+        m.on_detections([("person", 3.0), ("laptop", None), ("person", 2.04)], now=t)
+    for t in (2.0, 2.2):
+        m.on_detections([], now=t)
+    assert detection_lines(m) == [
+        "Camera sees: person (about 2.0 m), laptop.",
+        "The camera sees nothing it knows.",
+    ]
+
+
+def test_a_far_or_cut_off_object_is_named_without_a_distance():
+    m = Middleware(clock=lambda: 10.0)
+    for t in (1.0, 1.2):
+        m.on_detections([("chair", 1.4), ("person", 25.1)], now=t)
+    assert detection_lines(m) == ["Camera sees: chair (about 1.4 m), person."]
+
+
+def test_one_flickering_frame_is_not_written():
+    m = Middleware(clock=lambda: 10.0)
+    frames = [[("person", 2.0)], [("person", 2.0)], [], [("person", 2.0)], [("person", 2.0)]]
+    for i, found in enumerate(frames):
+        m.on_detections(found, now=1.0 + i * 0.2)
+    assert detection_lines(m) == ["Camera sees: person (about 2.0 m)."]
+
+
+def test_with_only_the_camera_on_mana_says_what_it_cannot_decide():
+    m = Middleware(clock=lambda: 10.0)
+    for i in range(30):
+        m.on_light(0.6, now=i * 0.1)
+        m.tick(i * 0.1)
+    assert SOLO_TEXT["camera"] in [e["text"] for e in m.decisions]
+
+
+def test_a_stop_while_already_stopped_is_answered_again():
+    m = Middleware(clock=lambda: 10.0)
+    m.tick(0.0)
+    m.on_command(Command.STOP, now=1.0, source="button")
+    m.tick(1.1)
+    m.on_command(Command.STOP, now=2.0, source="voice")
+    m.tick(2.1)
+    assert texts(m, "decision").count("MANA deactivated. Press GO or say go to restart.") == 2
 
 
 def test_the_decision_log_says_when_alerts_switch_to_bluetooth():

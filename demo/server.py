@@ -191,7 +191,9 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
     except Exception:  # not a decodable frame
         return
     frame = app["frame"]
-    frame.update(seq=frame["seq"] + 1, jpeg=jpeg, boxes=[])
+    # the last boxes stay until the next detection replaces them; frames arrive faster than the
+    # detector runs, so clearing them here left most frames without boxes
+    frame.update(seq=frame["seq"] + 1, jpeg=jpeg)
     if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
     app["live"]["busy"] = True
@@ -211,8 +213,11 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         mw.latency["detector_ms"] = round((mw.clock() - started) * 1000, 1)
         frame.update(w=w, h=h)
         found = vision.to_obstacles(detections, w, h)
-        for ob in found:
+        nearest: dict[str, float] = {}
+        for ob in found:  # nearest first
             mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
+            nearest.setdefault(ob.label, ob.distance_m)
+        mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
              "x2": d.x2, "y2": d.y2} for d in detections
@@ -324,12 +329,13 @@ def main(argv=None) -> None:
     p.add_argument("--host", default="127.0.0.1", help="the phone arrives through the USB cable")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--weights", default="yolo26n.pt", help="object detector weights (Ultralytics)")
+    p.add_argument("--imgsz", type=int, default=640, help="detector input size; 480 is faster")
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     a = p.parse_args(argv)
 
-    detector = None if a.no_detector else vision.Detector.load(a.weights)
+    detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     app = build_app(detector=detector, classifier=classifier, recognizer=recognizer)

@@ -242,6 +242,8 @@ WORD_COMMANDS = {
     "down": Command.SLOW_DOWN,
 }
 
+USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
+
 
 COMMAND_TEXT = {
     Command.STOP: "Stop",
@@ -279,6 +281,21 @@ LINK_TEXT = {
     "bluetooth": "Wi-Fi is not available. Switching alerts to Bluetooth.",
     "none": "Wi-Fi and Bluetooth are off. There is no alert link.",
 }
+
+# When a sensor is tested on its own: what MANA can and cannot decide with it. The radios only
+# choose the alert link, so they are not counted here.
+SOLO_TEXT = {
+    "camera": "Only the camera is on. MANA can see obstacles, but one camera cannot confirm a step "
+    "or check the tilt, so it cannot choose wheels or tracks. It slows down to stay safe.",
+    "motion": "Only motion is on. MANA can check tilt and rough ground, and rough ground changes "
+    "it to tracks, but it cannot see obstacles or steps. It slows down to stay safe.",
+    "gps": "Only GPS is on. MANA can choose the position source, but it has nothing to decide how "
+    "to move. It slows down to stay safe.",
+    "microphone": "Only the microphone is on. MANA obeys stop and go, but it cannot see or feel "
+    "the ground. It slows down to stay safe.",
+}
+NO_SENSOR_TEXT = "No sensor is on. MANA cannot make a decision, so it slows down to stay safe."
+SHOWN_DISTANCE_M = 8.0  # camera distances beyond this are too rough to write down
 
 
 def sensor_text(label: str, reason: str) -> str:
@@ -338,8 +355,10 @@ class Middleware:
         self._available_since: dict[str, float] = {}
         self._said_at: dict[str, float] = {}
         self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
-        self._obstacle_said: dict[str, float] = {}
         self.detections: list[dict] = []
+        self._seen_candidate: tuple[frozenset | None, int] = (None, 0)
+        self._seen_logged: frozenset | None = None
+        self._last_active: set[str] | None = None
         self.brightness = 1.0
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
@@ -372,7 +391,7 @@ class Middleware:
     def _decide(self, now: float, kind: str, text: str) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself."""
-        if kind in ("switch", "link", "position"):  # stop and go may repeat; radios may not
+        if kind in ("switch", "link", "position", "coverage"):  # stop and go may repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
                 return
@@ -391,7 +410,7 @@ class Middleware:
         """The decision as one sentence, and whether the stop came from the user."""
         user_stop = d.stop and fired == "user stop"
         if user_stop:
-            return "MANA deactivated. You are fully in control.", True
+            return USER_STOP_TEXT, True
         if d.stop:
             return f"Stopped. {end_sentence(d.reason)}", False
         how = "tracks" if d.mode == Mode.TRACKS else "wheels"
@@ -507,6 +526,17 @@ class Middleware:
                 else:
                     text = not_available(sid, label)
                 self._decide(now, "switch", text)
+
+        # one sensor on its own: say what MANA can and cannot decide with it
+        active = {sid for sid in SOLO_TEXT if self._sensor_state.get(sid) == "active"}
+        if active != self._last_active:
+            if len(active) == 1:
+                self._decide(now, "coverage", SOLO_TEXT[next(iter(active))])
+            elif not active and self._last_active:
+                self._decide(now, "coverage", NO_SENSOR_TEXT)
+            self._last_active = active
+        if next(s["state"] for s in sensors if s["id"] == "camera") != "active":
+            self._seen_logged, self._seen_candidate = None, (None, 0)  # say it afresh next time
         return sentence
 
     def _since_start(self, now: float) -> float:
@@ -670,9 +700,12 @@ class Middleware:
         self, command: Command, trust: float = 1.0, now: float | None = None, source: str = "button"
     ) -> Command:
         now = self.clock() if now is None else now
+        already_stopped = self.core.stopped_by_user
         self.core.on_command(command, trust)
         if command == Command.STOP:
             self._stop_sent = now
+            if already_stopped:  # answered again, so the user knows this stop was heard too
+                self._decide(now, "decision", USER_STOP_TEXT)
         self._say(now, source, "command", command.name, trust)
         return command
 
@@ -687,13 +720,9 @@ class Middleware:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
         self.core.on_obstacle(ObstacleReport(now, trust, Source.DETECTOR, distance_m, label))
+        # not written to the decision log: a detection is shown as a box on the camera, and the
+        # log says "Obstacle ahead, slowing down" or "stopping" once the core acts on it
         self._say(now, "detector", "obstacle", f"{label} {distance_m:.1f} m", trust)
-        last = self._obstacle_said.get(label)
-        if last is None or now - last >= 3.0:
-            self._obstacle_said[label] = now
-            self._decide(
-                now, "obstacle", f"Obstacle detected: {label}, about {distance_m:.1f} m ahead."
-            )
         self.detections.append(
             {
                 "t": now,
@@ -704,6 +733,37 @@ class Middleware:
             }
         )
         del self.detections[:-10]
+
+    def on_detections(
+        self, found: list[tuple[str, float | None]], now: float | None = None
+    ) -> None:
+        """Everything the detector found in one frame, as (label, distance or None). Written to
+        the log when what the camera sees changes and holds for two frames, so it is neither
+        repeated nor set off by one flickering frame."""
+        now = self.clock() if now is None else now
+        nearest: dict[str, float | None] = {}
+        for label, dist in found:
+            old = nearest.get(label)
+            nearest[label] = dist if old is None or (dist is not None and dist < old) else old
+        key = frozenset(nearest)
+        seen, count = self._seen_candidate
+        self._seen_candidate = (key, count + 1 if key == seen else 1)
+        if self._seen_candidate[1] < 2 or key == self._seen_logged:
+            return
+        if key or self._seen_logged:
+            if key:
+                order = sorted(nearest.items(), key=lambda kv: (kv[1] is None, kv[1] or 0.0, kv[0]))
+                # a box cut off by the frame edge looks far away; such guesses are not shown
+                things = ", ".join(
+                    f"{label} (about {dist:.1f} m)"
+                    if dist is not None and dist <= SHOWN_DISTANCE_M
+                    else label
+                    for label, dist in order[:5]
+                )
+                self._decide(now, "detection", f"Camera sees: {things}.")
+            else:
+                self._decide(now, "detection", "The camera sees nothing it knows.")
+        self._seen_logged = key
 
     def on_ground(
         self,

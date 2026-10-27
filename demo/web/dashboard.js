@@ -74,10 +74,15 @@ function render(s) {
   // the action box shows only the last action MANA took, the same one the voice says
   const log = s.decisions;
   const last = log.length ? log[log.length - 1] : null;
-  const shown = last ? last.text : d.sentence;
-  if (shown !== linesKey) {
-    linesKey = shown;
-    $("mode").innerHTML = "<p class=\"main\">" + shown + "</p>";
+  // while the user's stop holds, the box keeps saying so; newer lines still go to the log
+  const shown = d.stop && d.fired === "user stop" ? d.sentence : last ? last.text : d.sentence;
+  // the four lines before it stay visible underneath, newest first
+  const earlier = log.slice(-5, -1).reverse().map((e) =>
+    '<li><span class="when">' + e.t.toFixed(1) + "</span>" + e.text + "</li>").join("");
+  const html = '<p class="main">' + shown + "</p>" + (earlier ? '<ul class="earlier">' + earlier + "</ul>" : "");
+  if (html !== linesKey) {
+    linesKey = html;
+    $("mode").innerHTML = html;
   }
 
   // the voice says each new action, in order; a new one waits for the one still being spoken
@@ -87,7 +92,7 @@ function render(s) {
   } else if (newest > lastDecision) {
     const fresh = log.filter((e) => e.n > lastDecision);
     lastDecision = newest;
-    fresh.forEach((e) => speak(e.text));
+    fresh.filter((e) => e.kind !== "detection").forEach((e) => speak(e.text));   // detections are shown, not spoken
   }
 
   // box 4: only what the user says into the microphone
@@ -108,6 +113,12 @@ function render(s) {
   }
 
   if (!m.detector) setText($("cameraHint"), "The detector is not installed, so no boxes are drawn.");
+  // a frozen frame must not look live: dim it and say so when the camera stops sending
+  const cam = s.sensors.find((x) => x.id === "camera");
+  const camLive = !!cam && cam.state === "active";
+  if (!camLive && lastFrame) setText($("camEmpty"), "No live camera: the camera is off or the phone is disconnected.");
+  $("camEmpty").style.display = camLive && lastFrame ? "none" : "";
+  $("cam").style.opacity = camLive ? "" : "0.25";
   if (s.frame.seq > lastFrame) {
     boxes = s.frame.boxes;
     frameSize = { w: s.frame.w, h: s.frame.h };

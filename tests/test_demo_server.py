@@ -30,8 +30,8 @@ def sensor(snap, sid):
     return next(s for s in snap["sensors"] if s["id"] == sid)
 
 
-async def with_clients(test):
-    client = TestClient(TestServer(build_app()))
+async def with_clients(test, **app_kwargs):
+    client = TestClient(TestServer(build_app(**app_kwargs)))
     await client.start_server()
     try:
         phone = await client.ws_connect("/ws/phone")
@@ -160,6 +160,53 @@ def test_a_camera_frame_makes_the_camera_active_and_is_served_back():
         assert resp.status == 200 and resp.content_type == "image/jpeg"
 
     run(with_clients(go))
+
+
+class SlowSecondDetector:
+    """Finds a person in the first frame; every later detection takes a second."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def detect(self, jpeg):
+        import time
+
+        from demo.vision import Detection
+
+        self.calls += 1
+        if self.calls > 1:
+            time.sleep(1.0)
+        return [Detection("person", 0.9, 10.0, 5.0, 30.0, 45.0)], 64, 48
+
+
+def test_boxes_stay_on_new_frames_until_the_next_detection():
+    async def go(client, phone, dash):
+        await phone.send_bytes(b"\x01" + jpeg())
+        await snapshot_where(dash, lambda s: s["frame"]["boxes"])
+        await phone.send_bytes(b"\x01" + jpeg())  # arrives while the detector is still busy
+        snap = await snapshot_where(dash, lambda s: s["frame"]["seq"] == 2)
+        assert [b["label"] for b in snap["frame"]["boxes"]] == ["person"]
+
+    run(with_clients(go, detector=SlowSecondDetector()))
+
+
+class PersonDetector:
+    def detect(self, jpeg):
+        from demo.vision import Detection
+
+        return [Detection("person", 0.9, 10.0, 5.0, 30.0, 45.0)], 64, 48
+
+
+def test_what_the_camera_sees_reaches_the_decision_log():
+    async def go(client, phone, dash):
+        for _ in range(3):
+            await phone.send_bytes(b"\x01" + jpeg())
+            await asyncio.sleep(0.15)
+        await snapshot_where(
+            dash, lambda s: any(e["text"].startswith("Camera sees: person") for e in s["decisions"])
+        )
+
+    run(with_clients(go, detector=PersonDetector()))
 
 
 def test_a_broken_frame_does_not_crash_the_server():

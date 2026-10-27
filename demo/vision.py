@@ -27,6 +27,20 @@ OBSTACLE_HEIGHT_M = {
     "dog": 0.5,
     "chair": 0.9,
     "bench": 0.85,
+    "dining table": 0.75,
+    "couch": 0.85,
+    "bed": 0.6,
+    "potted plant": 0.6,
+    "suitcase": 0.65,
+    "refrigerator": 1.7,
+    "toilet": 0.75,
+    "fire hydrant": 0.75,
+    "table": 0.75,  # names from the open-vocabulary list in build_detector.py
+    "desk": 0.75,
+    "door": 2.0,
+    "wheelchair": 1.0,
+    "trash can": 0.7,
+    "traffic cone": 0.7,
 }
 
 # Defaults for a typical phone camera held upright. They are assumptions: calibrate once with
@@ -111,28 +125,31 @@ def to_obstacles(
 
 
 class Detector:
-    """A lightweight COCO object detector (Ultralytics YOLO, nano size)."""
+    """An Ultralytics object detector: YOLO26 on the COCO classes, or the open-vocabulary YOLOE
+    built by build_detector.py. imgsz is the size each frame is scaled to: 640 finds small objects
+    best, 480 is faster on a laptop CPU."""
 
-    def __init__(self, model):
+    def __init__(self, model, imgsz: int = 640):
         self.model = model
+        self.imgsz = imgsz
 
     @classmethod
-    def load(cls, weights: str = "yolo26n.pt") -> Detector | None:
+    def load(cls, weights: str = "yolo26n.pt", imgsz: int = 640) -> Detector | None:
         try:
             ultralytics = importlib.import_module("ultralytics")
         except ImportError:
             return None
         try:
-            return cls(ultralytics.YOLO(weights))
+            return cls(ultralytics.YOLO(weights), imgsz)
         except Exception:  # the weights cannot be found or downloaded
             return None
 
-    def detect(self, jpeg: bytes, conf: float = 0.3) -> tuple[list[Detection], int, int]:
+    def detect(self, jpeg: bytes, conf: float = 0.25) -> tuple[list[Detection], int, int]:
         """Detections in one JPEG frame, with the frame's width and height."""
         from PIL import Image
 
         image = Image.open(io.BytesIO(jpeg)).convert("RGB")
-        result = self.model(image, imgsz=416, conf=conf, verbose=False)[0]
+        result = self.model(image, imgsz=self.imgsz, conf=conf, verbose=False)[0]
         names = result.names
         found = []
         for box in result.boxes:
