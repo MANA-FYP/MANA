@@ -232,7 +232,7 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
-3. Stairs down seen by two sensors: stop and ask; go down on tracks only after the user says yes (a no, a stop or a new staircase asks again)
+3. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
 4. Manual mode: follow the user's mode and speed
 5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
 6. On tracks and not yet level for 2 s: stay on tracks

@@ -222,10 +222,14 @@ class DecisionCore:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
         control to the user (manual) until they choose automatic again. YES answers the question
         at the top of stairs down; at any other time it does nothing, so an early yes cannot
-        approve stairs not yet seen. A NO or a STOP takes the yes back, so MANA asks again. LEFT
-        and RIGHT are not part of this decision."""
+        approve stairs not yet seen. A NO or a STOP takes the yes back at any trust, since taking
+        it back is always safe, so MANA asks again. Once the user says yes, the stairs are gone
+        down on tracks whatever the mode. LEFT and RIGHT are not part of this decision."""
         if command == Command.STOP:
             self.stopped_by_user = True
+            self.down_ok = False
+            return
+        if command == Command.NO:
             self.down_ok = False
             return
         if trust < self.limits.min_trust:
@@ -239,8 +243,6 @@ class DecisionCore:
             self.user_mode = Mode.WHEELS if command == Command.WHEELS else Mode.TRACKS
         elif command == Command.YES and self.asking_down:
             self.down_ok = True
-        elif command == Command.NO:
-            self.down_ok = False
         elif command in (Command.SPEED_UP, Command.SLOW_DOWN):
             self.automatic = False
             step = SPEED_STEP if command == Command.SPEED_UP else -SPEED_STEP
@@ -394,6 +396,11 @@ class DecisionCore:
                     "stairs down",
                     lambda: self._stairs_down() and not self.down_ok,
                     lambda: self._stop(ASK_DOWN),
+                ),
+                branch(  # and after the yes, down on tracks whatever the mode
+                    "going down",
+                    lambda: self._stairs_down() and self.down_ok,
+                    self._tracks,
                 ),
                 branch(
                     "manual",

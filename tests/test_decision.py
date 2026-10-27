@@ -500,3 +500,28 @@ def test_a_driving_command_at_the_question_does_not_drive_on(command):
     c.on_command(command, 0.9)
     d = fed(c, stairs_down(), NOW + 0.1)
     assert (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [([Command.MANUAL], []), ([], [Command.SPEED_UP]), ([], [Command.WHEELS])],
+    ids=["manual then yes", "yes then speed up", "yes then wheels"],
+)
+def test_after_a_yes_the_stairs_are_gone_down_on_tracks_whatever_the_mode(before, after):
+    c = core()
+    for command in before:
+        c.on_command(command, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+    c.on_command(Command.YES, 0.9)
+    for command in after:
+        c.on_command(command, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.2)
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.TRACKS, False, LIM.slow)
+    assert d.reason == "Going down the stairs on tracks"
+
+
+def test_an_unsure_no_still_takes_the_yes_back():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    c.on_command(Command.NO, 0.2)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
