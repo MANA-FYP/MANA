@@ -26,7 +26,10 @@ length, and its bearing from the camera's field of view, both from the camera in
 box is cut by the top or the bottom of the frame (legs below it, or too close to fit) shows only
 part of their height, which would read too far: for that box the distance from a 0.4 m shoulder
 width is used too, and the nearer is kept, so a close person keeps coming closer instead of staying
-at about 1.6 m. It publishes only the **nearest** obstacle, because the core keeps one report per
+at about 1.6 m. 0.4 m errs closer for someone facing the camera, but someone side-on, crossing in
+front of the chair, is only about 0.25 to 0.3 m deep and reads about 1.4 times too far: at 0.6 m
+they read 0.86 m, so the camera alone stops only at about 0.55 m. The 3D camera and the lidar cover
+that case in the full system. It publishes only the **nearest** obstacle, because the core keeps one report per
 source. With nothing in view it publishes nothing, and the core lets the last report age out after
 0.5 s. The trust is the detector's confidence times `camera_trust_factor` of the frame's mean
 brightness, the same rule and the same code as the phone (#71), so the camera is trusted less in the
@@ -41,7 +44,7 @@ as one sensor.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `weights` | `yolo26n.pt` | `yolo26n.pt` (COCO, as at the mid-evaluation), `yoloe-26n-mana.pt` (YOLOE-26 told the 40 names in `demo/build_detector.py`, including stairs, doors and poles), and later the fine-tuned YOLO26s from #49, with no code change |
+| `weights` | `yolo26n.pt` | `yolo26n.pt` (COCO, as at the mid-evaluation), `yoloe-26n-mana.pt` (YOLOE-26 told the 42 names in `demo/build_detector.py`, including stairs, doors, poles, buses and trucks), and later the fine-tuned YOLO26s from #49, with no code change |
 | `imgsz` | `416` | size each frame is scaled to |
 | `conf` | `0.3` | lowest confidence the detector keeps |
 | `min_confidence` | `0.5` | lowest confidence that becomes an obstacle; the core ignores trust under 0.5 anyway |
@@ -59,11 +62,12 @@ after a warm-up, through the same `Detector.detect_image` call the node makes:
 | `yoloe-26n-mana.pt` (40 names) | 480 | 73 ms | 87 ms | 14 |
 | `yoloe-26n-mana.pt` (40 names) | 416 | 62 ms | 68 ms | 16 |
 
-Both keep up with the node's 10 frames per second on this laptop. On the same street picture both
-find the same person at the same estimated distance (3.5 m with a phone-like camera). **YOLOE-26n
-knows only its 40 names, and they do not include `bus` or `truck`**, so with those weights a bus
-is not an obstacle; the COCO model finds it. Add them to `NAMES` in `demo/build_detector.py`
-before using YOLOE outdoors.
+The times were measured with the 40-name YOLOE. Both keep up with the node's 10 frames per second on
+this laptop. On the same street picture both find the same person at the same estimated distance
+(3.5 m with a phone-like camera). YOLOE-26n finds only the names it was built with: the 40-name
+version missed the bus there, so `bus` and `truck` were added (#72), and rebuilt with 42 names it
+finds the bus at 6.1 m. Rebuild `yoloe-26n-mana.pt` with `python -m demo.build_detector` after the
+names change.
 
 ## Ground from the 3D camera
 
