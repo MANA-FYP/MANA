@@ -19,7 +19,7 @@ usage() {
   cat <<'EOF'
 name        size on disk           how
 stairnet    92 GB zip              manual: needs an IEEE DataPort login, then the script unpacks it
-sanpo       about 9 GB (default)   automatic: public Google bucket, a subset of SANPO-Real
+sanpo       about 3 GB (default)   automatic: public Google bucket, a subset of SANPO-Real
 coco        1.1 GB                 automatic: val2017 images and the 2017 annotations
 speech      2.4 GB                 automatic: Speech Commands v2 and its fixed test set
 urbansound  6.0 GB                 automatic: UrbanSound8K from Zenodo

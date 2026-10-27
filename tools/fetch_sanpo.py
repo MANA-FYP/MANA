@@ -19,7 +19,7 @@ taken as complete and the next run fills the gaps.
 
 --count prints, for each "thing" class, how many objects and frames the masks on disk hold. Masks
 are RGB: red is the class id; green and blue hold the instance id (green looks like the high byte).
-With --masks-only the counts cost about 50 MB instead of 9 GB.
+With --masks-only the counts cost about 20 MB instead of 3 GB.
 """
 
 from __future__ import annotations

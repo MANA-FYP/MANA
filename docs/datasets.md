@@ -9,12 +9,12 @@ tools/fetch_datasets.sh coco speech
 MANA_DATA=/mnt/big/mana tools/fetch_datasets.sh   # put the data somewhere else
 ```
 
-A dataset that is already on disk is skipped, and a stopped download picks up where it left off. Only StairNet needs a manual step (see below). The full licence list is in [`NOTICE`](../NOTICE).
+A dataset that is already on disk is skipped, and a stopped download picks up where it left off. Every archive is checked before it is unpacked (the CRC of each zip member, the gzip stream, and Zenodo's MD5 for UrbanSound8K), so a cut-off download is never used, and a failed dataset is not marked done. Only StairNet needs a manual step (see below). The full licence list is in [`NOTICE`](../NOTICE).
 
 | Dataset | Used for | Licence | Size we fetch | How |
 |---|---|---|---|---|
 | [StairNet](#stairnet) | MobileNetV2 ground classifier (#38) | Not stated by the authors; access through IEEE DataPort | 92 GB zip, about 515,000 images | Manual download, then the script unpacks it |
-| [SANPO](#sanpo) | YOLO26s and YOLOv8s fine-tuning, YOLOE-26 zero-shot test (#49) | CC BY 4.0 | About 9 GB, about 2,300 frames (a subset) | Automatic |
+| [SANPO](#sanpo) | YOLO26s and YOLOv8s fine-tuning, YOLOE-26 zero-shot test (#49) | CC BY 4.0 | About 3 GB, 890 frames (a subset) | Automatic |
 | [COCO 2017 val](#coco) | Check of the pretrained COCO detector (YOLO26n) | Annotations CC BY 4.0; images under their Flickr licences | 1.1 GB, 5,000 images | Automatic |
 | [Speech Commands v2](#speech-commands-v2) | BC-ResNet-8 command words (#46) | CC BY 4.0 | 2.4 GB, 105,829 clips | Automatic |
 | [UrbanSound8K](#urbansound8k) | EfficientAT-mn10 siren and horn detection (#47) | CC BY-NC 4.0 (non-commercial) | 6.0 GB, 8,732 clips | Automatic |
@@ -33,10 +33,10 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
   | LG | level ground | about 86 % | flat |
   | LG-IS | level ground, stairs coming up ahead | about 3 % | stairs |
   | IS | on incline stairs (going up) | about 9 % | stairs |
-  | IS-LG | stairs ending, level ground ahead | about 2 % | flat |
+  | IS-LG | top of the stairs: the landing is in view, the last steps are still ahead | about 2 % | stairs |
 
-  These are the demo's `STAIR_CLASSES` (`level`, `to_stairs`, `stairs`, `to_level`) in `demo/vision.py`, in the same order.
-- **Split:** the dataset has no fixed split. The authors found that a random split of frames leaks near-identical neighbouring frames into the test set (98.4 % test accuracy with a random split, 97.2 % with a split by video). We split **by video**: 70 % of the videos for training, 15 % for validation and 15 % for testing, with a fixed seed. The training script for #38 writes the exact list of videos in each part next to the model, so the split can be repeated.
+  These are the demo's `STAIR_CLASSES` (`level`, `to_stairs`, `stairs`, `to_level`) in `demo/vision.py`, in the same order. The classifier keeps all four classes; only LG means flat ground. IS-LG still has steps between the chair and the landing (the paper's Table 1 needs "the horizontal face of the last step prior to level ground" in view), so it is reported as stairs. Going back to wheels is not the classifier's call anyway: the core waits until the IMU says the chair is level. #38 changes `stair_ground()` to match.
+- **Split:** the dataset has no fixed split. The authors found that a random split of frames leaks near-identical neighbouring frames into the test set (98.4 % test accuracy for MobileNetV2 with a random split, in the "Baseline model" section and Table 2 of Kurbis et al. 2024; 97.2 % when retested on a split by video, in the Discussion, after Table 3). We split **by video**: 70 % of the videos for training, 15 % for validation and 15 % for testing, with a fixed seed. The training script for #38 writes the exact list of videos in each part next to the model, so the split can be repeated.
 - **Limits:** StairNet has only stairs going **up** and has no ramps. Stairs going down, drops and ramps come from the 3D camera (#39), not from this classifier.
 
 ## SANPO
@@ -44,10 +44,24 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Source:** Waghmare et al., *SANPO: A Scene Understanding, Accessibility, Navigation, Pathfinding, Obstacle Avoidance Dataset*, arXiv:2309.12172, 2023. Data in the public Google Cloud bucket `gs://gresearch/sanpo_dataset/v0`, [code and documentation](https://github.com/google-research-datasets/sanpo_dataset).
 - **Licence:** CC BY 4.0. Faces and number plates are already blurred by the authors.
 - **Contents:** SANPO-Real has 701 walking sessions filmed from a chest camera and a head camera (stereo pairs, 2208 × 1242 PNG frames), with depth maps and segmentation masks on the left image (in the sessions we checked, only one of the two cameras has masks). SANPO-Synthetic adds 113,000 rendered frames. The whole dataset is about 6 TB.
-- **What we fetch:** `tools/fetch_sanpo.py` (called by the main script) uses plain HTTPS, so no Google tools are needed. For each chosen session it keeps only the left frames that have a mask, and one of every 10 of those (frames next to each other are almost the same picture). By default that is 40 training sessions and 10 test sessions, about 2,300 frames and 9 GB. Change it with `SANPO_TRAIN`, `SANPO_TEST` and `SANPO_EVERY`, for example `SANPO_EVERY=5` for twice the frames. Depth maps, the right lens and SANPO-Synthetic are left out.
+- **What we fetch:** `tools/fetch_sanpo.py` (called by the main script) uses plain HTTPS, so no Google tools are needed. For each chosen session it keeps only the left frames that have a mask, and one of every 10 of those (frames next to each other are almost the same picture). By default that is 40 training sessions and 10 test sessions, spread evenly over each official list so they are not all from the same few places: 890 frames (705 for training, 185 for testing) and about 3 GB, measured. Sessions differ a lot in how many frames are annotated, from a handful to several hundred. A request that fails is tried again three times (after 1, 2 and 4 s); a file that is still missing is skipped and reported, and the run then exits with an error, so the next run fills the gap. Change it with `SANPO_TRAIN`, `SANPO_TEST` and `SANPO_EVERY`, for example `SANPO_EVERY=5` for twice the frames. Depth maps, the right lens and SANPO-Synthetic are left out.
 - **Layout:** `datasets/sanpo/<train|test>/<session>/<camera>/video_frames/<frame>.png`, with the matching mask under `segmentation_masks/`, plus `labelmap.json`, `labeltype.json` and `splits/`.
-- **Labels:** 31 classes in `labelmap.json`. Masks are RGB PNG files: in the frames we checked, the red channel holds the class id and the blue channel holds the instance id. SANPO has masks, not boxes, so #49 turns each instance of a "thing" class (`labeltype.json` marks them `panoptic`, for example `stairs`, `pedestrian`, `vehicle`, `pole`, `opening-door`, `obstacle`) into a YOLO box before training.
-- **Split:** the authors' own lists, `splits/train_session_ids.txt` (560 sessions) and `splits/test_session_ids.txt` (141 sessions), so a test walk is never seen in training. We take the first sessions of each list, so every member gets the same ones, and hold out 10 % of the training sessions (by session) for validation.
+- **Labels:** 31 classes in `labelmap.json`. Masks are RGB PNG files: in the frames we checked, the red channel holds the class id, and the green and blue channels hold the instance id (green looks like the high byte: it is 0 to 4 while blue goes up to 255). "Stuff" classes such as road and sidewalk always have instance 0. SANPO has masks, not boxes, so #49 turns each instance of a "thing" class (`labeltype.json` marks them `panoptic`, for example `stairs`, `pedestrian`, `vehicle`, `pole`, `opening-door`, `obstacle`) into a YOLO box before training.
+- **What the default subset holds** (`python3 tools/fetch_sanpo.py --masks-only --count`, about 20 MB; objects of at least 100 pixels):
+
+  | Class | Train objects (frames) | Test objects (frames) |
+  |---|---|---|
+  | vehicle | 2,090 (453) | 410 (113) |
+  | obstacle | 1,389 (420) | 704 (174) |
+  | pedestrian | 1,251 (383) | 994 (116) |
+  | tree | 1,128 (422) | 481 (121) |
+  | pole | 396 (358) | 290 (167) |
+  | opening-door | 46 (34) | 0 |
+  | **stairs** | **61 (61)** | **7 (7)** |
+
+  **Stairs are rare.** Seven stairs in the test split is far too few to report a stairs recall against the 0.85 target with any confidence: one miss moves it by 14 points. Before #49 trains, it has to find more. The plan is to run `--masks-only --count` over all 701 sessions with `--every 1` (about 2.5 GB of masks), list the sessions that contain stairs, and fetch those sessions in full. The test split stays the authors' own test sessions. Adjacent frames are near copies, so stairs recall should also be reported per staircase, not only per frame.
+
+- **Split:** the authors' own lists, `splits/train_session_ids.txt` (560 sessions) and `splits/test_session_ids.txt` (141 sessions), so a test walk is never seen in training. We take sessions spread evenly over each list (every 14th of the 560, every 14th of the 141), so every member gets the same ones, and hold out 10 % of the training sessions (by session) for validation.
 
 ## COCO
 
