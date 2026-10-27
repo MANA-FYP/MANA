@@ -2,8 +2,9 @@
 
 The depth frames are rendered by mana_perception.synthetic, which casts a ray for every pixel at a
 ground shape: flat ground, ramps, a curb, stairs up and down, drops and a wall. The camera is the
-3D camera planned for the chair: 1.0 m up, tilted 0.6 rad down, 87 by 58 degrees. When the Gazebo
-world (#13, #14) exists, frames saved from it go through the same checks.
+3D camera planned for the chair: 1.0 m up, tilted 0.6 rad down, 87 degrees across, with a blind
+zone to about 0.37 m. When the Gazebo world (#13, #14) exists, frames saved from it go through the
+same checks.
 """
 
 import math
@@ -132,10 +133,59 @@ def test_a_two_degree_tilt_error_on_flat_ground_is_not_a_ramp():
     assert dp.read_ground(image, tilted).ground == dp.FLAT
 
 
-def test_a_height_error_does_not_matter():
-    image = render(stairs(1.5, 0.17))
-    high = dp.Camera(CAM.fx, CAM.fy, CAM.cx, CAM.cy, 1.1, CAM.pitch_rad)
-    assert dp.read_ground(image, high).ground == dp.STAIRS_UP
+def test_a_mounting_height_error_of_a_few_centimetres_does_not_matter():
+    for height in (0.97, 1.03):
+        cam = dp.Camera(CAM.fx, CAM.fy, CAM.cx, CAM.cy, height, CAM.pitch_rad)
+        assert dp.read_ground(render(stairs(1.5, 0.17)), cam).ground == dp.STAIRS_UP
+        assert dp.read_ground(render(flat), cam).ground == dp.FLAT
+
+
+def test_the_blind_zone_ends_where_the_bottom_row_meets_the_ground():
+    assert dp.nearest_ground(CAM, ROWS) == pytest.approx(0.37, abs=0.01)
+    up = dp.Camera.from_fov(COLS, ROWS, math.radians(87.0), height_m=1.0, pitch_rad=-0.7)
+    assert dp.nearest_ground(up, ROWS) == math.inf
+
+
+@pytest.mark.parametrize("at", [0.1, 0.2, 0.3, 0.4, 0.45])
+def test_an_edge_down_in_the_blind_zone_is_reported_no_farther_than_it_is(at):
+    for shape, kinds in (
+        (stairs(at, -0.17), (dp.STAIRS_DOWN,)),
+        (step(at, -0.3), (dp.DROP,)),
+        (step(at, -3.0), (dp.DROP,)),  # a ledge: the floor below is out of range
+    ):
+        r = dp.read_ground(render(shape), CAM)
+        assert r.ground in kinds, (at, r)
+        assert r.distance_m <= at, (at, r)  # never farther than the real edge
+
+
+@pytest.mark.parametrize("at", [0.1, 0.3, 0.45])
+def test_a_curb_up_in_the_blind_zone_is_a_curb_right_in_front(at):
+    r = read(step(at, 0.12))
+    assert r.ground == dp.CURB and r.distance_m <= at
+    assert r.step_height_m == pytest.approx(0.12, abs=0.03)
+
+
+def test_the_drop_in_the_blind_zone_gives_its_measured_height():
+    r = read(step(0.3, -0.3))
+    assert r.step_height_m == pytest.approx(0.3, abs=0.04)
+
+
+def test_a_wall_right_in_front_is_left_to_the_obstacle_sensors():
+    assert read(step(0.3, 2.5)).ground == dp.UNKNOWN
+
+
+def test_stairs_up_starting_in_the_blind_zone_are_stairs_not_a_wall():
+    shallow = dp.Camera.from_fov(COLS, ROWS, math.radians(87.0), height_m=1.0, pitch_rad=0.5)
+    r = dp.read_ground(render(stairs(0.1, 0.17), cam=shallow), shallow)
+    assert r.ground == dp.STAIRS_UP and r.distance_m == 0.0
+
+
+def test_a_floor_seen_only_beyond_the_reading_range_is_a_ledge_and_no_depth_is_unknown():
+    # the floor 8 m down shows only past max_range_m (3 m): a ledge right in front
+    deep = dp.read_ground(render(step(0.2, -8.0), far=20.0), CAM)
+    assert deep.ground == dp.DROP and deep.distance_m == 0.0
+    # no depth at all, as from a covered lens or a floor beyond the sensor itself: nothing to judge
+    assert dp.read_ground(np.full((ROWS, COLS), np.nan), CAM).ground == dp.UNKNOWN
 
 
 def test_no_readings_at_all_is_unknown():

@@ -16,8 +16,11 @@ How it works:
    does not, with nothing after it, is a drop. A steady slope with no step is a ramp.
 
 Depth follows REP 118: metres along the optical axis, with NaN, inf or 0 where there is no reading.
-Heights are measured from the ground under the chair, so a small error in the mounting height
-does not matter, but the tilt must be right: 2 degrees of error looks like a slope of 3.5 %.
+The camera cannot see the ground right in front of the chair (its blind zone, about 0.5 m with the
+default mount). If the nearest ground it does see is lower or higher than the ground the chair
+stands on, the edge is somewhere in that zone, and it is reported at 0 m, the worst case. That
+comparison uses the mounting height, so it must be right to within about 5 cm, and the tilt to
+within about 2 degrees (2 degrees of error also looks like a slope of 3.5 %).
 """
 
 from __future__ import annotations
@@ -65,8 +68,10 @@ class Settings:
     bin_m: float = 0.05  # profile resolution along the path
     strip: float = 0.3  # share of the image width, in the middle, that is the path
     min_points: int = 8  # fewer points than this and a bin has no height
-    near_m: float = 0.3  # length of the nearest stretch of ground seen, which sets height zero
-    near_max_m: float = 1.2  # if no ground is seen closer than this, the reading is UNKNOWN
+    near_m: float = 0.1  # the nearest stretch of ground seen sets height zero; short, so it ends
+    # before an edge just past the blind zone
+    near_max_m: float = 1.2  # level ground seen only beyond this is missing data: UNKNOWN
+    blind_m: float = 0.06  # nearest ground this far off the chair's level: an edge out of view
     step_m: float = 0.04  # a height change this big between bins can be a step
     steep: float = 1.0  # a riser climbs at least half this per metre, a steep ramp a quarter
     riser_bins: int = 4  # a step's height change spans at most this many bins
@@ -95,6 +100,8 @@ class Profile:
     distance_m: np.ndarray  # bin centres
     height_m: np.ndarray  # median height in each bin, NaN when the bin has too few points
     visible_until_m: float  # how far ahead the camera can see the ground at all
+    nearest_m: float = 0.0  # the nearest flat ground in view: closer is the camera's blind zone
+    far_points: int = 0  # valid points beyond max_range_m: the image is not empty
 
 
 def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3):
@@ -123,6 +130,12 @@ def visible_until(cam: Camera, rows: int, max_range_m: float) -> float:
     return min(max_range_m, cam.height_m / math.tan(down))
 
 
+def nearest_ground(cam: Camera, rows: int) -> float:
+    """How far ahead the bottom row of the image meets flat ground: closer is not seen at all."""
+    down = cam.pitch_rad + math.atan((rows - 1 - cam.cy) / cam.fy)
+    return cam.height_m / math.tan(down) if down > 0 else math.inf
+
+
 def profile(depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS) -> Profile:
     """The median ground height along the path, in bins of settings.bin_m."""
     ahead, height = ground_points(depth, cam, settings.strip)
@@ -139,7 +152,14 @@ def profile(depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS) -> Pr
     for i, (a, b) in enumerate(zip(starts, ends, strict=True)):
         if b - a >= settings.min_points:
             heights[i] = np.median(height[a:b])
-    return Profile(centres, heights, visible_until(cam, depth.shape[0], settings.max_range_m))
+    rows = depth.shape[0]
+    return Profile(
+        centres,
+        heights,
+        visible_until(cam, rows, settings.max_range_m),
+        nearest_ground(cam, rows),
+        int(np.count_nonzero(ahead >= settings.max_range_m)),
+    )
 
 
 def _steps(d, h, settings):
@@ -208,12 +228,31 @@ def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
     """One ground reading from a profile: the nearest change in the ground ahead."""
     have = ~np.isnan(prof.height_m)
     d, h = prof.distance_m[have], prof.height_m[have]
-    if d.size < 2 or d[0] > settings.near_max_m:
-        return Reading(UNKNOWN)  # no ground in front of the chair: nothing to compare with
+    if not d.size:
+        if prof.far_points >= settings.min_points:
+            return Reading(DROP, 0.0)  # the camera sees only far below or beyond: a ledge
+        return Reading(UNKNOWN)  # no reading at all: nothing to judge
+    # the nearest ground seen, up to where its height starts to change, so that an edge just past
+    # the blind zone is not averaged into it (each bin is already a median of many points)
     near = d < d[0] + settings.near_m
-    if near.sum() < 2:
-        return Reading(UNKNOWN)
-    h = h - np.median(h[near])  # heights from the nearest ground, the ground under the chair
+    changes = np.flatnonzero(np.abs(np.diff(h)) >= settings.step_m / 2)
+    if changes.size:
+        near[changes[0] + 1 :] = False
+    level = float(np.median(h[near]))  # height of the nearest ground seen, against the chair's
+    if level > settings.riser_max_m:
+        # taller than a riser: stairs if more risers climb behind it, else a wall or an object
+        climbs = [dh for _, dh in _steps(d, h - level, settings) if dh > 0]
+        return Reading(STAIRS_UP, 0.0) if climbs else Reading(UNKNOWN)
+
+    # The camera cannot see the ground just in front of the chair. If the nearest ground it does
+    # see is clearly lower or higher than the ground the chair stands on, the edge is in that
+    # blind zone. Where in it is unknown, so it is reported at 0 m: the worst case.
+    blind = []
+    if abs(level) > settings.blind_m:
+        blind = [(0.0, level)]
+    elif d[0] > settings.near_max_m:
+        return Reading(UNKNOWN)  # level ground only far away: the near ground is missing data
+    h = h - level  # heights from the nearest ground seen
     visible = prof.visible_until_m
 
     # a rise taller than any stair riser is a wall or an object: the ground ends there for us
@@ -235,6 +274,8 @@ def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
         hole = (seen_to + settings.bin_m / 2.0, len(d) - 1)
 
     steps = _steps(d, h, settings)
+    if blind:  # the edge in the blind zone comes first; a hole past it is not the nearest change
+        steps, hole = blind + steps, None
     if hole is not None and not any(edge < hole[0] for edge, _ in steps):
         edge, i = hole
         after = h[i + 1 :]

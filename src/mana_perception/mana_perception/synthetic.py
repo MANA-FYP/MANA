@@ -13,7 +13,9 @@ import numpy as np
 
 from mana_perception.depth import Camera
 
-# The 3D camera planned for the chair: 1.0 m up, tilted 0.6 rad down, 87 by 58 degrees.
+# The 3D camera planned for the chair: 1.0 m up, tilted 0.6 rad down, 87 degrees across. The
+# image is 4:3 with square pixels, so about 70 degrees up and down, and the ground is out of view
+# closer than about 0.37 m (the blind zone).
 COLS, ROWS = 160, 120
 CAMERA = Camera.from_fov(COLS, ROWS, math.radians(87.0), height_m=1.0, pitch_rad=0.6)
 
