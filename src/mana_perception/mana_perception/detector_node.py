@@ -11,7 +11,9 @@ Topics (remap them to the camera's):
                       time it arrived, or the core would see it as stale
   camera/camera_info  sensor_msgs/CameraInfo, for the focal length (distance) and the field of view
                       (bearing)
-  obstacle            mana_msgs/ObstacleReport, source DETECTOR, trust = the detector's confidence
+  obstacle            mana_msgs/ObstacleReport, source DETECTOR; trust is the detector's confidence
+                      times camera_trust_factor of the frame's brightness, as on the phone, so the
+                      camera is trusted less in the dark
 
 Parameters:
   weights         Ultralytics weights (default yolo26n.pt, pretrained on COCO). yoloe-26n-mana.pt
@@ -19,7 +21,8 @@ Parameters:
                   fine-tuned YOLO26s from #49 drops in here without a code change
   imgsz           size each frame is scaled to (default 416)
   conf            lowest confidence the detector keeps (default 0.3)
-  min_confidence  lowest confidence that becomes an obstacle (default 0.4)
+  min_confidence  lowest confidence that becomes an obstacle (default 0.5, the core's min_trust:
+                  anything lower the core would ignore)
   rate_hz         most frames per second; frames in between are skipped (default 10.0)
 """
 
@@ -39,7 +42,7 @@ class DetectorNode(Node):
         weights = self.declare_parameter("weights", "yolo26n.pt").value
         imgsz = self.declare_parameter("imgsz", 416).value
         self.conf = self.declare_parameter("conf", 0.3).value
-        self.min_confidence = self.declare_parameter("min_confidence", 0.4).value
+        self.min_confidence = self.declare_parameter("min_confidence", 0.5).value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 10.0).value
         self.detector = detector or detection.Detector.load(weights, imgsz)
         if self.detector is None:
@@ -84,8 +87,9 @@ class DetectorNode(Node):
         if not obstacles:
             return
         nearest = obstacles[0]
+        light = detection.camera_trust_factor(detection.brightness(image))
         msg = ObstacleReport(
-            trust=float(nearest.confidence),
+            trust=float(nearest.confidence * light),
             source=ObstacleReport.DETECTOR,
             label=nearest.label,
             distance_m=float(nearest.distance_m),

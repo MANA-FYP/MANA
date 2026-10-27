@@ -58,12 +58,10 @@ BUTTONS = {
 
 
 def brightness_of(jpeg: bytes) -> float:
-    """Mean luminance of a JPEG frame, 0 (black) to 1 (white)."""
+    """Mean luminance of a JPEG frame, 0 (black) to 1 (white), the same as the ROS node's."""
     from PIL import Image
 
-    img = Image.open(io.BytesIO(jpeg)).convert("L").resize((32, 24))
-    pixels = list(img.getdata())
-    return sum(pixels) / (len(pixels) * 255.0)
+    return vision.brightness(Image.open(io.BytesIO(jpeg)).convert("RGB"))
 
 
 @web.middleware

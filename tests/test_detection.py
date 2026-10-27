@@ -18,6 +18,7 @@ def test_the_phone_and_ros_use_the_same_detector_and_maths():
     for name in ("Detector", "Detection", "to_obstacles", "distance_m", "bearing_rad"):
         assert getattr(vision, name) is getattr(detection, name)
     assert vision.OBSTACLE_HEIGHT_M is detection.OBSTACLE_HEIGHT_M
+    assert vision.OBSTACLE_WIDTH_M is detection.OBSTACLE_WIDTH_M
 
 
 def pixels(encoding, rows=2, cols=3, pad=0):
@@ -82,3 +83,69 @@ def test_detect_image_and_detect_give_the_same_boxes():
     image.fromarray(rgb).save(buf, "JPEG")
     from_jpeg, w, h = det.detect(buf.getvalue())
     assert from_array == from_jpeg and (w, h) == (64, 48)
+
+
+def test_the_phone_and_ros_share_one_trust_rule_for_the_light():
+    from demo import middleware
+
+    assert middleware.camera_trust_factor is detection.camera_trust_factor
+    assert vision.brightness is detection.brightness
+
+
+@pytest.mark.parametrize("level", [10, 30, 60, 200])
+def test_the_same_frame_gives_the_same_trust_on_the_phone_and_in_ros(level):
+    np = pytest.importorskip("numpy")
+    image = pytest.importorskip("PIL.Image")
+    from demo.server import brightness_of
+
+    rgb = np.full((480, 640, 3), level, dtype=np.uint8)
+    buf = __import__("io").BytesIO()
+    image.fromarray(rgb).save(buf, "JPEG")
+    phone = detection.camera_trust_factor(brightness_of(buf.getvalue()))
+    ros = detection.camera_trust_factor(detection.brightness(rgb))
+    assert phone == pytest.approx(ros, abs=0.01)
+    assert detection.brightness(rgb) == pytest.approx(level / 255, abs=1e-6)
+
+
+def test_brightness_weighs_colours_as_pil_does():
+    np = pytest.importorskip("numpy")
+    image = pytest.importorskip("PIL.Image")
+    rng = np.random.default_rng(0)
+    rgb = rng.integers(0, 256, (48, 64, 3), dtype=np.uint8)
+    pil = np.asarray(image.fromarray(rgb).convert("L"), dtype=np.float64).mean() / 255
+    assert detection.brightness(rgb) == pytest.approx(pil, abs=0.02)
+
+
+def person(x1, x2, y1=0, y2=480, confidence=0.9):
+    return detection.Detection("person", confidence, x1, y1, x2, y2)
+
+
+def test_a_person_cut_by_the_frame_keeps_coming_closer_with_the_width():
+    # the full-height box is the same for every close person, so its height says about 1.77 m
+    by_height = detection.distance_m(480, 1.7, 500)
+    far, near = (
+        detection.to_obstacles([person(220, 420 + extra)], 640, 480, 500)[0] for extra in (0, 200)
+    )
+    assert far.distance_m == pytest.approx(500 * 0.4 / 200)  # 1.0 m, from 0.4 m shoulders
+    assert near.distance_m == pytest.approx(500 * 0.4 / 400)  # 0.5 m: inside the 0.8 m stop
+    assert near.distance_m < far.distance_m < by_height
+
+
+def test_a_person_with_legs_below_the_frame_is_cut_too():
+    # a real YOLO26n box from the Ultralytics portrait: it stops 6 px above the bottom edge
+    legs_cut = detection.Detection("person", 0.89, 746, 42, 1154, 714)
+    assert detection.cut_by_frame(legs_cut, 720)
+    r = detection.to_obstacles([legs_cut], 1280, 720, 692)[0]
+    assert r.distance_m == pytest.approx(692 * 0.4 / 408)  # the width: nearer than the height's
+    assert not detection.cut_by_frame(detection.Detection("person", 0.9, 0, 20, 10, 690), 720)
+
+
+def test_a_box_that_is_not_cut_and_other_classes_keep_the_height_distance():
+    whole = detection.to_obstacles([person(300, 340, y1=100, y2=350)], 640, 480, 500)[0]
+    assert whole.distance_m == pytest.approx(500 * 1.7 / 250)
+    car = detection.Detection("car", 0.9, 0, 0, 640, 480)  # cut, but no typical width
+    assert detection.to_obstacles([car], 640, 480, 500)[0].distance_m == pytest.approx(
+        500 * 1.5 / 480
+    )
+    wide = person(0, 640)  # cut and as wide as the frame: right in front, 0.31 m
+    assert detection.to_obstacles([wide], 640, 480, 500)[0].distance_m == pytest.approx(0.3125)

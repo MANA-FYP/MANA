@@ -45,6 +45,13 @@ OBSTACLE_HEIGHT_M = {
     "traffic cone": 0.7,
 }
 
+# Typical widths in metres, for a box cut by the top or the bottom of the frame (legs below it, or
+# a person too close to fit): the box then shows only part of the object, so its height gives a
+# distance that is too far, but its width still grows as the object comes closer. Shoulders, on
+# the narrow side, so the distance errs closer.
+OBSTACLE_WIDTH_M = {"person": 0.4}
+EDGE = 0.01  # a box within this share of the image height of the top or the bottom is cut
+
 # Defaults for a typical phone camera held upright. They are assumptions: calibrate once with
 # calibrate_focal() by standing a person at a known distance.
 DEFAULT_VFOV_RAD = math.radians(55.0)
@@ -102,6 +109,12 @@ def bearing_rad(
     return -offset * (hfov_rad / 2.0)
 
 
+def cut_by_frame(d: Detection, image_height_px: float) -> bool:
+    """True when the box runs off the top or the bottom of the frame."""
+    margin = max(2.0, EDGE * image_height_px)
+    return d.y1 <= margin or d.y2 >= image_height_px - margin
+
+
 def to_obstacles(
     detections: list[Detection],
     image_width_px: float,
@@ -110,7 +123,13 @@ def to_obstacles(
     min_confidence: float = 0.4,
     hfov_rad: float = DEFAULT_HFOV_RAD,
 ) -> list[Obstacle]:
-    """Keep the classes that count as obstacles and estimate where they are, nearest first."""
+    """Keep the classes that count as obstacles and estimate where they are, nearest first.
+
+    The distance comes from the box height and a typical height for the class. A box cut by the top
+    or the bottom of the frame shows only part of the object, so its height gives a distance too
+    far, and a person filling the frame never reads closer than about 1.6 m. For such a box the
+    width is used too, where the class has a typical width, and the nearer of the two is kept.
+    """
     focal = focal_px or focal_from_fov(image_height_px)
     found = []
     for d in detections:
@@ -118,11 +137,33 @@ def to_obstacles(
         if height is None or d.confidence < min_confidence:
             continue
         dist = distance_m(d.height_px, height, focal)
+        width = OBSTACLE_WIDTH_M.get(d.label)
+        if width is not None and cut_by_frame(d, image_height_px):
+            dist = min(dist, distance_m(d.x2 - d.x1, width, focal))  # square pixels
         if math.isinf(dist):
             continue
         bearing = bearing_rad(d.center_x, image_width_px, hfov_rad)
         found.append(Obstacle(d.label, d.confidence, dist, bearing))
     return sorted(found, key=lambda o: o.distance_m)
+
+
+# ---- light: the camera is trusted less in the dark, on the phone and in ROS alike
+
+
+def camera_trust_factor(brightness: float) -> float:
+    """0 in the dark, 1 in good light; brightness is the mean image luminance, 0 to 1."""
+    return max(0.0, min(1.0, (brightness - 0.05) / 0.25))
+
+
+def brightness(rgb) -> float:
+    """Mean luminance of an HxWx3 RGB image, 0 (black) to 1 (white), as PIL's "L" weighs it."""
+    import numpy as np
+
+    image = np.asarray(rgb)
+    rows, cols = image.shape[:2]
+    small = image[:: max(1, rows // 24), :: max(1, cols // 32), :3]  # about 32 x 24 points
+    luma = small.astype(np.float64) @ np.array([0.299, 0.587, 0.114])
+    return float(luma.mean() / 255.0)
 
 
 # ---- ROS images

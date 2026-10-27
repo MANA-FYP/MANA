@@ -46,7 +46,7 @@ def ros():
     rclpy.shutdown()
 
 
-def run(boxes, encoding="bgr8", seconds=3.0):
+def run(boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255)):
     fake = FixedDetector(boxes)
     node, probe = DetectorNode(detector=fake), rclpy.create_node("probe")
     reports = []
@@ -60,7 +60,7 @@ def run(boxes, encoding="bgr8", seconds=3.0):
     info = CameraInfo(width=COLS, height=ROWS)
     info.k = [F, 0.0, COLS / 2.0, 0.0, F, ROWS / 2.0, 0.0, 0.0, 1.0]
     frame = np.zeros((ROWS, COLS, 3), dtype=np.uint8)
-    frame[..., 2] = 200  # red in RGB: as bgr8 the last channel is red
+    frame[...] = bgr  # bright by default; as bgr8 the last channel is red
     image = Image(height=ROWS, width=COLS, encoding=encoding, is_bigendian=0, step=COLS * 3)
     image.data = frame.tobytes()
     image.header.frame_id = "camera"
@@ -83,10 +83,14 @@ def test_the_nearest_obstacle_in_a_frame_reaches_the_core_from_the_detector(ros)
     assert r.label == "person"
     assert r.distance_m == pytest.approx(3.4, abs=0.01)
     assert r.bearing_rad > 0  # left of centre is positive (REP 103)
-    assert r.trust == pytest.approx(0.8)
+    assert r.trust == pytest.approx(0.8)  # good light: the detector's confidence as it is
     assert r.header.frame_id == "camera" and r.header.stamp.sec > 0  # a 0 stamp is replaced
     # the detector saw the frame as RGB
-    assert fake.frames[0].shape == (ROWS, COLS, 3) and fake.frames[0][0, 0, 0] == 200
+    assert fake.frames[0].shape == (ROWS, COLS, 3) and tuple(fake.frames[0][0, 0]) == (
+        255,
+        200,
+        200,
+    )
 
 
 def test_labels_without_a_height_are_not_obstacles(ros):
@@ -100,3 +104,10 @@ def test_the_bearing_follows_the_camera_field_of_view(ros):
     hfov = 2 * math.atan((COLS / 2) / F)
     offset = ((500 + 540) / 2 - COLS / 2) / (COLS / 2)
     assert reports[0].bearing_rad == pytest.approx(-offset * hfov / 2, abs=1e-4)
+
+
+def test_in_the_dark_the_report_is_trusted_less_as_on_the_phone(ros):
+    reports, _ = run([NEAR], bgr=(30, 30, 30))  # mean luminance 30 / 255
+    light = detection.camera_trust_factor(30 / 255)
+    assert 0 < light < 1
+    assert reports[0].trust == pytest.approx(0.8 * light, abs=1e-3)
