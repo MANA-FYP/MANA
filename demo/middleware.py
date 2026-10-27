@@ -753,7 +753,9 @@ class Middleware:
         if key or self._seen_logged:
             if key:
                 order = sorted(nearest.items(), key=lambda kv: (kv[1] is None, kv[1] or 0.0, kv[0]))
-                # a box cut off by the frame edge looks far away; such guesses are not shown
+                # a label goes without a distance when the estimate is too far to trust (a box
+                # cut off by the frame edge looks far away) or when there is none: a class with
+                # no typical height, or a box below the confidence that to_obstacles keeps
                 things = ", ".join(
                     f"{label} (about {dist:.1f} m)"
                     if dist is not None and dist <= SHOWN_DISTANCE_M

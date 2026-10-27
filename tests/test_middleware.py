@@ -7,6 +7,7 @@ import pytest
 from mana_core.decision import Command, Ground, Mode, Source
 
 from demo.middleware import (
+    NO_SENSOR_TEXT,
     SENSORS,
     SOLO_TEXT,
     LinkSelector,
@@ -614,3 +615,28 @@ def test_bluetooth_available_comes_with_what_it_is_for():
         t += 0.1
     assert "Bluetooth is available. It is the backup link for alerts." in texts(m, "switch")
     assert "Wi-Fi is available. Alerts use Wi-Fi." in texts(m, "link")
+
+
+def test_when_the_last_sensor_stops_mana_says_it_cannot_decide():
+    m = Middleware(clock=lambda: 10.0)
+    for i in range(10):
+        m.on_light(0.6, now=i * 0.1)
+        m.tick(i * 0.1)
+    for i in range(10, 60):  # nothing more arrives: idle after 2 s, written down 1.5 s later
+        m.tick(i * 0.1)
+    assert [e["text"] for e in m.decisions if e["kind"] == "coverage"][-1] == NO_SENSOR_TEXT
+
+
+def test_what_the_camera_sees_is_said_afresh_after_the_camera_was_off():
+    m = Middleware(clock=lambda: 10.0)
+    for t in (0.0, 0.2):
+        m.on_light(0.6, now=t)
+        m.on_detections([("person", 2.0)], now=t)
+        m.tick(t)
+    for i in range(5, 40):  # the camera goes idle
+        m.tick(i * 0.1)
+    for t in (4.0, 4.2):
+        m.on_light(0.6, now=t)
+        m.on_detections([("person", 2.0)], now=t)
+        m.tick(t)
+    assert detection_lines(m) == ["Camera sees: person (about 2.0 m)."] * 2

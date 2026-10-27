@@ -175,7 +175,7 @@ class SlowSecondDetector:
 
         self.calls += 1
         if self.calls > 1:
-            time.sleep(1.0)
+            time.sleep(0.3)
         return [Detection("person", 0.9, 10.0, 5.0, 30.0, 45.0)], 64, 48
 
 
@@ -255,3 +255,16 @@ def test_the_phone_page_lists_eight_sensors_in_two_columns_and_needs_no_scrollin
     assert "grid-template-columns: repeat(2, 1fr)" in css  # the phone grid
     assert "height: 100dvh" in css  # the phone page is one screen
     assert "height: 100vh" in css  # and so is the dashboard
+
+
+def test_the_imgsz_option_reaches_the_detector(monkeypatch):
+    from demo import server, vision
+
+    loaded = []
+    monkeypatch.setattr(
+        vision.Detector, "load", lambda weights, imgsz: loaded.append((weights, imgsz))
+    )
+    monkeypatch.setattr(server.web, "run_app", lambda *a, **k: None)
+    server.main(["--weights", "yoloe-26n-mana.pt", "--imgsz", "480"])
+    server.main([])
+    assert loaded == [("yoloe-26n-mana.pt", 480), ("yolo26n.pt", 416)]

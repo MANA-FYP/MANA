@@ -73,11 +73,13 @@ function render(s) {
   if ($("result").className !== cls) $("result").className = cls;
   // the action box shows only the last action MANA took, the same one the voice says
   const log = s.decisions;
-  const last = log.length ? log[log.length - 1] : null;
+  // detections are shown, not spoken, so the box holds the last action instead
+  const actions = log.filter((e) => e.kind !== "detection");
+  const last = actions.length ? actions[actions.length - 1] : null;
   // while the user's stop holds, the box keeps saying so; newer lines still go to the log
   const shown = d.stop && d.fired === "user stop" ? d.sentence : last ? last.text : d.sentence;
   // the four lines before it stay visible underneath, newest first
-  const earlier = log.slice(-5, -1).reverse().map((e) =>
+  const earlier = log.filter((e) => e !== last).slice(-4).reverse().map((e) =>
     '<li><span class="when">' + e.t.toFixed(1) + "</span>" + e.text + "</li>").join("");
   const html = '<p class="main">' + shown + "</p>" + (earlier ? '<ul class="earlier">' + earlier + "</ul>" : "");
   if (html !== linesKey) {

@@ -329,7 +329,7 @@ def main(argv=None) -> None:
     p.add_argument("--host", default="127.0.0.1", help="the phone arrives through the USB cable")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--weights", default="yolo26n.pt", help="object detector weights (Ultralytics)")
-    p.add_argument("--imgsz", type=int, default=640, help="detector input size; 480 is faster")
+    p.add_argument("--imgsz", type=int, default=416, help="detector input size; 640 finds more")
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
