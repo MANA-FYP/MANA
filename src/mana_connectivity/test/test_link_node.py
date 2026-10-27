@@ -13,7 +13,9 @@ from mana_msgs.msg import LinkReport, UserMessage
 
 @pytest.fixture
 def ros():
-    rclpy.init()
+    # a namespace of its own: colcon tests the packages in parallel, and the core's stop test
+    # publishes an urgent message on user_message at the same time
+    rclpy.init(args=["--ros-args", "-r", "__ns:=/link_node_test"])
     yield
     rclpy.shutdown()
 
