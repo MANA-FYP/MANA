@@ -276,12 +276,17 @@ def gps(age=0.0, trust=0.9):
     return PositionReport(NOW - age, trust, PositionSource.GPS, 3.0)
 
 
-def wifi(connected=True, missed=0, age=0.0):
-    return LinkReport(NOW - age, 0.9, Link.WIFI, connected, missed)
+def wifi(connected=True, missed=0, age=0.0, trust=0.9):
+    return LinkReport(NOW - age, trust, Link.WIFI, connected, missed)
 
 
-def with_reports(*reports, ground_reports=()):
+STALE = LIM.link_max_age_s + 0.5  # older than a link or position report may be
+
+
+def with_reports(*reports, ground_reports=(), commands=()):
     c = DecisionCore()
+    for command in commands:
+        c.on_command(command, 1.0)
     for r in ground_reports or (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)):
         c.on_ground(r)
     for r in reports:
@@ -300,7 +305,7 @@ def test_a_fresh_position_and_a_working_link_keep_full_speed():
     assert (d.speed_limit, d.reason) == (1.0, "Level ground")
 
 
-@pytest.mark.parametrize("position", [gps(age=2.0), gps(trust=0.2)], ids=["stale", "untrusted"])
+@pytest.mark.parametrize("position", [gps(age=STALE), gps(trust=0.2)], ids=["stale", "untrusted"])
 def test_a_lost_position_slows_down(position):
     d = with_reports(position, wifi())
     assert (d.mode, d.stop, d.speed_limit) == (Mode.WHEELS, False, LIM.slow)
@@ -309,13 +314,27 @@ def test_a_lost_position_slows_down(position):
 
 def test_any_one_fresh_position_source_is_enough():
     lidar_map = PositionReport(NOW, 0.9, PositionSource.LIDAR_MAP, 0.5)
-    assert with_reports(gps(age=2.0), lidar_map, wifi()).reason == "Level ground"
+    assert with_reports(gps(age=STALE), lidar_map, wifi()).reason == "Level ground"
+
+
+def test_reports_once_a_second_keep_full_speed_between_them():
+    # GPS and the heartbeats come about once a second, so a report 0.8 s old is still current
+    assert with_reports(gps(age=0.8), wifi(age=0.8)).reason == "Level ground"
+
+
+def test_odometry_alone_counts_as_a_lost_position():
+    odometry = PositionReport(NOW, 0.9, PositionSource.ODOMETRY, 0.2)
+    assert with_reports(gps(age=STALE), odometry, wifi()).reason == "Position unknown, slowing down"
+
+
+def test_one_heartbeat_short_of_the_limit_still_carries_alerts():
+    assert with_reports(gps(), wifi(missed=LIM.missed_heartbeats - 1)).reason == "Level ground"
 
 
 @pytest.mark.parametrize(
     "link",
-    [wifi(connected=False), wifi(missed=LIM.missed_heartbeats), wifi(age=2.0)],
-    ids=["disconnected", "missed heartbeats", "stale"],
+    [wifi(connected=False), wifi(missed=LIM.missed_heartbeats), wifi(age=STALE), wifi(trust=0.2)],
+    ids=["disconnected", "missed heartbeats", "stale", "untrusted"],
 )
 def test_no_alert_link_slows_down(link):
     d = with_reports(gps(), link)
@@ -329,13 +348,24 @@ def test_bluetooth_carries_the_alerts_when_wifi_is_gone():
 
 def test_a_hazard_is_named_before_a_lost_link():
     ramp = (ground(CAM, Ground.RAMP), ground(DEPTH, Ground.RAMP, 1.0))
-    d = with_reports(gps(age=2.0), wifi(connected=False), ground_reports=ramp)
+    d = with_reports(gps(age=STALE), wifi(connected=False), ground_reports=ramp)
     assert d.reason == "Ramp ahead, slowing down"
 
 
 def test_a_lost_link_and_position_never_stop_the_device():
-    d = with_reports(gps(age=2.0), wifi(connected=False))
+    d = with_reports(gps(age=STALE), wifi(connected=False))
     assert not d.stop and d.reason == "No alert link, slowing down"
+
+
+def test_the_users_stop_still_wins_with_link_and_position_lost():
+    d = with_reports(gps(age=STALE), wifi(connected=False), commands=[Command.STOP])
+    assert (d.stop, d.reason) == (True, "Stopped by you")
+
+
+def test_manual_mode_follows_the_user_with_the_link_lost():
+    # in manual mode the user drives, so the warning waits until MANA is in control again
+    d = with_reports(gps(), wifi(connected=False), commands=[Command.MANUAL])
+    assert (d.reason, d.speed_limit) == ("Manual mode", 1.0)
 
 
 # ---- the codes match mana_msgs
@@ -427,3 +457,46 @@ def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
 
 def test_stairs_up_still_change_to_tracks_without_asking():
     assert core(*stairs()).decision.reason == "Stairs ahead, changing to tracks"
+
+
+def test_mixed_step_labels_with_stairs_down_still_ask():
+    d = core(ground(CAM, Ground.STAIRS_DOWN, 0.5), ground(DEPTH, Ground.CURB, 1.0)).decision
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+def test_a_no_after_the_yes_takes_it_back():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    c.on_command(Command.NO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.2).reason == ASK_DOWN
+
+
+def test_a_yes_lapses_once_the_stairs_are_out_of_sight_even_without_level_ground():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    for i in range(1, 20):  # no motion reports, so level ground is never confirmed
+        t = NOW + i / 10
+        for r in flat:
+            c.on_ground(GroundReport(t, r.trust, r.source, r.ground, r.distance_m))
+        c.tick(t)
+    assert fed(c, stairs_down(), NOW + 2.0).reason == ASK_DOWN
+
+
+def test_stop_then_go_asks_again():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    c.on_command(Command.STOP, 0.9)
+    c.on_command(Command.GO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+
+
+@pytest.mark.parametrize(
+    "command", [Command.SPEED_UP, Command.SLOW_DOWN, Command.WHEELS, Command.MANUAL]
+)
+def test_a_driving_command_at_the_question_does_not_drive_on(command):
+    c = core(*stairs_down())
+    c.on_command(command, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.1)
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
