@@ -268,13 +268,13 @@ Check every scenario in fast time (CI runs the same as `tests/test_scenarios.py`
 ros2 run mana_core evaluate              # or one or more by name: ros2 run mana_core evaluate stairs dark
 ```
 
-Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The baseline uses the same thresholds and messages, but every report counts however old or doubtful it is, one source is enough to change mode, a tilt alone means tracks, and it returns to wheels as soon as the tilt is small:
+Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The baseline uses the same thresholds and messages and the same stops and slow-downs, but every report counts however old or doubtful it is, one source is enough to change to tracks, a tilt steeper than any accessible ramp means tracks, and it returns to wheels as soon as the tilt is small:
 
 ```bash
 ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
 ```
 
-In the scripted world MANA meets 39 of 39 pass marks and the baseline 36: it changes to tracks on the ramp and for the picture of stairs, and it does not tell the user why it stays on tracks when the IMU is lost.
+In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
 
 Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
 

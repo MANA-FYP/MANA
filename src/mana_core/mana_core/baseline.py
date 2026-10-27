@@ -6,10 +6,12 @@ so the comparison shows what MANA's design adds, not different tuning. What it l
 - trust and age: every report counts, however doubtful or old;
 - agreement: one source is enough to change to tracks;
 - the level timer: it goes back to wheels the moment the tilt is small;
-- lost sensors: with no reports at all it carries on at full speed.
+- lost sensors: old reports are never cleared, so when a sensor stops it acts on that sensor's
+  last values for ever.
 
-It changes to tracks for a step that is seen, or for a tilt, since without a ground type a tilt is
-its only sign of stairs.
+Otherwise it is a fair if-else controller: it stops for the user, a drop or an obstacle, slows for
+an obstacle, a drop or a ramp ahead, and changes to tracks for a step that is seen or a tilt
+steeper than any accessible ramp.
 """
 
 import math
@@ -29,6 +31,8 @@ from mana_core.decision import (
     Priority,
     Source,
 )
+
+STAIRS_TILT_RAD = 0.2  # about 11 degrees: steeper than any accessible ramp (1:12, about 0.08 rad)
 
 
 class BaselineController:
@@ -87,10 +91,18 @@ class BaselineController:
             return Decision(
                 Mode.TRACKS, False, lim.slow, "Stairs ahead, changing to tracks", Priority.WARNING
             )
-        if tilt >= lim.level_rad:
-            return Decision(Mode.TRACKS, False, lim.slow, "Tilted, on tracks", Priority.WARNING)
+        if tilt >= STAIRS_TILT_RAD:
+            return Decision(
+                Mode.TRACKS, False, lim.slow, "On tracks until the ground is level", Priority.INFO
+            )
         if nearest <= lim.obstacle_slow_m:
             return Decision(
                 Mode.WHEELS, False, lim.slow, "Obstacle ahead, slowing down", Priority.WARNING
             )
+        near = [r.ground for r in grounds if not r.distance_m > lim.step_m]  # unknown counts
+        for kind, reason in ((Ground.DROP, "Drop ahead"), (Ground.RAMP, "Ramp ahead")):
+            if kind in near:
+                return Decision(
+                    Mode.WHEELS, False, lim.slow, f"{reason}, slowing down", Priority.WARNING
+                )
         return Decision(Mode.WHEELS, False, 1.0, "Level ground", Priority.INFO)

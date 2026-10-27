@@ -15,8 +15,8 @@ from mana_core.decision import (
     ObstacleReport,
     Source,
 )
-from mana_core.evaluate import compare, met
-from mana_core.scenarios import SCENARIOS
+from mana_core.evaluate import compare, main, met, run
+from mana_core.scenarios import SCENARIOS, check
 
 NOW = 100.0
 LIM = Limits()
@@ -44,15 +44,26 @@ def test_one_camera_is_enough_for_the_baseline_to_change_mode():
     assert d.mode == Mode.TRACKS
 
 
-def test_it_trusts_old_and_doubtful_reports():
-    b = baseline(ground(Source.DEPTH_CAMERA, Ground.DROP, 0.3, trust=0.1, age=5.0))
-    assert b.tick(NOW).stop
-    assert DecisionCore().tick(NOW).reason == "Ground sensors not available, slowing down"
+def test_it_trusts_old_and_doubtful_reports_that_mana_ignores():
+    doubtful = ground(Source.DEPTH_CAMERA, Ground.DROP, 0.3, trust=0.1, age=5.0)
+    assert baseline(doubtful).tick(NOW).stop
+    mana = DecisionCore()
+    mana.on_ground(doubtful)
+    mana.on_motion(MotionReport(NOW, 0.9))
+    d = mana.tick(NOW)
+    assert not d.stop and d.reason == "Ground sensors not available, slowing down"
 
 
-def test_a_tilt_alone_changes_to_tracks():
+def test_a_ramp_slows_on_wheels_and_a_stairs_sized_tilt_means_tracks():
     d = baseline(ground(Source.CAMERA, Ground.RAMP), pitch=0.08).tick(NOW)
-    assert d.mode == Mode.TRACKS
+    assert (d.mode, d.reason) == (Mode.WHEELS, "Ramp ahead, slowing down")
+    d = baseline(ground(Source.CAMERA, Ground.FLAT), pitch=0.55).tick(NOW)
+    assert (d.mode, d.reason) == (Mode.TRACKS, "On tracks until the ground is level")
+
+
+def test_a_drop_further_ahead_slows_down():
+    d = baseline(ground(Source.DEPTH_CAMERA, Ground.DROP, 1.5)).tick(NOW)
+    assert (d.stop, d.reason) == (False, "Drop ahead, slowing down")
 
 
 def test_stop_keeps_the_mode_and_go_drives_on():
@@ -85,14 +96,31 @@ def test_manual_mode_still_stops_at_a_drop():
     assert b.tick(NOW).stop
 
 
-@pytest.mark.parametrize("name", ["ramp", "picture", "imu_lost"])
-def test_the_baseline_misses_marks_that_mana_meets(name):
-    mana, marks, _ = met(SCENARIOS[name], DecisionCore)
-    base, _, _ = met(SCENARIOS[name], BaselineController)
-    assert mana == marks and base < marks
+def test_the_picture_of_stairs_is_where_the_baseline_falls_short():
+    # one camera is enough for the baseline to ask for tracks; MANA needs two sensors
+    trace = run(SCENARIOS["picture"], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS["picture"], trace) if not ok]
+    assert failed == ["No track request on flat ground or ramps"]
+    assert not run(SCENARIOS["picture"]).mishaps and met(SCENARIOS["picture"], DecisionCore)[0] == 4
+
+
+def test_the_baseline_meets_every_other_scenario():
+    for name, scenario in SCENARIOS.items():
+        if name != "picture":
+            base, marks, _ = met(scenario, BaselineController)
+            assert base == marks, name
 
 
 def test_compare_prints_both_and_passes_while_mana_meets_every_mark(capsys):
+    marks = sum(len(check(s, run(s))) for s in SCENARIOS.values())
     assert compare(list(SCENARIOS)) == 0
     out = capsys.readouterr().out
-    assert "Baseline" in out and out.splitlines()[-1].split()[1] == "39/39"
+    assert "Baseline" in out and out.splitlines()[-1].split()[1] == f"{marks}/{marks}"
+
+
+def test_main_runs_the_baseline_and_rejects_unknown_options(capsys):
+    assert main(["--baseline", "picture"]) == 1  # the baseline misses one mark there
+    assert "FAIL" in capsys.readouterr().out
+    assert main(["--basline"]) == 2
+    assert main(["nowhere"]) == 2
+    assert main(["--baseline", "level"]) == 0

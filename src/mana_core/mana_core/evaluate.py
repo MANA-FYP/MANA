@@ -82,6 +82,10 @@ def compare(names: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    options = [a for a in args if a.startswith("--")]
+    if bad := [o for o in options if o not in ("--baseline", "--compare")]:
+        print(f"unknown option {', '.join(bad)}; use --baseline or --compare")
+        return 2
     names = [a for a in args if not a.startswith("--")] or list(SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
