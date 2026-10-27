@@ -31,6 +31,8 @@ from mana_core.decision import (
     Source,
 )
 
+from demo.vision import camera_trust_factor  # shared with the ROS detector node
+
 # ---- sensors the phone page lists
 
 
@@ -222,11 +224,6 @@ class RadioLink:
 def tilt(ax: float, ay: float, az: float) -> tuple[float, float]:
     """Pitch and roll in radians from the gravity vector. A phone lying flat gives 0 and 0."""
     return math.atan2(-ax, math.hypot(ay, az)), math.atan2(ay, az)
-
-
-def camera_trust_factor(brightness: float) -> float:
-    """0 in the dark, 1 in good light; brightness is the mean image luminance, 0 to 1."""
-    return max(0.0, min(1.0, (brightness - 0.05) / 0.25))
 
 
 WORD_COMMANDS = {

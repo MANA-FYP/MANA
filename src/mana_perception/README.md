@@ -13,30 +13,38 @@ Perception for MANA (M1 Vision). It holds:
 
 ```bash
 pip install ultralytics      # not a rosdep key; the CPU build of PyTorch is enough to run it
-ros2 run mana_perception detector_node --ros-args   -r camera/image:=/camera/image_raw -r camera/camera_info:=/camera/camera_info   -p weights:=yolo26n.pt -p imgsz:=416
+ros2 run mana_perception detector_node --ros-args \
+  -r camera/image:=/camera/image_raw -r camera/camera_info:=/camera/camera_info \
+  -p weights:=yolo26n.pt -p imgsz:=416
 ```
 
 The detector and its maths are in `mana_perception/detection.py`, which the phone demo also uses
-(`demo/vision.py` imports it), so the phone and ROS 2 give the same obstacles from the same
-picture. For each frame the node runs the detector, keeps the classes with a typical height
+(`demo/vision.py` imports it), so the phone and ROS 2 give the same obstacles from the same picture.
+For each frame the node runs the detector, keeps the classes with a typical height
 (`OBSTACLE_HEIGHT_M`), estimates each one's distance from its box height and the camera's focal
-length, and its bearing from the camera's field of view, both from the camera info. It publishes
-only the **nearest** obstacle, because the core keeps one report per source. With nothing in view
-it publishes nothing, and the core lets the last report age out after 0.5 s. The detector and the
-ground classifier both look through the camera, so the core counts them as one sensor.
+length, and its bearing from the camera's field of view, both from the camera info. A person whose
+box is cut by the top or the bottom of the frame (legs below it, or too close to fit) shows only
+part of their height, which would read too far: for that box the distance from a 0.4 m shoulder
+width is used too, and the nearer is kept, so a close person keeps coming closer instead of staying
+at about 1.6 m. It publishes only the **nearest** obstacle, because the core keeps one report per
+source. With nothing in view it publishes nothing, and the core lets the last report age out after
+0.5 s. The trust is the detector's confidence times `camera_trust_factor` of the frame's mean
+brightness, the same rule and the same code as the phone (#71), so the camera is trusted less in the
+dark. The detector and the ground classifier both look through the camera, so the core counts them
+as one sensor.
 
 | Topic | Type | Meaning |
 |---|---|---|
 | `camera/image` (in) | `sensor_msgs/Image` | rgb8, bgr8, rgba8 or bgra8; a frame stamped 0 gets the time it arrived |
 | `camera/camera_info` (in) | `sensor_msgs/CameraInfo` | focal length (distance) and field of view (bearing) |
-| `obstacle` (out) | `mana_msgs/ObstacleReport` | the nearest obstacle, source `DETECTOR`, trust = the detector's confidence |
+| `obstacle` (out) | `mana_msgs/ObstacleReport` | the nearest obstacle, source `DETECTOR`; trust = the detector's confidence × the light factor, as on the phone |
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `weights` | `yolo26n.pt` | `yolo26n.pt` (COCO, as at the mid-evaluation), `yoloe-26n-mana.pt` (YOLOE-26 told the 40 names in `demo/build_detector.py`, including stairs, doors and poles), and later the fine-tuned YOLO26s from #49, with no code change |
 | `imgsz` | `416` | size each frame is scaled to |
 | `conf` | `0.3` | lowest confidence the detector keeps |
-| `min_confidence` | `0.4` | lowest confidence that becomes an obstacle |
+| `min_confidence` | `0.5` | lowest confidence that becomes an obstacle; the core ignores trust under 0.5 anyway |
 | `rate_hz` | `10.0` | most frames per second; frames in between are skipped |
 
 **Time per frame** (`python3 tools/time_detector.py --weights yolo26n.pt yoloe-26n-mana.pt
@@ -60,7 +68,9 @@ before using YOLOE outdoors.
 ## Ground from the 3D camera
 
 ```bash
-ros2 run mana_perception depth_node --ros-args   -r depth/image:=/camera/depth/image_raw -r depth/camera_info:=/camera/depth/camera_info   -p camera_height_m:=1.0 -p camera_pitch_rad:=0.6
+ros2 run mana_perception depth_node --ros-args \
+  -r depth/image:=/camera/depth/image_raw -r depth/camera_info:=/camera/depth/camera_info \
+  -p camera_height_m:=1.0 -p camera_pitch_rad:=0.6
 ```
 
 The work is in `mana_perception/depth.py`, which is pure numpy, so it is tested without ROS. Every
