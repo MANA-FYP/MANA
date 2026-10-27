@@ -35,7 +35,8 @@ class MessageQueue:
       never cuts off another stop.
     - A message older than max_age_s is dropped, because it may no longer be true.
     - A message is not said twice in a row: the same decision text again within max_age_s, or the
-      same direction as the last one, is dropped. An URGENT direction is also dropped when an
+      same direction as the last one, is dropped. An URGENT decision is always said again, so a
+      second STOP is answered. An URGENT direction is also dropped when an
       URGENT message went out less than max_age_s ago: the user has been told to stop already.
     """
 
@@ -63,6 +64,8 @@ class MessageQueue:
             and message.stamp - self._last_urgent_at <= self.max_age_s
         ):
             return True  # a stop has just been said
+        if message.kind == DECISION and message.priority == Priority.URGENT:
+            return False  # a stop is answered every time
         last = self._last.get(message.kind)
         if last is None or last[0] != message.text:
             return False

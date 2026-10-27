@@ -238,7 +238,7 @@ Every report to the core starts with the same two fields: `header` (its stamp is
 ros2 run mana_core core_node
 ```
 
-The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` when the reason changes. The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` through a queue that says one message at a time, the most urgent first (`mana_core/messages.py`; the parameter `directions` also says what is ahead, for a smart cane host). The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop

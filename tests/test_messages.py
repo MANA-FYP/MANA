@@ -131,6 +131,14 @@ def test_a_decision_is_not_said_twice_in_a_row_within_the_age_limit():
     assert q.release(9.0).text == "Ramp ahead, slowing down"
 
 
+def test_an_urgent_decision_is_said_again_every_time():
+    q = MessageQueue(max_age_s=6.0)
+    q.push(say("Stopped by you", URGENT, 0.0), 0.0)
+    assert q.release(0.0).text == "Stopped by you"
+    q.push(say("Stopped by you", URGENT, 2.0), 2.0)  # the user presses STOP again
+    assert q.release(4.0).text == "Stopped by you"
+
+
 def test_a_decision_that_changed_in_between_is_said_again():
     q = MessageQueue()
     q.push(say("Ramp ahead, slowing down", WARNING, 0.0), 0.0)
