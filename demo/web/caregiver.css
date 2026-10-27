@@ -1,0 +1,58 @@
+/*
+ * The caregiver view: the demo's palette (style.css), laid out for a phone held in one hand.
+ * Unlike the dashboard and the phone page, it scrolls: it is read on a small screen, often in
+ * portrait, and nothing on it has to fit next to anything else.
+ */
+
+body.care {
+  overflow: auto;
+  height: auto;
+  min-height: 100%;
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.care-head { padding: 1em 1em 0.4em; }
+.care-head h1 { font-size: 1.35em; color: var(--primary); }
+.care-head h1 span { color: var(--muted); font-weight: 500; }
+.care-note { color: var(--muted); font-size: 0.85em; margin-top: 0.2em; }
+
+.care-main {
+  display: grid;
+  gap: 0.8em;
+  padding: 0.6em 1em 1.5em;
+  max-width: 36em;
+  margin: 0 auto;
+}
+
+.care-main .card { padding: 0.9em 1em; }
+.care-main h2 { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.5em; }
+
+/* the big status card: its colour says it all at a glance */
+.care-status { border-left: 0.45em solid var(--primary-2); }
+.care-status.slow { border-left-color: var(--accent); background: var(--accent-soft); }
+.care-status.stopped { border-left-color: var(--danger); background: #fef2f2; }
+.care-status.offline { border-left-color: var(--muted); background: #f8fafc; }
+
+.care-state { font-size: 1.7em; font-weight: 700; }
+.care-status.moving .care-state { color: var(--primary); }
+.care-status.slow .care-state { color: #c2410c; }
+.care-status.stopped .care-state { color: var(--danger); }
+.care-status.offline .care-state { color: var(--slate-1); }
+.care-sentence { font-size: 1.1em; margin-top: 0.2em; }
+.care-updated { color: var(--muted); font-size: 0.8em; margin-top: 0.5em; }
+
+.care-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7em 1em; }
+.care-facts dt { color: var(--muted); font-size: 0.8em; }
+.care-facts dd { margin: 0; font-weight: 600; font-size: 1.05em; }
+.care-facts dd.warn { color: #c2410c; }
+.care-facts dd.bad { color: var(--danger); }
+
+.care-alerts { list-style: none; padding: 0; display: grid; gap: 0.45em; }
+.care-alerts li { display: flex; gap: 0.7em; align-items: baseline; }
+.care-alerts .t { color: var(--muted); font-size: 0.8em; min-width: 3.6em; font-variant-numeric: tabular-nums; }
+.care-alerts li.empty { color: var(--muted); }
+
+@media (max-width: 340px) {
+  .care-facts { grid-template-columns: 1fr; }
+}
