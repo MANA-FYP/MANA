@@ -186,7 +186,10 @@ def direction(core: DecisionCore, now: float) -> Message | None:
     lim = core.limits
 
     def good(report) -> bool:
-        return now - report.stamp <= lim.max_age_s and report.trust >= lim.min_trust
+        # as the core's own check: not stamped further ahead than max_age_s either
+        return (
+            -lim.max_age_s <= now - report.stamp <= lim.max_age_s and report.trust >= lim.min_trust
+        )
 
     found: list[tuple[Priority, float, str]] = []  # priority, distance, sentence
     step = core._confirmed_step()  # two sensors agree, and the distance is known

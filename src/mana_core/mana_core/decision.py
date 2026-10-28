@@ -147,6 +147,7 @@ class Limits:
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
     position_max_age_s: float = 2.5
+    clock_back_s: float = 5.0  # a report this much older than the one held: the clock went back
 
 
 @dataclass(frozen=True)
@@ -204,10 +205,17 @@ class DecisionCore:
 
     # ---- inputs: the latest report per source wins; one older than it, arriving late, does not
 
-    @staticmethod
-    def _keep(reports: dict, key, report) -> None:
-        old = reports.get(key)
-        if old is None or report.stamp >= old.stamp:
+    def _newer(self, old, report) -> bool:
+        """A report a little older than the one held came late and is dropped. One much older
+        means the clock went back (a world reset, a bag played again), so it wins."""
+        return (
+            old is None
+            or report.stamp >= old.stamp
+            or old.stamp - report.stamp > self.limits.clock_back_s
+        )
+
+    def _keep(self, reports: dict, key, report) -> None:
+        if self._newer(reports.get(key), report):
             reports[key] = report
 
     def on_ground(self, report: GroundReport) -> None:
@@ -217,7 +225,7 @@ class DecisionCore:
         self._keep(self.obstacles, report.source, report)
 
     def on_motion(self, report: MotionReport) -> None:
-        if self.motion is None or report.stamp >= self.motion.stamp:
+        if self._newer(self.motion, report):
             self.motion = report
 
     def on_position(self, report: PositionReport) -> None:
@@ -280,10 +288,12 @@ class DecisionCore:
     # ---- what the reports say
 
     def _ok(self, report, max_age_s: float | None = None) -> bool:
+        """Recent and trusted. A report stamped further ahead than max_age_s is not used either:
+        after the clock went back, one held from before would otherwise stay fresh."""
+        max_age_s = self.limits.max_age_s if max_age_s is None else max_age_s
         return (
             report is not None
-            and self.now - report.stamp
-            <= (self.limits.max_age_s if max_age_s is None else max_age_s)
+            and -self.limits.max_age_s <= self.now - report.stamp <= max_age_s
             and report.trust >= self.limits.min_trust
         )
 

@@ -336,6 +336,28 @@ def test_an_older_report_arriving_late_does_not_replace_a_newer_one():
     assert c.links[Link.WIFI].connected
 
 
+def test_after_the_clock_goes_back_new_reports_are_used_again():
+    # a Gazebo world reset or a bag played again: the stamps start again near 0
+    c = DecisionCore()
+    c.on_motion(MotionReport(500.0, 0.9))
+    for source in (CAM, DEPTH):
+        c.on_ground(GroundReport(500.0, 0.9, source, Ground.FLAT, 3.0))
+    c.tick(500.0)
+    c.on_motion(MotionReport(5.0, 0.9))
+    c.on_ground(GroundReport(5.0, 0.9, DEPTH, Ground.DROP, 0.3))
+    assert c.tick(5.0).stop
+    assert c.motion.stamp == 5.0
+
+
+def test_a_report_stamped_well_ahead_of_the_clock_is_not_used():
+    c = DecisionCore()
+    for source in (CAM, DEPTH):
+        c.on_ground(GroundReport(NOW + 10.0, 0.9, source, Ground.FLAT, 3.0))
+    c.on_motion(level())
+    d = c.tick(NOW)  # the reports held come from a clock that has since gone back
+    assert d.reason == "Ground sensors not available, slowing down"
+
+
 def test_a_report_with_the_same_stamp_replaces_the_one_held_even_untrusted():
     c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
     c.on_ground(GroundReport(NOW, 0.2, DEPTH, Ground.FLAT, 3.0))  # the newest frame counts
