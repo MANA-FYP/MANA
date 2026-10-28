@@ -35,6 +35,7 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 | Stairs | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Curb | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Spoken stop | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
+| Stairs down | 187/200 (89.2% to 96.2%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 97.4% (sd 9.9%) | 80.0% (sd 0.0%) |
 | Drop ahead (edge case) | 2/200 (0.3% to 3.6%) | 2/200 (0.3% to 3.6%) | 0/200 | 0/200 | 67.0% (sd 3.3%) | 67.0% (sd 3.3%) |
 | Manual mode at a drop (edge case) | 32/200 (11.6% to 21.7%) | 32/200 (11.6% to 21.7%) | 0/200 | 0/200 | 79.0% (sd 9.2%) | 79.0% (sd 9.2%) |
 | Picture of stairs (edge case) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.2% (sd 6.4%) | 73.1% (sd 6.6%) |
@@ -45,7 +46,7 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 
 ### What the table shows
 
-- **Neither controller had a mishap in any of the 4,800 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
+- **Neither controller had a mishap in any of the 5,200 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
 - **A stop is released for a moment in nearly every noisy run, by both controllers alike: #97.** "Stops before" fails if the chair moves at all after its first stop for the hazard. After that first stop, one noisy distance over `edge_m` or `obstacle_stop_m` lets the chair move for a tick, and it happens again later in the run:
 
   | Scenario | Runs where the stop was released (MANA) | Moved on after the first stop (median, most) | Closest to the hazard |
@@ -55,10 +56,13 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
   | Dark corridor | 199/200 | 0.14 m, 0.32 m | 0.58 m from the person |
 
   The baseline's numbers are the same within a few runs, because both stop on the same one reading. None of these runs reached the hazard, but the manual-mode runs came within 0.20 m of an edge that the rule keeps 0.5 m away. A stop should not depend on one reading.
+
+  The same cause loses a yes at **stairs down** (MANA 187 of 200). In the 13 other runs the yes is heard on a tick where one lost camera report has turned the question into "possible step ahead", so the yes does nothing and MANA asks until the end of the run (in run 0 it also crept 0.25 m towards the stairs while it asked).
 - **Where the baseline falls short:**
   - **The picture of stairs** (0 of 200): one camera report is enough for it to ask for tracks.
   - **The ramp** (118 of 200): a single false camera report of stairs makes it ask for tracks on the ramp. **Building entry** (120 of 200) fails for the same reason, on its entrance ramp, so it is the same weakness, not a second one. With false reports turned off, the baseline meets every mark on both in 200 of 200 runs.
   - **The Wi-Fi drop** (0 of 200): the alert link is not part of its rules, so it drives on at full speed while no alert could be sent.
+  - **Stairs down** (0 of 200): its if-else rules have no question, so it never asks before going down.
 - **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182) and the Wi-Fi drop (186), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all three in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
 
 To make the table without false reports:
