@@ -142,6 +142,58 @@ def test_an_urgent_direction_is_dropped_right_after_a_stop_was_said():
     assert q.release(9.0).text == "Drop ahead. Stop."
 
 
+def test_a_stop_also_replaces_a_waiting_decision_that_is_less_urgent():
+    q = MessageQueue()
+    q.push(say("Ramp ahead, slowing down", WARNING, 0.0), 0.0)
+    q.push(tell("Drop ahead. Stop.", URGENT, 0.0), 0.0)
+    assert q.release(0.0).text == "Drop ahead. Stop."
+    assert heard(q, 5) == []
+
+
+def test_an_urgent_direction_that_stays_the_same_is_not_said_again():
+    q = MessageQueue(max_age_s=6.0)
+    q.push(tell("Drop ahead. Stop.", URGENT, 0.0), 0.0)
+    assert q.release(0.0)
+    q.push(tell("Drop ahead. Stop.", URGENT, 20.0), 20.0)  # long after, but nothing changed
+    assert q.release(20.0) is None
+
+
+def test_a_stop_direction_is_not_said_again_while_the_chair_waits_at_the_same_drop():
+    # the node pushes the direction every tick and the decision when it changes, both urgent
+    q = MessageQueue(max_age_s=6.0)
+    q.push(tell("Drop ahead, less than a metre. Stop.", URGENT, 0.0), 0.0)
+    q.push(say("Drop ahead, stopping", URGENT, 0.0), 0.0)
+    assert q.release(0.0).text == "Drop ahead, stopping"
+    q.push(tell("Drop ahead, less than a metre. Stop.", URGENT, 7.0), 7.0)  # still there
+    assert heard(q, 9) == []
+
+
+def test_a_message_exactly_max_age_s_old_is_still_said():
+    q = MessageQueue(max_age_s=6.0)
+    q.push(say("Level ground", INFO, 0.0), 0.0)
+    assert q.release(6.0).text == "Level ground"
+
+
+def test_a_repeated_decision_does_not_push_out_a_waiting_direction():
+    # late in a run, so that the queue's own clock is far from zero
+    q = MessageQueue()
+    q.push(say("Ramp ahead, slowing down", WARNING, 10.0), 10.0)
+    assert q.release(10.0)
+    q.push(tell("Ramp ahead, 1 metre.", WARNING, 10.5), 10.5)  # waits for the gap
+    q.push(say("Ramp ahead, slowing down", WARNING, 11.0), 11.0)  # the same decision again
+    assert [text for _, text in heard(q, 14)] == ["Ramp ahead, 1 metre."]
+
+
+def test_a_decision_said_just_before_is_not_said_again_after_one_never_said():
+    q = MessageQueue()
+    q.push(say("Ramp ahead, slowing down", WARNING, 10.0), 10.0)
+    assert q.release(10.0)
+    q.push(say("Possible step ahead, slowing down", WARNING, 10.5), 10.5)  # waits, never said
+    q.push(say("Ramp ahead, slowing down", WARNING, 11.0), 11.0)  # replaces it: back as before
+    q.push(tell("Ramp ahead, 1 metre.", WARNING, 11.0), 11.0)
+    assert heard(q, 14) == [(11.8, "Ramp ahead, 1 metre.")]  # at once when the first is said
+
+
 def test_an_old_message_is_dropped_not_said_late():
     q = MessageQueue(max_age_s=6.0)
     q.push(say("Level ground", INFO, 0.0), 0.0)
@@ -156,7 +208,7 @@ def test_an_urgent_message_is_never_dropped_for_its_age():
 
 
 def test_the_gap_must_be_shorter_than_the_age_limit():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="gap_s must be shorter than max_age_s"):
         MessageQueue(gap_s=6.0, max_age_s=6.0)
 
 
@@ -409,6 +461,31 @@ def test_a_step_that_only_one_sensor_sees_is_not_told_as_a_fact():
 
 def test_a_step_far_away_is_not_told_yet():
     assert direction(core_with(ground=step(Ground.STAIRS_UP, 3.5)), 1.0) is None
+    assert direction(core_with(ground=[ground(Ground.DROP, 2.5)]), 1.0) is None
+
+
+def test_a_drop_at_an_unknown_distance_is_told_without_one():
+    m = direction(core_with(ground=[ground(Ground.DROP, math.nan)]), 1.0)
+    assert (m.text, m.priority) == ("Drop ahead. Stop.", WARNING)
+
+
+def test_a_far_report_does_not_hide_a_near_one_after_it():
+    far_first = [ground(Ground.DROP, 3.0), ground(Ground.RAMP, 1.0, Source.CAMERA)]
+    assert direction(core_with(ground=far_first), 1.0).text == "Ramp ahead, 1 metre."
+    far, near = obstacle(3.0), ObstacleReport(1.0, 0.9, Source.DETECTOR, 1.0, "chair")
+    assert direction(core_with(obstacles=[far, near]), 1.0).text == "Chair ahead, 1 metre."
+
+
+def test_each_limit_is_reached_at_its_own_value_for_the_directions():
+    lim = DecisionCore().limits
+    m = direction(core_with(obstacles=[obstacle(lim.obstacle_stop_m)]), 1.0)
+    assert m.priority == URGENT
+    m = direction(core_with(obstacles=[obstacle(lim.obstacle_slow_m)]), 1.0)
+    assert m.priority == WARNING
+    m = direction(core_with(ground=[ground(Ground.DROP, lim.edge_m)]), 1.0)
+    assert m.priority == URGENT
+    at_limits = obstacle(1.2, trust=lim.min_trust, stamp=1.0 - lim.max_age_s)
+    assert direction(core_with(obstacles=[at_limits]), 1.0).text == "Person ahead, 1 metre."
 
 
 def test_an_obstacle_is_told_by_name_and_distance():

@@ -119,3 +119,17 @@ def test_one_bad_reading_on_a_1_hz_gps_does_not_switch():
         reading = None if stale else error
         seen.append((t, s.update(reading, True, t, lost_since=last_good if stale else None)))
     assert not switches(seen)
+
+
+def test_each_limit_is_reached_at_its_own_value():
+    """GPS is left only when its error is over out_m, and taken back only under back_m; the
+    times count as reached at their value."""
+    s = PositionSelector(out_m=15.0, out_s=1.5, back_m=8.0, back_s=5.0)
+    assert {source for _, source in run(s, [(5, 15.0)])} == {Source.GPS}  # 15 m is not over
+    seen = run(PositionSelector(), [(1, 3.0), (1.5, 16.0), (0.1, 16.0)])
+    ((t, source),) = switches(seen)
+    assert (round(t - 1.0, 2), source) == (1.5, Source.LIDAR_MAP)  # after exactly out_s
+    s = PositionSelector()
+    run(s, [(3, None)])
+    assert s.source == Source.LIDAR_MAP
+    assert {source for _, source in run(s, [(10, 8.0)], start=3.0)} == {Source.LIDAR_MAP}
