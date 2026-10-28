@@ -28,7 +28,10 @@ ros2 topic pub -r 10 /drive_request mana_msgs/msg/DriveRequest \
   "{mode: 1, stop: false, speed_limit: 0.3, reason: test}"      # tracks, 30 percent
 ```
 
-To drive it with the decision core instead, start `ros2 run mana_core core_node` in another terminal.
+To drive it with the decision core instead, start
+`ros2 run mana_core core_node --ros-args -p use_sim_time:=true` in another terminal. The host node runs
+on the simulation clock (`use_sim_time`), so the 2.5 s slide switch and the 0.5 s watchdog count
+simulation seconds, also when Gazebo runs slower than real time. The core must use the same clock.
 
 ## The route
 
@@ -43,10 +46,10 @@ One straight course along +x, 3 m wide. The chair starts at x = 1 m.
 | 12 to 14 | plateau, 0.5 m high | |
 | 14 to 18 | ramp down | wheels, slow |
 | 18 to 22 | level ground | |
-| 22 to 23 | stairs up: 3 steps of 17 cm | tracks, slow |
-| 23 to 26 | top of the stairs, 51 cm high | stay on tracks until level for 2 s |
-| 26 to 27 | stairs down | stop and ask |
-| 27 to 31 | level ground | back on wheels |
+| 22 to 22.66 | stairs up: 3 risers of 17 cm (x = 22, 22.33, 22.66) | tracks, slow |
+| 22.66 to 26 | top of the stairs, 51 cm high | stay on tracks until level for 2 s |
+| 26 to 26.66 | stairs down: 3 risers (x = 26, 26.33, 26.66) | stop and ask |
+| 26.66 to 31 | level ground | back on wheels |
 | 31 to 34 | curb, 12 cm high | tracks |
 | 34 to 38 | level ground | |
 | 38 to 46 | a drop of 1 m (the ground ends) | stop 0.5 m before the edge |
@@ -73,6 +76,11 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 - The tracks climb the 17 cm steps (the step height of the scripted world), the ramps and the curb at
   up to 0.5 m/s. Faster, they have not been tried on the stairs.
 - The chair drives straight; there is no steering command yet.
+- The slides are open loop: both sets move at once for the 2.5 s of a mode change, so for a moment
+  neither fully carries the chassis, and the host does not check that the slides have arrived.
+- The tracks (belt and sloping ends) are about 2.2 m long, against a 0.9 m chassis: the front of the
+  chair is 1.1 m from its centre. Take that into account when a scenario measures the distance to an edge.
+- A drive request with a mode other than 0 or 1 is ignored (the chair stands still) and logged.
 - No sensors yet (the next issue bridges them).
 
 ## Tests
