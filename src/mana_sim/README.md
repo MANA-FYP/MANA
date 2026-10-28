@@ -15,6 +15,7 @@ colcon build --packages-select mana_msgs mana_sim
 source install/setup.bash
 ros2 launch mana_sim world.launch.py                  # with the Gazebo window
 ros2 launch mana_sim world.launch.py headless:=true   # no window
+ros2 launch mana_sim world.launch.py driver:=true     # a driver steers (see below)
 ```
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
@@ -37,6 +38,26 @@ To drive it with the decision core instead, start
 `ros2 run mana_core core_node --ros-args -p use_sim_time:=true` in another terminal. The host node runs
 on the simulation clock (`use_sim_time`), so the 2.5 s slide switch and the 0.5 s watchdog count
 simulation seconds, also when Gazebo runs slower than real time. The core must use the same clock.
+
+### Steering, with a driver
+
+With `driver:=true` the host also follows `cmd_vel` (`geometry_msgs/Twist`: `linear.x` forward in
+m/s, `angular.z` turn in rad/s, positive to the left) from whoever drives: the supervisor's keyboard
+(#77) or the autopilot (#78). MANA's drive request still decides, whoever drives:
+
+- the mode is always the drive request's, and nothing moves while the slides change;
+- forward is capped at `speed_limit` times 1.2 m/s, turning at 1.0 rad/s and reversing at 0.3 m/s;
+- after a stop, the driver can only turn on the spot or reverse, to move away from what stopped the
+  chair (docs/decisions.md, D3);
+- if the driver goes quiet for 0.5 s (keys let go), the chair stands still. It never drives on by
+  itself in this mode.
+
+Without `driver:=true` the chair drives straight at the speed limit, as the scripted scenarios need.
+
+```bash
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.5}, angular: {z: 0.4}}"                       # forward 0.5 m/s, turning left
+```
 
 ## Smoke test
 
@@ -87,13 +108,22 @@ it in ROS 2, and stops the chair when no request has arrived for `watchdog_s` (0
 | `drive_request` | `mana_msgs/DriveRequest` | what the host follows (mode, stop, speed_limit) |
 | `/model/mana_chair/ground_truth` | `nav_msgs/Odometry` | where the chair really is |
 
-Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
+Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world. With a driver it
+is the driver's speed, capped there.
 
 ## Known limits
 
 - The tracks climb the 17 cm steps (the step height of the scripted world), the ramps and the curb at
   up to 0.5 m/s. Faster, they have not been tried on the stairs.
-- The chair drives straight; there is no steering command yet.
+- Without a driver the chair drives straight; steering needs `driver:=true` and `cmd_vel`.
+- On wheels the chair turns at about 60 percent of the asked turn rate (0.8 rad/s for 2 s gave
+  about 55 degrees, not 92): four wheels steered as two sides skid. The tracks turn at about the
+  asked rate. A driver corrects for it by steering; the autopilot (#78) closes the loop itself.
+- The route is 3 m wide with nothing beyond its sides: steer far off the centre line and the chair
+  falls off. Free driving needs the open test world (#79).
+- Turning on the spot after a stop swings the ends of the chair: on tracks the front is 1.1 m from the
+  centre (below), so near a drop the turn itself can bring an end over the edge. Nothing behind the
+  chair is sensed, which is why reversing is slow.
 - The slides are open loop: both sets move at once for the 2.5 s of a mode change, so for a moment
   neither fully carries the chassis, and the host does not check that the slides have arrived.
 - The tracks (belt and sloping ends) are about 2.2 m long, against a 0.9 m chassis: the front of the
@@ -107,6 +137,6 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 ## Tests
 
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
-stop) and `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in the
+stop, and a driver's steering capped by the drive request) and `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in the
 model) and `test/test_faults.py` (the faults and their scenarios) without Gazebo. With the simulation running, `tools/check_topic_rates.sh` checks that every sensor
 publishes at the rate in [docs/topics.md](docs/topics.md).
