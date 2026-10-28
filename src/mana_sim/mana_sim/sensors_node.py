@@ -2,7 +2,8 @@
 
 - Transforms: map > odom (identity), odom > base_link (from the ground truth of the simulation) and
   base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry).
-- `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode).
+- `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode:
+  the speed of the wheels against the chair's speed, and their turn against the gyro).
 - `obstacle` from the nearest echo of the lidar in front of the chair. (`position` is made by
   mana_position's position_node from `gps/fix`, and `link` by mana_connectivity's link_node from the
   heartbeats of fault_node.)
@@ -32,7 +33,8 @@ class SensorsNode(Node):
         self.obstacle_trust = p("obstacle_trust", 0.9).value
 
         self.mode = WHEELS
-        self.wheel_rad_s: list[float] = []
+        self.left_rad_s: list[float] = []
+        self.right_rad_s: list[float] = []
         self.speed_mps = 0.0
 
         self.tf = TransformBroadcaster(self)
@@ -80,14 +82,16 @@ class SensorsNode(Node):
         self.odom.publish(m)
 
     def on_joints(self, m: JointState) -> None:
-        self.wheel_rad_s = [
-            v for n, v in zip(m.name, m.velocity, strict=False) if n.startswith("wheel_")
-        ]
+        self.left_rad_s, self.right_rad_s = conv.wheel_sides(list(m.name), list(m.velocity))
 
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
         pitch, roll = conv.tilt(q.x, q.y, q.z, q.w)
-        slip = self.mode == WHEELS and conv.wheel_slip(self.wheel_rad_s, self.speed_mps)
+        wheels = self.left_rad_s + self.right_rad_s
+        slip = self.mode == WHEELS and (
+            conv.wheel_slip(wheels, self.speed_mps)
+            or conv.turn_slip(self.left_rad_s, self.right_rad_s, m.angular_velocity.z)
+        )
         r = MotionReport()
         r.header.stamp, r.header.frame_id = m.header.stamp, BASE
         r.trust, r.pitch_rad, r.roll_rad, r.wheel_slip = 1.0, pitch, roll, slip

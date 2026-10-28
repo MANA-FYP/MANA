@@ -43,6 +43,36 @@ def test_reversing_at_the_ground_speed_is_not_slip():
     assert c.wheel_slip([-8.0] * 4, -0.3)
 
 
+def test_only_the_four_wheel_joints_count_and_they_are_split_by_side():
+    names = [
+        "wheel_fl_joint",
+        "wheel_fr_joint",
+        "wheel_lift",
+        "wheel_rl_joint",
+        "wheel_rr_joint",
+        "track_lift_left",
+    ]
+    left, right = c.wheel_sides(names, [1.0, 2.0, 99.0, 3.0, 4.0, 77.0])
+    assert (left, right) == ([1.0, 3.0], [2.0, 4.0])
+    assert c.wheel_sides([], []) == ([], [])
+
+
+def test_a_normal_turn_on_the_spot_is_not_turn_slip():
+    # left turn at 1 rad/s: right wheels forward, left back, and a skid steer chair turns 0.67 of it
+    assert not c.turn_slip([-2.33] * 2, [2.33] * 2, 0.67)
+    assert not c.turn_slip([-2.33] * 2, [2.33] * 2, 0.7)
+
+
+def test_wheels_that_turn_twice_as_fast_in_a_turn_are_slip():
+    assert c.turn_slip([-4.67] * 2, [4.67] * 2, 0.68)
+    assert c.turn_slip([4.67] * 2, [-4.67] * 2, -0.68)  # to the right
+
+
+def test_driving_straight_is_not_turn_slip_and_no_wheels_is_no_answer():
+    assert not c.turn_slip([3.3] * 2, [3.3] * 2, 0.0)
+    assert not c.turn_slip([], [3.3], 0.0)
+
+
 def test_standing_still_is_not_slip():
     assert not c.wheel_slip([0.5] * 4, 0.0)
     assert not c.wheel_slip([], 1.0)
