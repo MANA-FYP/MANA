@@ -31,7 +31,7 @@ from mana_sim.world_variants import without_rendering_sensors
 
 def bare_world(world: str) -> str:
     """A copy of the world with no cameras and no lidar, in a folder of this user. It is written to
-    a file of its own and moved into place, so two launches at once never read a half-written one."""
+    a file of its own and moved into place, so a launch at the same time never reads half of it."""
     with open(world) as f:
         text = without_rendering_sensors(f.read())
     folder = os.path.join(tempfile.gettempdir(), f"mana_sim_{os.getuid()}")
