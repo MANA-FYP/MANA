@@ -6,8 +6,10 @@ with the service set_fault (mana_msgs/srv/SetFault), for example:
 
     ros2 service call /set_fault mana_msgs/srv/SetFault "{sensor: gps, kind: dropout, active: true}"
 
-`fault_state` (a String, latched) says which faults are on. The node also publishes `link`, the
-Wi-Fi link: healthy, or fading while a wifi fade is on. Run it on simulation time.
+`fault_state` (a String, latched) says which faults are on. The node also sends the heartbeats
+of the two radios, once a second, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`, which
+mana_connectivity's link_node turns into `link`. A Wi-Fi fade loses more and more of the Wi-Fi
+heartbeats, in the same pattern every run, until none arrives. Run it on simulation time.
 """
 
 import random
@@ -17,9 +19,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CameraInfo, Image, Imu, JointState, LaserScan, NavSatFix
-from std_msgs.msg import String
+from std_msgs.msg import Header, String
 
-from mana_msgs.msg import LinkReport
 from mana_msgs.srv import SetFault
 from mana_sim import faults as f
 
@@ -35,9 +36,10 @@ class FaultNode(Node):
         self.state = self.create_publisher(
             String, "fault_state", QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         )
-        self.link = self.create_publisher(LinkReport, "link", 10)
+        self.wifi_beat = self.create_publisher(Header, "link/wifi/heartbeat", 10)
+        self.bluetooth_beat = self.create_publisher(Header, "link/bluetooth/heartbeat", 10)
         self.create_service(SetFault, "set_fault", self.on_set_fault)
-        self.create_timer(0.5, self.send_link)
+        self.create_timer(1.0, self.send_beats)
 
         # raw topic -> (topic read by the others, type, sensor, what to do with a message)
         for raw, out, kind, sensor, fix in (
@@ -78,12 +80,11 @@ class FaultNode(Node):
     def publish_state(self) -> None:
         self.state.publish(String(data=self.faults.summary()))
 
-    def send_link(self) -> None:
-        r = LinkReport()
-        r.header.stamp = self.get_clock().now().to_msg()
-        r.connected, r.rssi_dbm, r.trust, r.missed_heartbeats = self.faults.wifi(self.now_s())
-        r.link = LinkReport.WIFI
-        self.link.publish(r)
+    def send_beats(self) -> None:
+        beat = Header(stamp=self.get_clock().now().to_msg())
+        self.bluetooth_beat.publish(beat)
+        if self.faults.wifi_beat(self.now_s()):
+            self.wifi_beat.publish(beat)
 
     def fix_camera(self, m: Image) -> Image:
         data = f.noisy_image(

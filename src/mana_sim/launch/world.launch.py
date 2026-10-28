@@ -8,10 +8,10 @@
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
-(config/bridge.yaml) and starts the host node, the sensors node and the depth node (the ground
-reports from the 3D camera, told where the camera is mounted). With detector:=true it also starts
-the object detector on the RGB camera, which needs `pip install ultralytics`. The core node is
-started separately, on the same clock:
+(config/bridge.yaml) and starts the host node, the sensors node, MANA's position and link nodes
+and the depth node (the ground reports from the 3D camera, told where the camera is mounted).
+With detector:=true it also starts the object detector on the RGB camera, which needs
+`pip install ultralytics`. The core node is started separately, on the same clock:
 ros2 run mana_core core_node --ros-args -p use_sim_time:=true
 """
 
@@ -153,6 +153,20 @@ def generate_launch_description():
             Node(
                 package="mana_sim",
                 executable="sensors_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
+            # MANA's own position source (GPS, then the lidar map) and alert link. The simulated GPS
+            # gives no covariance, so its error is the 1.5 m of a good fix
+            Node(
+                package="mana_position",
+                executable="position_node",
+                output="screen",
+                parameters=[{"use_sim_time": True, "unknown_error_m": 1.5}],
+            ),
+            Node(
+                package="mana_connectivity",
+                executable="link_node",
                 output="screen",
                 parameters=[{"use_sim_time": True}],
             ),

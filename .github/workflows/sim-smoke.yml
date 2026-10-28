@@ -10,6 +10,8 @@ on:
       - "src/mana_core/**"
       - "src/mana_msgs/**"
       - "src/mana_perception/**"
+      - "src/mana_position/**"
+      - "src/mana_connectivity/**"
       - "tools/sim_smoke.sh"
       - ".github/workflows/sim-smoke.yml"
   push:
@@ -19,6 +21,8 @@ on:
       - "src/mana_core/**"
       - "src/mana_msgs/**"
       - "src/mana_perception/**"
+      - "src/mana_position/**"
+      - "src/mana_connectivity/**"
       - "tools/sim_smoke.sh"
       - ".github/workflows/sim-smoke.yml"
   schedule:
@@ -51,7 +55,7 @@ jobs:
           rosdep init || true
           rosdep update
           rosdep install --from-paths src --ignore-src -y
-          colcon build --packages-select mana_msgs mana_perception mana_core mana_sim
+          colcon build --packages-up-to mana_sim mana_core
       - name: Gazebo starts headless and the core answers
         shell: bash
         run: |

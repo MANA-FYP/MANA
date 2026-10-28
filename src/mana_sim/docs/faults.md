@@ -27,8 +27,8 @@ refused, and the answer says why. Run the nodes on simulation time (`-p use_sim_
 | camera, depth, lidar, imu, gps | `noise` | adds Gaussian noise: 20 grey levels, 5 cm, 5 cm, 0.05 rad/s and m/s^2, 3 m. A GPS gets the matching covariance, so the `position` error grows | 1 (times the sizes on the left) |
 | camera, depth, lidar, imu, gps | `dropout` | the sensor sends nothing (a GPS `dropout` is the GPS loss) | none |
 | camera | `dark` | the image keeps a share of its light | 0.05 |
-| wifi | `fade` | the `link` report falls from -50 dBm and trust 1 to -95 dBm and not connected, with missed heartbeats in the last 30 percent | 10 (seconds) |
-| wheels | `slip` | the wheel encoders (`joint_states`) read this many times faster than the chair moves, so `motion` says `wheel_slip` on wheels | 2 |
+| wifi | `fade` | more and more of the Wi-Fi heartbeats are lost, until none gets through after this many seconds; `link_node` then reports missed heartbeats and the link gone, and MANA changes to Bluetooth | 10 (seconds) |
+| wheels | `slip` | the wheel encoders (`joint_states`) read this many times faster than the chair moves, so `motion` says `wheel_slip` on wheels, also in a turn (the wheels' turn against the gyro) | 2 |
 
 ## Scenarios
 
@@ -46,7 +46,7 @@ Each switches its fault on at 10 s and off at 30 s (simulation time) and ends.
 | `depth_noise` | 3D camera noise, 4 times the usual | ground reports get less certain; a flat floor is not called a step |
 | `lidar_dropout` | the lidar sends nothing | no obstacle reports; the other sources carry on |
 | `gps_loss` | the GPS sends nothing | no position reports; the position source switches |
-| `wifi_fade` | Wi-Fi fades in 10 s | the link falls, then MANA slows down and changes link |
+| `wifi_fade` | Wi-Fi fades in 10 s | the Wi-Fi link is reported gone and the alerts change to Bluetooth; MANA does not slow down, because Bluetooth still carries them (it would, if both links went) |
 | `wheel_slip` | the encoders read twice the speed | a slip report; on wheels MANA changes to tracks |
 | `darkness` | the camera keeps 5 percent of the light | the camera is distrusted; the 3D camera carries on |
 | `imu_lost` | the IMU sends nothing | no motion reports; MANA does not rely on tilt |
@@ -58,5 +58,5 @@ The scenarios say what to expect in words. Scoring them with pass marks comes wi
 
 - The faults are made on the messages, not in the physics. Wheel slip is the encoders reading fast: the chair
   does not really slide. Darkness darkens the image; the light in the world stays on.
-- `fault_node` also makes the `link` report (a healthy Wi-Fi link when no fault is on).
+- `fault_node` also sends the heartbeats of the two radios (once a second); `link_node` of `mana_connectivity` turns them into the `link` reports. The Bluetooth heartbeats never stop.
 - Images are copied through Python: at the sizes of the simulation this is fine, a larger camera would need a faster path.

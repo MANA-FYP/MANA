@@ -6,7 +6,7 @@
 set -uo pipefail
 
 # topic  documented rate (Hz)
-TOPICS="camera/image:15 depth/image:10 scan:10 imu:100 gps/fix:5 joint_states:250 odom:20"
+TOPICS="camera/image:15 depth/image:10 scan:10 imu:100 gps/fix:5 joint_states:250 odom:20 position:10 link:20"
 TOLERANCE=0.15  # 15 percent
 
 failed=0

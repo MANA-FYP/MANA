@@ -54,7 +54,8 @@ FAULT_SCENARIOS = {
         FaultScenario(
             "wifi_fade",
             "The Wi-Fi link fades to nothing in 10 s.",
-            "The link report falls, then MANA slows down and changes to the other link.",
+            "The Wi-Fi link is reported gone and the alerts change to Bluetooth. MANA does not "
+            "slow down: Bluetooth still carries them.",
             on_off("wifi", "fade", 10.0),
         ),
         FaultScenario(

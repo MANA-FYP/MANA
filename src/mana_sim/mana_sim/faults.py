@@ -7,7 +7,7 @@ they work the same on a recording.
 - noise (camera, depth, lidar, imu, gps): adds Gaussian noise; a GPS gets the matching covariance
 - dropout (the same sensors): the sensor sends nothing; a GPS dropout is the GPS loss
 - dark (camera): the image keeps a share of its light
-- fade (wifi): the link falls from good to none over some seconds
+- fade (wifi): the Wi-Fi heartbeats get lost more and more often, until none gets through
 - slip (wheels): the encoders say the wheels turn faster than the chair moves
 """
 
@@ -27,8 +27,6 @@ KINDS = {
 # the usual size of the noise: grey levels, metres, metres, rad/s and m/s^2, metres
 NOISE_SIGMA = {"camera": 20.0, "depth": 0.05, "lidar": 0.05, "imu": 0.05, "gps": 3.0}
 DEFAULT_VALUE = {"noise": 1.0, "dark": 0.05, "fade": 10.0, "slip": 2.0, "dropout": 1.0}
-FADE_START_DBM = -50.0
-FADE_END_DBM = -95.0
 DEGREES_PER_METRE = 1.0 / 111320.0
 
 
@@ -41,6 +39,7 @@ class Active:
 class Faults:
     def __init__(self) -> None:
         self.on: dict[tuple[str, str], Active] = {}
+        self._lost = 0.0  # the loss of the Wi-Fi heartbeats that has not been taken out yet
 
     def set(
         self, sensor: str, kind: str, active: bool, value: float, now: float
@@ -50,6 +49,7 @@ class Faults:
             return False, f"unknown kind {kind!r}; choose from {', '.join(KINDS)}"
         if sensor not in KINDS[kind]:
             return False, f"{kind} is for {', '.join(sorted(KINDS[kind]))}, not {sensor!r}"
+        self._lost = 0.0
         if active:
             strength = value if math.isfinite(value) and value > 0.0 else DEFAULT_VALUE[kind]
             self.on[(sensor, kind)] = Active(strength, now)
@@ -77,15 +77,23 @@ class Faults:
         f = self.on.get(("wheels", "slip"))
         return f.value if f else 1.0
 
-    def wifi(self, now: float) -> tuple[bool, float, float, int]:
-        """(connected, rssi_dbm, trust, missed_heartbeats) of the Wi-Fi link."""
+    def wifi_quality(self, now: float) -> float:
+        """The share of the Wi-Fi heartbeats that get through: 1 for a good link, falling to 0 over
+        the fade time."""
         f = self.on.get(("wifi", "fade"))
         if f is None:
-            return True, FADE_START_DBM, 1.0, 0
-        done = min(1.0, max(0.0, (now - f.since) / f.value))
-        rssi = FADE_START_DBM + (FADE_END_DBM - FADE_START_DBM) * done
-        missed = 0 if done < 0.7 else min(5, int((done - 0.7) / 0.3 * 5) + 1)
-        return done < 1.0, rssi, 1.0 - done, missed
+            return 1.0
+        return 1.0 - min(1.0, max(0.0, (now - f.since) / f.value))
+
+    def wifi_beat(self, now: float) -> bool:
+        """Whether this Wi-Fi heartbeat gets through. The loss of every heartbeat is added up and a
+        heartbeat is lost each time the sum reaches 1, so a fade is the same pattern every run:
+        no chance, and the heartbeats lost more and more often until none gets through."""
+        self._lost += 1.0 - self.wifi_quality(now)
+        if self._lost >= 1.0 - 1e-9:
+            self._lost -= 1.0
+            return False
+        return True
 
 
 def noisy(values: list[float], sigma: float, rng: random.Random) -> list[float]:
