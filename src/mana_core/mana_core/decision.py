@@ -206,12 +206,14 @@ class DecisionCore:
     # ---- inputs: the latest report per source wins; one older than it, arriving late, does not
 
     def _newer(self, old, report) -> bool:
-        """A report a little older than the one held came late and is dropped. One much older
-        means the clock went back (a world reset, a bag played again), so it wins."""
+        """A report a little older than the one held came late and is dropped. It wins when the
+        clock went back (a world reset, a bag played again): when it is much older, or when the
+        one held is stamped ahead of the core's own clock."""
         return (
             old is None
             or report.stamp >= old.stamp
             or old.stamp - report.stamp > self.limits.clock_back_s
+            or old.stamp - self.now > self.limits.max_age_s
         )
 
     def _keep(self, reports: dict, key, report) -> None:

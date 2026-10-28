@@ -349,6 +349,27 @@ def test_after_the_clock_goes_back_new_reports_are_used_again():
     assert c.motion.stamp == 5.0
 
 
+def test_after_the_clock_goes_back_a_little_a_drop_still_stops_the_chair():
+    # a reset from 3.0 s to 0.1 s: less than clock_back_s, as in a bag looped every few seconds
+    c = DecisionCore()
+    for i in range(31):
+        t = i / 10
+        for source in (CAM, DEPTH):
+            c.on_ground(GroundReport(t, 0.9, source, Ground.FLAT, 3.0))
+        c.on_motion(MotionReport(t, 0.9))
+        c.tick(t)
+    after = []
+    for i in range(1, 41):  # a drop 0.3 m ahead, reported every 0.5 s
+        t = round(i / 10, 2)
+        if i % 5 == 1:
+            c.on_ground(GroundReport(t, 0.9, DEPTH, Ground.DROP, 0.3))
+            c.on_ground(GroundReport(t, 0.9, CAM, Ground.FLAT, 3.0))
+            c.on_motion(MotionReport(t, 0.9))
+        after.append((t, c.tick(t)))
+    assert all(d.speed_limit < 1.0 for _, d in after)  # never on the reports from before
+    assert all(d.stop for t, d in after if t >= 0.6)
+
+
 def test_a_report_stamped_well_ahead_of_the_clock_is_not_used():
     c = DecisionCore()
     for source in (CAM, DEPTH):
