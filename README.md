@@ -305,6 +305,8 @@ Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a 
 | `picture` | Edge case: only the camera sees stairs (a picture), so MANA slows down but does not change mode |
 | `dark` | Failure case: the camera is not trusted in the dark; the lidar still sees a person, and MANA stops and says why |
 | `imu_lost` | Failure case: the IMU stops during the climb, so MANA cannot confirm level ground and stays on tracks |
+| `entry` | Full system: up the entrance ramp on GPS, then inside without GPS; the lidar map keeps the position, so MANA does not slow down for it |
+| `wifi_drop` | Full system: Wi-Fi fades and Bluetooth carries the alerts at full speed; with both gone MANA slows down until one is back |
 
 The pass marks are the team's targets: no track request on flat ground or ramps, tracks requested at least 1.5 m before the first step, a stop acted on within 1 s, and obstacles still announced in the dark. No scenario may end with the chair on a step on wheels, over a drop or against an obstacle.
 
@@ -320,7 +322,13 @@ Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The bas
 ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
 ```
 
-In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
+In the scripted world MANA meets 55 of 55 pass marks and the baseline 51: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), and it never asks before stairs down (`stairs_down`).
+
+The scripted world is exact. To see how each controller copes with imperfect inputs, `repeat` runs every scenario many times with lost reports, noisy trust, distance and tilt, false one-sensor reports, and faults and spoken commands moved in time. MANA and the baseline get the same seed for the same run. The table for 200 runs, and what it shows, is in [docs/results.md](docs/results.md):
+
+```bash
+python3 -m mana_core.repeat --runs 200 --seed 1   # or name scenarios; several minutes for all
+```
 
 Which hazard each sensor, rule and test covers, and the gaps that are left, is in [docs/coverage.md](docs/coverage.md).
 
