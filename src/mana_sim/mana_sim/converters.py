@@ -20,34 +20,15 @@ def wheel_slip(
     limit_mps: float = 0.3,
     min_mps: float = 0.2,
 ) -> bool:
-    """The wheels turn much faster (or slower) than the chair moves: they slip. Below min_mps there
-    is too little movement to tell."""
+    """The wheels turn much faster (or slower) than the chair moves: they slip. The mean of the
+    wheel speeds is signed, so on a turn on the spot, when the two sides turn opposite ways, it
+    cancels and is not read as slip. Below min_mps there is too little movement to tell."""
     if not wheel_rad_s:
         return False
-    wheels_mps = sum(abs(w) for w in wheel_rad_s) / len(wheel_rad_s) * WHEEL_RADIUS_M
+    wheels_mps = abs(sum(wheel_rad_s) / len(wheel_rad_s)) * WHEEL_RADIUS_M
     if max(wheels_mps, abs(ground_mps)) < min_mps:
         return False
     return abs(wheels_mps - abs(ground_mps)) > limit_mps
-
-
-def local_xy(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
-    """East and north in metres of a GPS fix from the origin. Flat earth: good to a few centimetres
-    over the 50 m of the route."""
-    r = 6378137.0
-    north = math.radians(lat - origin_lat) * r
-    east = math.radians(lon - origin_lon) * r * math.cos(math.radians(origin_lat))
-    return east, north
-
-
-def gps_error_m(cov_xx: float, cov_yy: float, default_m: float) -> float:
-    """The horizontal error from the covariance of the fix; default_m if the sensor gives none."""
-    var = max(cov_xx, 0.0) + max(cov_yy, 0.0)
-    return math.sqrt(var) if var > 0.0 else default_m
-
-
-def gps_trust(error_m: float, bad_m: float = 10.0) -> float:
-    """1 for a perfect fix, falling to 0 at bad_m."""
-    return max(0.0, min(1.0, 1.0 - error_m / bad_m))
 
 
 def nearest_ahead(

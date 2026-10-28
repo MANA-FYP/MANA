@@ -31,25 +31,21 @@ def test_wheels_much_faster_than_the_chair_slip():
     assert c.wheel_slip([8.0] * 4, 0.3)
 
 
+def test_a_turn_on_the_spot_is_not_slip():
+    # the two sides turn opposite ways at 1 rad/s of the chair: each rim moves at 0.35 m/s
+    # (wheels 0.35 m from the middle, 0.15 m radius), but the chair does not move forward
+    assert not c.wheel_slip([2.33, -2.33, 2.33, -2.33], 0.0)
+    assert not c.wheel_slip([-2.33, 2.33, -2.33, 2.33], 0.0)
+
+
+def test_reversing_at_the_ground_speed_is_not_slip():
+    assert not c.wheel_slip([-4.0] * 4, -0.6)
+    assert c.wheel_slip([-8.0] * 4, -0.3)
+
+
 def test_standing_still_is_not_slip():
     assert not c.wheel_slip([0.5] * 4, 0.0)
     assert not c.wheel_slip([], 1.0)
-
-
-def test_a_fix_east_of_the_origin_is_east():
-    east, north = c.local_xy(33.6844, 73.0489, 33.6844, 73.0479)
-    assert east > 80 and north == pytest.approx(0.0)
-
-
-def test_the_gps_error_comes_from_the_covariance_or_the_default():
-    assert c.gps_error_m(4.0, 5.0, 1.5) == pytest.approx(3.0)
-    assert c.gps_error_m(0.0, 0.0, 1.5) == 1.5
-
-
-def test_gps_trust_falls_with_the_error():
-    assert c.gps_trust(0.0) == 1.0
-    assert c.gps_trust(5.0) == pytest.approx(0.5)
-    assert c.gps_trust(50.0) == 0.0
 
 
 def test_the_nearest_echo_in_front_wins_and_the_ones_to_the_side_are_ignored():
