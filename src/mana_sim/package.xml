@@ -16,6 +16,7 @@
   <depend>sensor_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>rosgraph_msgs</depend>
+  <exec_depend>mana_core</exec_depend>
   <exec_depend>mana_perception</exec_depend>
   <exec_depend>mana_position</exec_depend>
   <exec_depend>mana_connectivity</exec_depend>
