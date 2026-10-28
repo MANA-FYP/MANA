@@ -18,8 +18,8 @@ For `selector.py` and `link.py` the runner is that package's `test_selector*.py`
 |---|---|---|---|---|
 | `mana_core/decision.py` | 347 | 293 | 54 | 84.4% |
 | `mana_core/messages.py` | 169 | 154 | 15 | 91.1% |
-| `mana_position/selector.py` | SELECTOR_TOTAL | SELECTOR_KILLED | SELECTOR_SURVIVED | SELECTOR_SCORE |
-| `mana_connectivity/link.py` | LINK_TOTAL | LINK_KILLED | LINK_SURVIVED | LINK_SCORE |
+| `mana_position/selector.py` | 34 | 33 | 1 | 97.1% |
+| `mana_connectivity/link.py` | 69 | 61 | 8 | 88.4% |
 
 Before this work the first run left 70 survivors in `decision.py`, 31 in `messages.py`, 5 in `selector.py` and 21 in `link.py`. Every survivor that changed behaviour now has a test. They were gaps in the tests, not bugs in the code: no test would have noticed if
 
@@ -65,4 +65,11 @@ Every one of these was read, and none changes what MANA decides, says or sends.
 
 ### `selector.py` and `link.py`
 
-SELECTOR_LINK_SURVIVORS
+Two of the 61 killed in `link.py` are what mutmut calls "suspicious": the tests failed on them, but slowly.
+
+| Module | Mutants | What changes | Why the behaviour does not |
+|---|---|---|---|
+| `selector.py` | 13 | a type annotation | As above. |
+| `link.py` | 9, 21, 23 | a type annotation | As above. |
+| `link.py` | 22, 24 | the first value of `active` or `_steady_since` is `""` instead of `None` | `active` is compared only with `Link.BLUETOOTH` before it is set. `_steady_since` is set to `None` by the first update, before it is read. |
+| `link.py` | 19, 38, 39 | the defaults `back_s`, `resend_s` and `max_pending` | Design values, as for the limits. |

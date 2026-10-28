@@ -168,9 +168,9 @@ def test_alert_ids_count_up_from_one_after_the_boot_id():
 def test_an_alert_is_not_resent_over_the_same_link_before_resend_s():
     box = Outbox(resend_s=1.0, boot="b")
     box.add("Drop ahead, stopping")
-    assert [i for i, _ in box.due(Link.WIFI, 0.0)] == ["b-1"]
-    assert box.due(Link.WIFI, 0.5) == []
-    assert [i for i, _ in box.due(Link.WIFI, 1.0)] == ["b-1"]
+    assert [i for i, _ in box.due(Link.WIFI, 10.0)] == ["b-1"]  # not 0 s, which equals Link.WIFI
+    assert box.due(Link.WIFI, 10.5) == []
+    assert [i for i, _ in box.due(Link.WIFI, 11.0)] == ["b-1"]
 
 
 def test_every_alert_dropped_past_the_cap_is_counted():
