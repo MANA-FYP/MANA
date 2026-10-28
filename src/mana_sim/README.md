@@ -21,7 +21,8 @@ The launch file sets the model path, starts Gazebo, bridges the chair's topics t
 (`config/bridge.yaml`) and starts the host node, `sensors_node` (transforms, `odom`, and the `motion`,
 `position` and `obstacle` reports), `fault_node` (the faults, and the `link` report) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
-stub is off; `stub:=true` starts it as well.
+stub is off; `stub:=true` starts it as well. `sensors:=false` leaves out the cameras and the lidar
+(for a machine with no GPU).
 
 Drive the chair by hand (the request must repeat: the chair stops 0.5 s after the last one):
 
@@ -36,6 +37,19 @@ To drive it with the decision core instead, start
 `ros2 run mana_core core_node --ros-args -p use_sim_time:=true` in another terminal. The host node runs
 on the simulation clock (`use_sim_time`), so the 2.5 s slide switch and the 0.5 s watchdog count
 simulation seconds, also when Gazebo runs slower than real time. The core must use the same clock.
+
+## Smoke test
+
+`tools/sim_smoke.sh` starts the world headless with no cameras and no lidar (`sensors:=false`, for a machine
+with no GPU), starts the core, and passes when a `DriveRequest` and a `UserMessage` are published within 90 s.
+`--no-core` runs it without the core and must fail. In CI the workflow `.github/workflows/sim-smoke.yml` runs
+both, when the simulation, the core or the script change and every night. Locally, after
+`colcon build` and `source install/setup.bash`:
+
+```bash
+tools/sim_smoke.sh               # passes in a few seconds
+tools/sim_smoke.sh --no-core     # fails after the time limit
+```
 
 ## The route
 
