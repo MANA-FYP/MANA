@@ -254,24 +254,30 @@ def _ramp(d, h, settings):
 
 
 def _slope_from_blind_zone(d, h, changes, settings):
-    """Where a slope that starts in the blind zone starts, or None.
+    """Where a slope that starts in the blind zone starts, or None. h is measured from the plane
+    the chair stands on, carried on ahead.
 
-    At the foot of a ramp, or at its crest, the chair is still level while the nearest ground in
-    view is already on the slope, more than blind_m above or below the chair's level. That is no
-    edge if the ground seen is one straight slope, no steeper than a steep ramp, that meets the
-    chair's level in the blind zone: at the camera's foot it is no more than ramp_join_m on the far
-    side of that level. A curb with a ramp up behind it, or a step down with a ramp down behind it,
-    is off that level on the near side, so it is still an edge."""
+    At the foot of a ramp, or at its crest, the chair is still on one slope while the nearest
+    ground in view is already on the next, more than blind_m off the chair's plane. That is no edge
+    if the near ground seen is one straight slope, no steeper than a steep ramp, that meets the
+    chair's plane in the blind zone: at the camera's foot it is no more than ramp_join_m on the far
+    side of that plane, and at the nearest ground seen it is on the far side. A curb with a ramp up
+    behind it, or a step down with a ramp down behind it, is off the plane on the near side at the
+    camera's foot; with the ramp the other way behind it, it meets the plane only past the ground
+    seen. Either way it is still an edge."""
     smooth = len(d) if not changes.size else changes[0] + 1  # the bins before the first step
     if smooth < settings.ramp_bins:
         return None
-    x, y = d[:smooth], h[:smooth]
+    near = min(smooth, 2 * settings.ramp_bins)  # only the near ground: farther, the slope may end
+    x, y = d[:near], h[:near]
     slope, at_zero = np.polyfit(x, y, 1)
     if np.sqrt(np.mean((slope * x + at_zero - y) ** 2)) > settings.ramp_fit_m:
         return None
     if not settings.ramp_slope <= abs(slope) <= settings.steep / 4:
         return None
     if at_zero * np.sign(slope) > settings.ramp_join_m:  # above level climbing, below falling
+        return None
+    if (slope * x[0] + at_zero) * slope <= 0:  # it meets that level only past the ground seen
         return None
     return float(np.clip(-at_zero / slope, 0.0, d[0]))  # where the line meets the chair's level
 
@@ -282,8 +288,9 @@ def classify(prof: Profile, settings: Settings = DEFAULTS, chair_pitch_rad: floa
     chair_pitch_rad is the chair's own pitch, already in the profile's camera (tilted()). Heights
     are then measured from a level plane, while the chair may stand on a slope that goes on ahead:
     on the route's 7 degree ramp the nearest ground in view is about 7 cm off that plane. So the
-    blind-zone check allows for the slope the chair stands on, and for one that starts in the blind
-    zone, at the foot or the crest of a ramp, before the chair has tilted (_slope_from_blind_zone).
+    blind-zone check compares the nearest ground with the plane the chair stands on, carried on
+    ahead, and allows for a slope that starts in the blind zone, at the foot or the crest of a
+    ramp, before the chair has tilted (_slope_from_blind_zone).
     """
     have = ~np.isnan(prof.height_m)
     d, h = prof.distance_m[have], prof.height_m[have]
@@ -298,21 +305,23 @@ def classify(prof: Profile, settings: Settings = DEFAULTS, chair_pitch_rad: floa
     if changes.size:
         near[changes[0] + 1 :] = False
     level = float(np.median(h[near]))  # height of the nearest ground seen, against the chair's
-    if level > settings.riser_max_m:
+    # the plane the chair stands on, carried on ahead: higher ahead going up (nose up)
+    under = -d * math.tan(chair_pitch_rad)
+    slope_m = float(np.median(under[near]))
+    if level - slope_m > settings.riser_max_m:
         # taller than a riser: stairs if more risers climb behind it, else a wall or an object
         climbs = [dh for _, dh in _steps(d, h - level, settings) if dh > 0]
         return Reading(STAIRS_UP, 0.0) if climbs else Reading(UNKNOWN)
 
     # The camera cannot see the ground just in front of the chair. If the nearest ground it does
-    # see is clearly lower or higher than the ground the chair stands on, the edge is in that
+    # see is clearly lower or higher than the plane the chair stands on, the edge is in that
     # blind zone. Where in it is unknown, so it is reported at 0 m: the worst case.
     blind = []
-    slope_m = d[0] * abs(math.tan(chair_pitch_rad))  # where a slope under the chair would be
     ramp_from = None
-    if abs(level) > settings.blind_m + slope_m:
-        ramp_from = _slope_from_blind_zone(d, h, changes, settings)
+    if abs(level - slope_m) > settings.blind_m:  # off the plane the chair stands on
+        ramp_from = _slope_from_blind_zone(d, h - under, changes, settings)
         if ramp_from is None:
-            blind = [(0.0, level)]
+            blind = [(0.0, level - slope_m)]
     elif d[0] > settings.near_max_m:
         return Reading(UNKNOWN)  # level ground only far away: the near ground is missing data
     h = h - level  # heights from the nearest ground seen

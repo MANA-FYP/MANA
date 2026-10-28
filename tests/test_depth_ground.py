@@ -227,11 +227,13 @@ def test_the_chairs_own_pitch_is_added_to_the_cameras_tilt():
 
 
 @pytest.mark.parametrize("chair_pitch", [0.2, -0.2])
-def test_a_pitched_chair_on_level_ground_reads_flat_only_with_its_pitch(chair_pitch):
-    # nose down where a ramp meets level ground, or nose up: the mounting tilt alone reads a step
+def test_a_pitched_chair_on_level_ground_reads_no_hazard_only_with_its_pitch(chair_pitch):
+    # nose down where a ramp meets level ground, or nose up: the mounting tilt alone reads a step.
+    # With the pitch it is RAMP at 0 m: against the plane the chair stands on, the ground ahead
+    # does change slope there, and the core only slows down.
     image = render(flat, cam=dp.tilted(CAM, chair_pitch))
     assert dp.read_ground(image, CAM).ground != dp.FLAT
-    assert dp.read_ground(image, CAM, chair_pitch_rad=chair_pitch).ground == dp.FLAT
+    assert dp.read_ground(image, CAM, chair_pitch_rad=chair_pitch).ground in (dp.FLAT, dp.RAMP)
 
 
 def test_on_the_way_down_the_stairs_the_steps_below_are_stairs_down():
@@ -314,6 +316,18 @@ def test_a_curb_or_a_drop_on_the_ramp_is_still_found_where_it_is(pitch):
         assert r.ground == kind and r.distance_m == pytest.approx(1.0, abs=0.1)
 
 
+@pytest.mark.parametrize("pitch", [-RAMP_RAD, RAMP_RAD], ids=["going-up", "going-down"])
+@pytest.mark.parametrize("height", [0.1, -0.1, 0.2, -0.2], ids=lambda h: f"{h:+.1f}m")
+def test_an_edge_in_the_blind_zone_on_the_ramp_is_still_an_edge_at_0_m(pitch, height):
+    # 0.3 m ahead is in the blind zone (the nearest ground in view is about 0.53 m ahead). From
+    # #100's review: a drop going up, or a raised edge going down, brings the ground in view back
+    # towards level, so it is measured from the plane the chair stands on, not from level.
+    cam = dp.tilted(SIM_CAM, pitch)
+    image = render(on_slope(pitch, step(0.3, height)), cam=cam, rows=240, cols=320)
+    r = dp.read_ground(image, SIM_CAM, chair_pitch_rad=pitch)
+    assert r.ground in (dp.CURB, dp.DROP) and r.distance_m == 0.0, r
+
+
 @pytest.mark.parametrize("start", [0.0, 0.2, 0.35])
 @pytest.mark.parametrize("slope", [math.tan(RAMP_RAD), -math.tan(RAMP_RAD)], ids=["foot", "crest"])
 @pytest.mark.parametrize("height_error", [-0.015, 0.015])
@@ -332,20 +346,22 @@ def test_a_ramp_that_starts_in_the_blind_zone_is_a_ramp_not_an_edge(start, slope
 
 @pytest.mark.parametrize("height_error", [-0.015, 0.015])
 @pytest.mark.parametrize(
-    "at, height, slope, kind",
-    [(0.3, 0.1, 0.125, dp.CURB), (0.2, 0.08, 0.125, dp.CURB), (0.3, -0.1, -0.125, dp.CURB),
-     (0.3, -0.3, -0.125, dp.DROP)],
+    "at, height, slope",
+    [(0.3, 0.1, 0.125), (0.2, 0.08, 0.125), (0.3, -0.1, -0.125), (0.3, -0.3, -0.125),
+     (0.3, -0.3, 0.125), (0.15, -0.2, 0.125), (0.3, 0.15, -0.125)],
     ids=["curb-then-ramp-up", "low-curb-then-ramp-up", "step-down-then-ramp-down",
-         "drop-then-ramp-down"],
+         "drop-then-ramp-down", "drop-then-ramp-up", "near-drop-then-ramp-up",
+         "curb-then-ramp-down"],
 )  # fmt: skip
 def test_an_edge_in_the_blind_zone_with_a_ramp_behind_it_is_still_an_edge(
-    at, height, slope, kind, height_error
+    at, height, slope, height_error
 ):
-    # the slope behind the edge meets the chair's level on the near side, not in the blind zone
+    # the slope behind the edge meets the chair's level on the near side, not in the blind zone,
+    # or, with the slope the other way, only past the ground in view
     seen_from = dp.Camera.from_fov(320, 240, 1.2, SIM_CAM.height_m + height_error, 0.6)
     edge = lambda a: np.where(a < at, 0.0, height + slope * np.clip(a - at, 0.0, None))  # noqa: E731
     r = dp.read_ground(render(edge, cam=seen_from, rows=240, cols=320), SIM_CAM)
-    assert r.ground == kind and r.distance_m == 0.0
+    assert r.ground in (dp.CURB, dp.DROP) and r.distance_m == 0.0, r
 
 
 def test_a_slope_too_steep_for_a_ramp_from_the_blind_zone_is_still_an_edge():

@@ -171,20 +171,34 @@ Known limits:
   240, 1.2 rad, 0.97 m, 0.6 rad): without it, a chair pitched 0.2 rad nose down (the front reaching
   level ground at the foot of a ramp) or nose up reads the level ground ahead as a curb at 0 m, and
   on tracks going down the stairs (0.48 rad) the steps below read as a curb 0.85 m away; with it
-  both read right. Heights are then measured from a level plane, while the chair may stand on a
-  slope that goes on ahead: on the route's 7 degree ramp the nearest ground in view is about 7 cm
-  off that plane, so the blind-zone check allows for the slope under the chair (`blind_m` plus the
-  nearest ground's distance times the tangent of the pitch). On the ramp the reading is then RAMP,
-  and a 0.1 m curb or a 0.3 m drop on it is still found at its place; the check is looser while the
-  chair is pitched. With no recent or trusted `motion` report the mounting tilt is used alone. Roll
-  is not corrected yet.
-- **At the foot or the crest of a ramp** the chair is still level while the nearest ground in view
-  is already 6 to 9 cm up or down the slope, so the pitch does not help there (single frames of
-  `CURB 0.00 m` on the Gazebo run of #100). It is no edge if that ground is one straight slope, no
-  steeper than 25 %, that meets the chair's level in the blind zone, within 3 cm (`ramp_join_m`,
-  for the mounting height's error): the reading is then RAMP. A curb with a ramp up behind it, or
-  a step down with a ramp down behind it, meets that level on the near side and is still an edge
-  at 0 m.
+  both read right (the level ground then reads RAMP at 0 m: against the chair's own plane it does
+  change slope there). Heights are then measured from a level plane, while the chair may stand on
+  a slope that goes on ahead: on the route's 7 degree ramp the nearest ground in view is about 7 cm
+  off that plane. So the blind-zone check measures the nearest ground from the plane the chair
+  stands on, carried on ahead, with the same 6 cm (`blind_m`) either side of it. On the ramp the
+  reading is then RAMP; a 0.1 m curb or a 0.3 m drop on it is still found at its place, and an edge
+  of 0.1 or 0.2 m up or down in the blind zone is still an edge at 0 m, going up and going down.
+  With no recent or trusted `motion` report the mounting tilt is used alone. Roll is not corrected
+  yet.
+- **At the foot or the crest of a ramp** the chair is still on one slope while the nearest ground
+  in view is already 6 to 9 cm up or down the next, so the pitch does not help there (single frames
+  of `CURB 0.00 m` on the Gazebo run of #100). It is no edge if the near ground seen (0.6 m of it)
+  is one straight slope, no steeper than 25 %, that meets the chair's plane in the blind zone,
+  within 3 cm (`ramp_join_m`, for the mounting height's error): the reading is then RAMP. A curb
+  with a ramp up behind it, or a step down with a ramp down behind it, meets that plane on the near
+  side, and with the ramp the other way it meets it only past the ground seen; both are still an
+  edge at 0 m. With the chair standing on both axles as it would, every 10 cm over the route's
+  ramp on wheels and on tracks reads FLAT or RAMP, except one frame at the foot going down on
+  wheels (17.7 m), where the camera is 3.3 cm lower over the level ground than `camera_height_m /
+  cos(pitch)` says, just past `ramp_join_m`. It reads CURB at 0 m, so the core stops: safe, but
+  worth a look in Gazebo.
+- **An edge just inside the blind zone with a ramp behind it can read as that ramp.** From the
+  ground in view alone, an 8 to 10 cm edge 0.3 to 0.45 m ahead with a 7 degree ramp the same way
+  behind it looks like the ramp starting about 0.2 m ahead, and it reads RAMP at 0 m. With the ramp
+  the other way behind it (a raised edge, then down), the ground in view has come back to within
+  6 cm of the chair's plane, and it read RAMP before this check too. Both are a ramp joined to the
+  ground by an edge, which a ramp built for wheelchairs should not have; the core slows down for
+  RAMP.
 - **A hazard on less than half of the path strip is not seen.** Each row's median keeps what
   covers most of the row, so a drop beside the path, on only a third of the strip, reads flat. The
   strip is about 0.5 m wide at 1 m; what is beside the path is the lidar's and the core's to watch.
