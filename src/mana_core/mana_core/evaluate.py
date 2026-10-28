@@ -12,7 +12,15 @@ marks each controller met and exits with 1 only if MANA misses one.
 import sys
 
 from mana_core.baseline import BaselineController
-from mana_core.decision import DecisionCore, GroundReport, Limits, ObstacleReport, Priority
+from mana_core.decision import (
+    DecisionCore,
+    GroundReport,
+    Limits,
+    LinkReport,
+    ObstacleReport,
+    PositionReport,
+    Priority,
+)
 from mana_core.messages import Message as Heard
 from mana_core.messages import MessageQueue, direction
 from mana_core.scenarios import SCENARIOS, Message, Sample, Scenario, Trace, check
@@ -26,17 +34,27 @@ def feed(core: DecisionCore, report) -> None:
         core.on_ground(report)
     elif isinstance(report, ObstacleReport):
         core.on_obstacle(report)
+    elif isinstance(report, PositionReport):
+        core.on_position(report)
+    elif isinstance(report, LinkReport):
+        core.on_link(report)
     else:
         core.on_motion(report)
 
 
 def run(
-    scenario: Scenario, limits: Limits | None = None, controller=DecisionCore, cane: bool = False
+    scenario: Scenario,
+    limits: Limits | None = None,
+    controller=DecisionCore,
+    cane: bool = False,
+    world: World | None = None,
 ) -> Trace:
     """Play a scenario. trace.messages has every change of reason, as the node makes them;
     trace.heard has what the user would hear, one at a time, urgent first. With cane=True the
-    host also says what is ahead (step directions), as a smart cane would."""
-    core, world, trace = controller(limits), World(scenario.route), Trace()
+    host also says what is ahead (step directions), as a smart cane would. world replaces the
+    scripted world, for example with a noisy one (repeat.py)."""
+    core, trace = controller(limits), Trace()
+    world = world or World(scenario.route)
     queue = MessageQueue()
     says = sorted(scenario.says, key=lambda s: s.at_s)
     t = 0.0

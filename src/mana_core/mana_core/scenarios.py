@@ -136,6 +136,17 @@ def full_speed(after_s: float = 1.0) -> Mark:
     return Mark("Full speed on wheels", test)
 
 
+def full_speed_on(start_m: float, end_m: float, what: str) -> Mark:
+    def test(tr):
+        on = [s for s in tr.samples if start_m <= s.x_m < end_m]
+        slowest = min((0.0 if s.stop else s.speed_limit for s in on), default=None)
+        if slowest is None:
+            return False, f"never reached the {what}"
+        return slowest == 1.0, f"slowest {slowest:.0%} of top speed on the {what}"
+
+    return Mark(f"Full speed on the {what}", test)
+
+
 def stop_within() -> Mark:
     def test(tr):
         sent = tr.said_at(Command.STOP)
@@ -325,6 +336,45 @@ SCENARIOS = {
                 tracks_before(6.0),
                 tracks_from(8.0),
                 tells("On tracks until the ground is level", aloud=False),
+            ),
+        ),
+        Scenario(
+            "entry",
+            "Building entry (full system)",
+            "Up the entrance ramp on GPS, then inside, where GPS is lost. The lidar map still "
+            "knows where the user is, so MANA does not slow down for the position.",
+            Route(
+                14.0,
+                (Stretch(4.0, 7.0, Ground.RAMP, pitch_rad=0.08),),
+                faults=(Fault("gps", from_m=8.0),),
+                full_system=True,
+            ),
+            40.0,
+            marks=(
+                no_tracks(),
+                slower_on(4.0, 7.0, "entrance ramp"),
+                full_speed_on(8.5, 14.0, "way inside, without GPS"),
+                reaches_end(14.0),
+            ),
+        ),
+        Scenario(
+            "wifi_drop",
+            "Wi-Fi drop (full system)",
+            "Wi-Fi fades at 4 m and Bluetooth carries the alerts, so MANA keeps its speed. From 8 "
+            "to 10 m Bluetooth is out of range too: no alert could be sent, so MANA slows down.",
+            Route(
+                14.0,
+                faults=(Fault("wifi", from_m=4.0), Fault("bluetooth", from_m=8.0, to_m=10.0)),
+                full_system=True,
+            ),
+            40.0,
+            # each mark keeps 0.5 m clear of the fault edges, so the repeated runs can move them
+            marks=(
+                full_speed_on(4.5, 7.5, "stretch on Bluetooth"),
+                slower_on(8.5, 9.5, "stretch with no alert link"),
+                tells("No alert link, slowing down"),
+                full_speed_on(11.0, 14.0, "stretch with Bluetooth back"),
+                reaches_end(14.0),
             ),
         ),
     )
