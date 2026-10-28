@@ -15,7 +15,9 @@ Then level ground again until the chair drives on, and the next trial. Gazebo is
 host's wheel command is where the simulated or real chair starts to brake.
 """
 
+import os
 import random
+import signal
 import statistics
 import subprocess
 import sys
@@ -108,7 +110,9 @@ def summary(values: list[float]) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     trials = int(args[args.index("--trials") + 1]) if "--trials" in args else 50
-    procs = [subprocess.Popen(["ros2", "run", *n]) for n in NODES]
+    # each in its own process group: `ros2 run` starts the node as a child, and stopping only
+    # `ros2 run` leaves the node running
+    procs = [subprocess.Popen(["ros2", "run", *n], start_new_session=True) for n in NODES]
     rclpy.init()
     probe = None
     try:
@@ -122,8 +126,12 @@ def main(argv: list[str] | None = None) -> int:
             probe.destroy_node()
         rclpy.shutdown()
         for p in procs:  # always, so that no node is left running
-            p.terminate()
-            p.wait(timeout=10)
+            os.killpg(p.pid, signal.SIGINT)
+        for p in procs:
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(p.pid, signal.SIGKILL)
     if not r:
         print("no trial finished: is the workspace sourced and built?")
         return 1
