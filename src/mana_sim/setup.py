@@ -41,6 +41,8 @@ setup(
         "console_scripts": [
             "host_node = mana_sim.host_node:main",
             "sensors_node = mana_sim.sensors_node:main",
+            "fault_node = mana_sim.fault_node:main",
+            "fault_script = mana_sim.fault_script:main",
         ]
     },
 )
