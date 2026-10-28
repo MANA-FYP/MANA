@@ -322,6 +322,8 @@ ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, m
 
 In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
 
+Which hazard each sensor, rule and test covers, and the gaps that are left, is in [docs/coverage.md](docs/coverage.md).
+
 Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
 
 ```bash
