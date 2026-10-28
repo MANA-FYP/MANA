@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MANA Behaviour Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* The decision core's behaviour tree (src/mana_core/mana_core/decision.py): a selector whose
+   fifteen branches are tried in order, highest priority first, every tick (10 Hz). The first
+   branch whose condition holds decides. Tiles are the branches; a click shows the rule; "Run"
+   plays a scripted scenario recorded from the real core and lights the branch that decides.
+   Icons: Phosphor Icons (duotone), MIT licence. */
+:root {
+  --bg: #edf3f2; --surface: #ffffff; --ink: #0d2526; --muted: #4b6364; --line: #c3d5d2; --wire: #86a6a1;
+  --stop: #d64545;  --stop-hi: #f08a7e;  --stop-deep: #8f2323;  --stop-ink: #9b2626;
+  --ask: #7a4fd0;   --ask-hi: #a98af0;   --ask-deep: #4a2b8f;   --ask-ink: #5b35a8;
+  --user: #e0702a;  --user-hi: #f7a35f;  --user-deep: #a2470f;  --user-ink: #8a3a0c;
+  --move: #0f8c82;  --move-hi: #35c1b5;  --move-deep: #07554d;  --move-ink: #065a52;
+  --help: #2b72c9;  --help-hi: #6aa5ee;  --help-deep: #164a8a;  --help-ink: #1d559c;
+  --base0: #5f7476; --base0-hi: #93a8a9; --base0-deep: #3a4b4c; --base0-ink: #3a4b4c;
+  --on-tile: #fff; --shadow: rgba(13, 37, 38, .28); --gloss: rgba(255, 255, 255, .42); --face: 20%;
+  --display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --body: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
+.page { position: relative; overflow: hidden; overflow: clip; max-width: 1400px; margin: 0 auto;
+  padding-inline: clamp(16px, 3vw, 44px); padding-block: 22px 18px; }
+.floor { position: absolute; left: -30%; right: -30%; bottom: 0; height: 55%;
+  background-image: linear-gradient(var(--line) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--line) 1.5px, transparent 1.5px);
+  background-size: 64px 64px; transform: perspective(620px) rotateX(64deg); transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, #000, rgba(0,0,0,.5) 45%, transparent 90%); mask-image: linear-gradient(to top, #000, rgba(0,0,0,.5) 45%, transparent 90%);
+  pointer-events: none; z-index: 0; }
+.head { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 28px; }
+.eyebrow { margin: 0 0 6px; font: 700 .78rem/1 var(--body); letter-spacing: .16em; text-transform: uppercase; color: var(--move-ink); }
+h1 { margin: 0; font: 800 clamp(1.9rem, 3.6vw, 2.8rem)/1 var(--display); letter-spacing: -.025em; text-wrap: balance; }
+.sub { margin: 6px 0 0; color: var(--muted); font-size: .95rem; max-width: 62ch; }
+.key { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: .86rem; font-weight: 600; color: var(--muted); }
+.key li { display: inline-flex; align-items: center; gap: 7px; }
+.key i { width: 16px; height: 16px; border-radius: 5px; background: linear-gradient(155deg, var(--hi), var(--base)); box-shadow: 0 2px 0 var(--deep); }
+.stop { --hi: var(--stop-hi); --base: var(--stop); --deep: var(--stop-deep); --tint: var(--stop); --tint-ink: var(--stop-ink); }
+.ask  { --hi: var(--ask-hi);  --base: var(--ask);  --deep: var(--ask-deep);  --tint: var(--ask);  --tint-ink: var(--ask-ink); }
+.user { --hi: var(--user-hi); --base: var(--user); --deep: var(--user-deep); --tint: var(--user); --tint-ink: var(--user-ink); }
+.move { --hi: var(--move-hi); --base: var(--move); --deep: var(--move-deep); --tint: var(--move); --tint-ink: var(--move-ink); }
+.help { --hi: var(--help-hi); --base: var(--help); --deep: var(--help-deep); --tint: var(--help); --tint-ink: var(--help-ink); }
+.base0 { --hi: var(--base0-hi); --base: var(--base0); --deep: var(--base0-deep); --tint: var(--base0); --tint-ink: var(--base0-ink); }
+
+.board { position: relative; z-index: 1; margin-top: 18px; --t: clamp(62px, 5.6vw, 82px); }
+.wires { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.row { display: flex; gap: 16px; }
+.row + .row { margin-top: 30px; }
+.stage { flex: var(--n) 1 0; min-width: 0; padding: 10px 12px 10px; border-radius: 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 12%, var(--surface)), color-mix(in srgb, var(--tint) 4%, var(--bg)));
+  border: 1px solid color-mix(in srgb, var(--tint) 28%, transparent);
+  box-shadow: 0 7px 0 color-mix(in srgb, var(--tint) 16%, transparent), 0 22px 34px -24px var(--shadow); }
+.stage > h2 { margin: 0; font: 700 1.05rem/1 var(--display); color: var(--tint-ink); }
+.nodes { display: flex; justify-content: space-around; align-items: flex-start; gap: 6px; padding-top: 14px; }
+.node { position: relative; z-index: 2; appearance: none; border: 0; background: none; padding: 3px; margin: 0; font: inherit; color: inherit; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 10px; border-radius: 16px; min-width: 0; -webkit-tap-highlight-color: transparent; }
+.node:focus-visible { outline: 3px solid var(--move); outline-offset: 3px; }
+.tile { --rest: perspective(700px) rotateX(10deg); --lift: perspective(700px) rotateX(3deg) translateY(-8px);
+  position: relative; width: var(--t); aspect-ratio: 1; display: grid; place-items: center; border-radius: 30%;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--hi) var(--face), var(--surface)) 0%, color-mix(in srgb, var(--base) calc(var(--face) - 4%), var(--surface)) 55%, color-mix(in srgb, var(--base) calc(var(--face) + 12%), var(--surface)) 100%);
+  border: 2px solid color-mix(in srgb, var(--base) 42%, var(--surface));
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.6), inset 0 -8px 14px color-mix(in srgb, var(--base) 16%, transparent), 0 8px 0 var(--base), 0 8px 0 2px color-mix(in srgb, var(--deep) 40%, transparent), 0 26px 26px -14px var(--shadow);
+  transform: var(--rest); transition: transform .3s cubic-bezier(.2,.8,.2,1), filter .3s, opacity .3s; }
+.tile::before { content: ""; position: absolute; inset: 7% 12% 55% 12%; border-radius: 50% 50% 46% 46% / 70% 70% 30% 30%; background: linear-gradient(var(--gloss), transparent); }
+.tile > svg { position: relative; width: calc(var(--t) * .54); height: calc(var(--t) * .54); color: var(--tint-ink); filter: drop-shadow(0 3px 3px color-mix(in srgb, var(--deep) 28%, transparent)); }
+.num { position: absolute; top: -8px; left: -8px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font: 500 .72rem/1 var(--mono); color: #fff; background: var(--deep); box-shadow: 0 2px 0 rgba(0,0,0,.18); }
+.label { font: 700 .86rem/1.15 var(--body); text-align: center; color: var(--ink); max-width: 9ch; }
+.node:hover .tile, .node.sel .tile { transform: var(--lift); }
+.node.sel .label { color: var(--tint-ink); }
+.board.running .node:not(.on) .tile { filter: saturate(.25); opacity: .55; }
+.node.on .tile { transform: var(--lift); filter: none; opacity: 1; box-shadow: inset 0 2px 0 rgba(255,255,255,.6), 0 8px 0 var(--base), 0 0 0 5px color-mix(in srgb, var(--base) 30%, transparent), 0 0 34px color-mix(in srgb, var(--base) 70%, transparent), 0 26px 26px -14px var(--shadow); }
+.board.running .node.tried .tile { opacity: .8; filter: saturate(.55); }
+
+/* the run strip */
+.run { position: relative; z-index: 2; margin-top: 22px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 12px 16px; box-shadow: 0 16px 30px -24px var(--shadow); min-width: 0; }
+.card h3 { margin: 0 0 4px; font: 700 1.05rem/1.2 var(--display); }
+.card p { margin: 0; color: var(--muted); font-size: .92rem; }
+.rule { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 8px 0 0; font-size: .9rem; }
+.rule dt { font-weight: 700; color: var(--muted); }
+.rule dd { margin: 0; }
+.say { font-family: var(--mono); font-size: .82rem; color: var(--ink); background: color-mix(in srgb, var(--move) 8%, var(--surface)); padding: 1px 6px; border-radius: 6px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tab { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: 600 .84rem/1 var(--body); padding: 7px 11px; border-radius: 999px; cursor: pointer; }
+.tab[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+.go { appearance: none; border: 0; background: var(--move); color: #fff; font: 700 .9rem/1 var(--body); padding: 8px 14px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 3px 0 var(--move-deep); }
+.go svg { width: 16px; height: 16px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.route { position: relative; height: 44px; margin: 12px 0 6px; border-radius: 10px; background: color-mix(in srgb, var(--line) 35%, var(--surface)); overflow: hidden; }
+.route .seg { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; font: 700 .7rem/1 var(--body); color: #fff; letter-spacing: .02em; }
+.seg.RAMP { background: #8fb7a9; } .seg.STAIRS_UP { background: var(--move); } .seg.STAIRS_DOWN { background: var(--ask); }
+.seg.CURB { background: var(--user); } .seg.DROP { background: var(--stop); } .seg.fake { background: repeating-linear-gradient(45deg, #b9c7c6, #b9c7c6 6px, #d5dfde 6px, #d5dfde 12px); color: var(--ink); }
+.route .obst { position: absolute; top: 4px; bottom: 4px; width: 6px; border-radius: 3px; background: var(--ink); }
+.route .chair { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--surface); border: 4px solid var(--ink); transition: left .08s linear; }
+.readout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; font-size: .84rem; }
+.readout b { display: block; font: 500 .95rem/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.readout span { color: var(--muted); font-weight: 600; }
+.msg { margin-top: 8px; min-height: 1.5em; font: 600 .95rem/1.4 var(--body); }
+.msg .branch { font: 500 .78rem/1 var(--mono); color: #fff; background: var(--ink); padding: 3px 7px; border-radius: 6px; margin-right: 8px; }
+.foot { position: relative; z-index: 2; margin: 10px 0 0; font-size: .78rem; color: var(--muted); }
+@media (max-width: 900px) { .row { flex-direction: column; } .run { grid-template-columns: 1fr; } .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="floor" aria-hidden="true"></div>
+  <header class="head">
+    <div>
+      <p class="eyebrow">MANA decision core</p>
+      <h1>How MANA decides, ten times a second</h1>
+      <p class="sub">Fifteen branches, tried in order. The first whose condition holds decides the mode, the speed and the message. Click a branch to read its rule, or play a scenario recorded from the real core.</p>
+    </div>
+    <ul class="key" aria-label="Colours">
+      <li class="stop"><i></i>Stop</li><li class="ask"><i></i>Stairs down</li><li class="user"><i></i>User</li>
+      <li class="move"><i></i>Ground and motion</li><li class="help"><i></i>Help can reach</li><li class="base0"><i></i>Otherwise</li>
+    </ul>
+  </header>
+
+  <section class="board" id="board" aria-label="The behaviour tree, highest priority first">
+    <svg class="wires" id="wires" aria-hidden="true"></svg>
+    <div class="row">
+      <div class="stage stop" style="--n:4"><h2>Stop: needs one sensor</h2><div class="nodes" data-group="stop"></div></div>
+      <div class="stage ask" style="--n:2"><h2>Stairs down</h2><div class="nodes" data-group="ask"></div></div>
+      <div class="stage user" style="--n:1"><h2>User</h2><div class="nodes" data-group="user"></div></div>
+    </div>
+    <div class="row">
+      <div class="stage move" style="--n:5"><h2>Ground and motion</h2><div class="nodes" data-group="move"></div></div>
+      <div class="stage help" style="--n:2"><h2>Help can reach</h2><div class="nodes" data-group="help"></div></div>
+      <div class="stage base0" style="--n:1"><h2>Otherwise</h2><div class="nodes" data-group="base0"></div></div>
+    </div>
+  </section>
+
+  <section class="run">
+    <article class="card" id="inspector" aria-live="polite">
+      <h3 id="i-title">Pick a branch</h3>
+      <p id="i-text">Each tile is one branch of the tree in <code>decision.py</code>, numbered by priority. Everything above "manual" also holds in manual mode.</p>
+      <dl class="rule" id="i-rule"></dl>
+    </article>
+    <article class="card">
+      <div class="controls">
+        <div class="tabs" id="tabs" role="group" aria-label="Scenario"></div>
+        <button class="go" id="play" type="button"><svg viewBox="0 0 256 256" aria-hidden="true">__ICON_play__</svg><span>Run</span></button>
+      </div>
+      <div class="route" id="route" aria-hidden="true"><div class="chair" id="chair"></div></div>
+      <div class="readout">
+        <div><span>Time</span><b id="r-t">0.0 s</b></div>
+        <div><span>Chair at</span><b id="r-x">0.00 m</b></div>
+        <div><span>Mode</span><b id="r-mode">WHEELS</b></div>
+        <div><span>Speed</span><b id="r-speed">0%</b></div>
+      </div>
+      <p class="msg" id="r-msg"></p>
+    </article>
+  </section>
+  <p class="foot">Runs are recorded from the decision core on the scripted world (<code>mana_core/scenarios.py</code>), one record per 0.1 s tick, and played at four times real speed. Icons: Phosphor Icons, MIT licence.</p>
+</div>
+
+<script>
+const BRANCHES = __BRANCHES__;
+const RUNS = __RUNS__;
+const ICONS = __ICONS__;
+
+const board = document.getElementById('board');
+const tiles = {};
+BRANCHES.forEach((b, i) => {
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'node ' + b.group; btn.dataset.name = b.name;
+  btn.innerHTML = `<span class="tile"><span class="num">${i + 1}</span><svg viewBox="0 0 256 256" aria-hidden="true">${ICONS[b.icon]}</svg></span><span class="label">${b.label}</span>`;
+  btn.addEventListener('click', () => show(b.name));
+  board.querySelector(`[data-group="${b.group}"]`).appendChild(btn);
+  tiles[b.name] = btn;
+});
+
+function show(name) {
+  const b = BRANCHES.find(x => x.name === name);
+  Object.values(tiles).forEach(t => t.classList.toggle('sel', t.dataset.name === name));
+  document.getElementById('i-title').textContent = `${BRANCHES.indexOf(b) + 1}. ${b.label}`;
+  document.getElementById('i-text').textContent = b.why;
+  const rows = [['When', b.when], ['Does', b.does], ['Says', b.says ? `<span class="say">${b.says}</span>` : 'nothing new'], ['In code', `<code>${b.name}</code> branch, <code>decision.py</code>`]];
+  document.getElementById('i-rule').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+
+/* wires: one line through the branches in priority order */
+function wire() {
+  const svg = document.getElementById('wires'), box = board.getBoundingClientRect();
+  const pts = BRANCHES.map(b => { const r = tiles[b.name].querySelector('.tile').getBoundingClientRect(); return [r.left + r.width / 2 - box.left, r.top + r.height / 2 - box.top]; });
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    d += y1 > y0 + 20 ? ` C${x0},${y0 + 120} ${x1},${y1 - 120} ${x1},${y1}` : ` L${x1},${y1}`;
+  }
+  svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="var(--wire)" stroke-width="3" stroke-dasharray="2 9" stroke-linecap="round"/>`;
+}
+addEventListener('resize', wire); document.fonts && document.fonts.ready.then(wire); wire();
+
+/* runs */
+const tabs = document.getElementById('tabs'), route = document.getElementById('route'), chair = document.getElementById('chair');
+let current = Object.keys(RUNS)[0], timer = null, i = 0;
+Object.entries(RUNS).forEach(([key, r]) => {
+  const t = document.createElement('button'); t.type = 'button'; t.className = 'tab'; t.textContent = r.title.replace(/ \(.*\)$/, '');
+  t.setAttribute('aria-pressed', key === current); t.addEventListener('click', () => pick(key)); tabs.appendChild(t);
+});
+function pick(key) {
+  stop(); current = key; i = 0;
+  [...tabs.children].forEach((t, k) => t.setAttribute('aria-pressed', Object.keys(RUNS)[k] === key));
+  const r = RUNS[key];
+  route.querySelectorAll('.seg, .obst').forEach(e => e.remove());
+  r.stretches.forEach(([a, b, kind, real]) => {
+    const s = document.createElement('div'); s.className = 'seg ' + (real ? kind : 'fake');
+    s.style.left = (a / r.length * 100) + '%'; s.style.width = Math.max(2.5, (b - a) / r.length * 100) + '%';
+    s.textContent = real ? { RAMP: 'ramp', STAIRS_UP: 'stairs', STAIRS_DOWN: 'down', CURB: 'curb', DROP: 'drop' }[kind] : 'picture';
+    route.insertBefore(s, chair);
+  });
+  r.obstacles.forEach(([x]) => { const o = document.createElement('div'); o.className = 'obst'; o.style.left = (x / r.length * 100) + '%'; route.insertBefore(o, chair); });
+  frame(0);
+}
+function frame(k) {
+  const r = RUNS[current], [t, x, branch, mode, speed, reason, heard] = r.ticks[k];
+  chair.style.left = Math.min(98.5, Math.max(1.5, x / r.length * 100)) + '%';
+  document.getElementById('r-t').textContent = t.toFixed(1) + ' s';
+  document.getElementById('r-x').textContent = x.toFixed(2) + ' m';
+  document.getElementById('r-mode').textContent = mode;
+  document.getElementById('r-speed').textContent = Math.round(speed * 100) + '%';
+  const said = heard ? ` <span class="say">user: ${heard}</span>` : '';
+  document.getElementById('r-msg').innerHTML = `<span class="branch">${branch}</span>${reason}${said}`;
+  const at = BRANCHES.findIndex(b => b.name === branch);
+  BRANCHES.forEach((b, n) => { tiles[b.name].classList.toggle('on', n === at); tiles[b.name].classList.toggle('tried', n < at); });
+}
+function stop() { clearInterval(timer); timer = null; board.classList.remove('running'); document.querySelector('#play span').textContent = 'Run'; }
+document.getElementById('play').addEventListener('click', () => {
+  if (timer) return stop();
+  const r = RUNS[current]; if (i >= r.ticks.length - 1) i = 0;
+  board.classList.add('running'); document.querySelector('#play span').textContent = 'Pause';
+  timer = setInterval(() => { frame(i); if (++i >= r.ticks.length) { stop(); } }, 25);
+});
+/* a link such as behaviour-tree.html#stairs_down-91 opens that run at that tick */
+const [hashRun, hashTick] = location.hash.slice(1).split('-');
+if (RUNS[hashRun]) {
+  pick(hashRun); i = Math.min(+hashTick || 0, RUNS[hashRun].ticks.length - 1);
+  frame(i); board.classList.add('running');
+  show(RUNS[hashRun].ticks[i][2]);
+} else { pick(current); show('user stop'); }
+</script>
+</body>
+</html>
