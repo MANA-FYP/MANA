@@ -9,6 +9,10 @@ Frames follow REP 103 (x forward, y left, z up; a positive pitch looks down) and
 
 ## Sensors (Gazebo to ROS 2)
 
+The bridge publishes the sensors that can fail with a `_raw` ending (`camera/image_raw`, `scan_raw`, `imu_raw`,
+`gps/fix_raw`, `joint_states_raw`, and the two `camera_info_raw`). `fault_node` passes them on under the names
+below, unchanged while no fault is on ([faults.md](faults.md)). Read the names below, not the `_raw` ones.
+
 | Topic | Type | Rate | Frame | Where it comes from |
 |---|---|---|---|---|
 | `camera/image` | `sensor_msgs/Image` (rgb8, 640x480) | 15 Hz | `camera_link` | RGB camera |
@@ -24,7 +28,7 @@ Frames follow REP 103 (x forward, y left, z up; a positive pitch looks down) and
 
 Every node that reads these must run on simulation time (`-p use_sim_time:=true`).
 
-## What `sensors_node` makes of them
+## What `sensors_node` and `fault_node` make of them
 
 | Topic | Type | Rate | Frame | How |
 |---|---|---|---|---|
@@ -32,10 +36,14 @@ Every node that reads these must run on simulation time (`-p use_sim_time:=true`
 | `motion` | `mana_msgs/MotionReport` | 100 Hz | `base_link` | pitch and roll from the IMU orientation; `wheel_slip` when the wheels turn at a different speed than the chair moves (only judged in wheels mode) |
 | `position` | `mana_msgs/PositionReport` | 5 Hz | `map` | the GPS fix as metres east and north of the origin of the world; error 1.5 m (the simulated GPS gives no covariance) |
 | `obstacle` | `mana_msgs/ObstacleReport` | 10 Hz, only when something is there | `lidar_link` | the nearest lidar echo within 0.35 rad of straight ahead and 4 m, source LIDAR |
-| `link` | `mana_msgs/LinkReport` | 2 Hz | none | a healthy Wi-Fi link; the faults degrade it |
+| `link` | `mana_msgs/LinkReport` | 2 Hz | none | made by `fault_node`: a healthy Wi-Fi link, or the fade while a fault is on |
+| `fault_state` | `std_msgs/String` | when it changes | none | the faults that are on (`fault_node`), "none" if there are none |
 
-It also broadcasts the transforms: `map` > `odom` (identity), `odom` > `base_link` (from the ground truth) and
+`sensors_node` also broadcasts the transforms: `map` > `odom` (identity), `odom` > `base_link` (from the ground truth) and
 `base_link` > each sensor frame (`mana_sim/frames.py`, the same poses as the model; a test compares them).
+
+`position` comes straight from the GPS because `mana_position` is not in the simulation launch yet. When it
+joins, `sensors_node` should stop publishing `position`, or there would be two publishers.
 
 ## Ground reports
 

@@ -17,6 +17,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   # decision core -> host and user
   "msg/DriveRequest.msg"
   "msg/UserMessage.msg"
+  # simulation only
+  "srv/SetFault.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
 
