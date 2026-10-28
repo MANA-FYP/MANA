@@ -23,10 +23,17 @@ done
 
 LOGS=$(mktemp -d)
 PIDS=()
-cleanup() {
-  for pid in "${PIDS[@]}"; do kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null; done
-  pkill -f "gz sim" 2>/dev/null
+cleanup() {  # stop what this script started (each in its own process group): ask, wait, then kill
+  for pid in "${PIDS[@]}"; do kill -TERM -- "-$pid" 2>/dev/null; done
+  for _ in 1 2 3 4 5; do
+    alive=0
+    for pid in "${PIDS[@]}"; do kill -0 -- "-$pid" 2>/dev/null && alive=1; done
+    [ $alive = 0 ] && break
+    sleep 1
+  done
+  for pid in "${PIDS[@]}"; do kill -KILL -- "-$pid" 2>/dev/null; done
   wait 2>/dev/null
+  rm -rf "$LOGS"
 }
 trap cleanup EXIT
 
@@ -35,16 +42,11 @@ start() {  # start a command in its own process group, output to a file
   setsid "$@" >"$out" 2>&1 &
   PIDS+=($!)
 }
-listen() {  # wait for one message on a topic
-  local out=$1; shift
-  setsid "$@" >"$out" 2>&1 &
-  PIDS+=($!)
-}
 
 # listen first: both messages can come in the first second of the core. The message types are given,
 # or echo gives up at once when the topic does not exist yet.
-listen "$LOGS/drive_request" ros2 topic echo --once /drive_request mana_msgs/msg/DriveRequest
-listen "$LOGS/user_message" ros2 topic echo --once /user_message mana_msgs/msg/UserMessage
+start "$LOGS/drive_request" ros2 topic echo --once /drive_request mana_msgs/msg/DriveRequest
+start "$LOGS/user_message" ros2 topic echo --once /user_message mana_msgs/msg/UserMessage
 start "$LOGS/launch.log" ros2 launch mana_sim world.launch.py headless:=true sensors:=false
 if [ "$CORE" = 1 ]; then
   start "$LOGS/core.log" ros2 run mana_core core_node --ros-args -p use_sim_time:=true
