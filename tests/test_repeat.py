@@ -84,6 +84,11 @@ def test_the_full_system_marks_stay_clear_of_the_moved_faults():
         for seed in range(30):
             r = one(SCENARIOS[name], DecisionCore, seed, only_moved)
             assert r.marks_met == r.marks, (name, seed)
+    # two runs of the table where Bluetooth is lost late (8.44 and 8.45 m) and the chair, with the
+    # other noise on, is still at full speed at 8.52 m: the stretch with no link starts after that
+    for i in (86, 114):
+        r = one(SCENARIOS["wifi_drop"], DecisionCore, 100_003 + i, Noise(false_p=0.0))
+        assert r.marks_met == r.marks, i
 
 
 def test_noise_is_drawn_only_where_it_applies():
@@ -112,6 +117,8 @@ def test_the_table_has_a_row_per_scenario():
 def test_command_line(capsys):
     assert main(["--runs", "2", "level"]) == 0
     assert "| Level ground |" in capsys.readouterr().out
+    assert main(["--runs", "2", "--no-false-reports", "level"]) == 0
+    assert "noise with no false reports" in capsys.readouterr().out
     assert main(["--runs"]) == 2
     assert main(["--runs", "x"]) == 2
     assert main(["--fast"]) == 2
@@ -120,8 +127,9 @@ def test_command_line(capsys):
 
 def test_the_noise_finds_a_weakness_the_exact_world_cannot():
     """With noise MANA still never has a mishap at the drop, but a single 3D camera reading over
-    edge_m can release its stop for a tick (see docs/results.md)."""
+    edge_m can release its stop for a tick (#97, docs/results.md): the stop mark fails then."""
     sc = SCENARIOS["drop"]
     results = [one(sc, DecisionCore, 100_003 + i, Noise()) for i in range(20)]
     assert not any(r.mishap for r in results)
+    assert any(r.marks_met < r.marks for r in results)
     assert all(ok for _, ok, _ in check(sc, run(sc)))  # and without noise every mark is met

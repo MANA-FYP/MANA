@@ -1,7 +1,7 @@
 """Repeated noisy runs (#54): every scenario many times, with sensor noise, lost reports, false
 one-sensor reports, and faults and spoken commands moved in time, for MANA and the baseline.
 
-    python3 -m mana_core.repeat [--runs N] [--seed S] [scenario ...]
+    python3 -m mana_core.repeat [--runs N] [--seed S] [--no-false-reports] [scenario ...]
 
 The scripted world is exact; real sensors are not. Each run draws its noise from its own seeded
 generator, and MANA and the baseline get the same seed for the same run, so a table can be made
@@ -148,10 +148,10 @@ def table(names: list[str], runs: int, seed: int, noise: Noise | None = None) ->
 
         def rate(s):
             lo, hi = s["interval"]
-            return f"{s['passed']}/{s['runs']} ({lo:.0%} to {hi:.0%})"
+            return f"{s['passed']}/{s['runs']} ({lo:.1%} to {hi:.1%})"
 
         def spread(s):
-            return f"{s['met_mean']:.0%} (sd {s['met_sd']:.0%})"
+            return f"{s['met_mean']:.1%} (sd {s['met_sd']:.1%})"
 
         m, b = stats["MANA"], stats["baseline"]
         rows.append(
@@ -163,7 +163,7 @@ def table(names: list[str], runs: int, seed: int, noise: Noise | None = None) ->
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    runs, seed, names = 200, 1, []
+    runs, seed, names, noise = 200, 1, [], Noise()
     it = iter(args)
     for a in it:
         if a in ("--runs", "--seed"):
@@ -172,8 +172,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{a} needs a whole number")
                 return 2
             runs, seed = (int(value), seed) if a == "--runs" else (runs, int(value))
+        elif a == "--no-false-reports":
+            noise = replace(noise, false_p=0.0)
         elif a.startswith("--"):
-            print(f"unknown option {a}; use --runs N or --seed S")
+            print(f"unknown option {a}; use --runs N, --seed S or --no-false-reports")
             return 2
         else:
             names.append(a)
@@ -181,8 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     if unknown := [n for n in names if n not in SCENARIOS]:
         print(f"unknown scenario {', '.join(unknown)}; choose from: {', '.join(SCENARIOS)}")
         return 2
-    text, _ = table(names, runs, seed)
-    print(f"{runs} runs per scenario and controller, seed {seed}, noise as in Noise():\n")
+    text, _ = table(names, runs, seed, noise)
+    which = "with no false reports" if noise.false_p == 0 else "as in Noise()"
+    print(f"{runs} runs per scenario and controller, seed {seed}, noise {which}:\n")
     print(text)
     return 0
 

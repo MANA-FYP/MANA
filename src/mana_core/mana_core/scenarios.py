@@ -181,12 +181,13 @@ def moves_after_go() -> Mark:
 
 def stops_before(at_m: float, what: str) -> Mark:
     def test(tr):
-        gap = at_m - tr.end_m
-        ok = not tr.mishaps and gap > 0 and tr.samples[-1].stop
-        return (
-            ok,
-            f"stopped {gap:.2f} m before the {what}" if ok else f"did not stop for the {what}",
-        )
+        first = tr.first(lambda s: s.stop)
+        gap = at_m - tr.end_m  # the closest it came: the chair never goes back
+        if tr.mishaps or first is None or gap <= 0 or not tr.samples[-1].stop:
+            return False, f"did not stop for the {what}"
+        if (on := tr.end_m - first.x_m) > 0:  # the stop was released for a moment
+            return False, f"stopped, then moved on {on:.2f} m, to {gap:.2f} m before the {what}"
+        return True, f"stopped {gap:.2f} m before the {what}"
 
     return Mark(f"Stops before the {what}", test)
 
@@ -368,10 +369,11 @@ SCENARIOS = {
                 full_system=True,
             ),
             40.0,
-            # each mark keeps 0.5 m clear of the fault edges, so the repeated runs can move them
+            # each mark keeps clear of the fault edges, which the repeated runs move up to 0.5 m,
+            # and of the tick it takes to react at full speed (0.12 m)
             marks=(
                 full_speed_on(4.5, 7.5, "stretch on Bluetooth"),
-                slower_on(8.5, 9.5, "stretch with no alert link"),
+                slower_on(8.7, 9.3, "stretch with no alert link"),
                 tells("No alert link, slowing down"),
                 full_speed_on(11.0, 14.0, "stretch with Bluetooth back"),
                 reaches_end(14.0),
