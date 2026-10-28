@@ -10,7 +10,7 @@ an obstacle.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mana_core.decision import Command, Ground, Limits, Mode, Source
+from mana_core.decision import ASK_DOWN, Command, Ground, Limits, Mode, Source
 from mana_core.world import Fault, Obstacle, Route, Stretch
 
 SLOW = Limits().slow
@@ -208,6 +208,16 @@ def follows_user() -> Mark:
     return Mark("Follows the user in manual mode", test)
 
 
+def waits_for_yes_before(at_m: float) -> Mark:
+    def test(tr):
+        yes = tr.said_at(Command.YES)
+        before = [s for s in tr.samples if yes is None or s.t < yes]
+        furthest = max((s.x_m for s in before), default=0.0)
+        return furthest < at_m, f"{at_m - furthest:.2f} m before the stairs until the yes"
+
+    return Mark("Waits before the stairs until the user says yes", test)
+
+
 def reaches_end(length_m: float) -> Mark:
     def test(tr):
         return tr.end_m >= length_m, f"reached {tr.end_m:.2f} of {length_m:.0f} m"
@@ -278,6 +288,21 @@ SCENARIOS = {
             7.0,
             says=(Say(2.0, Command.STOP), Say(5.0, Command.GO)),
             marks=(stop_within(), stopped_until_go(), moves_after_go(), tells("Stopped by you")),
+        ),
+        Scenario(
+            "stairs_down",
+            "Stairs down",
+            "Both cameras see stairs going down. MANA stops at the top and asks; once the user "
+            "says yes it goes down on tracks, and back to wheels at the bottom.",
+            Route(12.0, (Stretch(6.0, 8.0, Ground.STAIRS_DOWN, pitch_rad=-0.55, height_m=0.17),)),
+            60.0,
+            says=(Say(12.0, Command.YES),),
+            marks=(
+                tells(ASK_DOWN),
+                waits_for_yes_before(6.0),
+                wheels_after(8.0),
+                reaches_end(12.0),
+            ),
         ),
         Scenario(
             "drop",

@@ -1,0 +1,71 @@
+name: Simulation smoke test
+
+# Not part of ci.yml: it needs Gazebo, so it runs only when the simulation, the core or the script
+# change, and every night. It is a separate check; add it to the branch rule when it has proved stable.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/mana_sim/**"
+      - "src/mana_core/**"
+      - "src/mana_msgs/**"
+      - "src/mana_perception/**"
+      - "tools/sim_smoke.sh"
+      - ".github/workflows/sim-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mana_sim/**"
+      - "src/mana_core/**"
+      - "src/mana_msgs/**"
+      - "src/mana_perception/**"
+      - "tools/sim_smoke.sh"
+      - ".github/workflows/sim-smoke.yml"
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-smoke-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sim-smoke:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-colcon-common-extensions python3-rosdep procps
+      - name: Build the simulation and the core
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          rosdep init || true
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+          colcon build --packages-select mana_msgs mana_perception mana_core mana_sim
+      - name: Gazebo starts headless and the core answers
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          tools/sim_smoke.sh
+      - name: The smoke test fails when the core is not started
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          code=0
+          tools/sim_smoke.sh --no-core --timeout 30 || code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "::error::expected the smoke test to fail with exit 1 without the core, got $code"
+            exit 1
+          fi

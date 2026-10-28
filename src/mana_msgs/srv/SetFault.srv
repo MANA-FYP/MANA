@@ -1,0 +1,15 @@
+# Simulation only: switch a sensor fault on or off during a run (mana_sim fault_node).
+#
+# sensor: camera, depth, lidar, imu, gps, wifi or wheels
+# kind:   noise (camera, depth, lidar, imu, gps), dropout (camera, depth, lidar, imu, gps),
+#         dark (camera), fade (wifi), slip (wheels)
+# value:  the strength of the fault, 0 for the default of that fault:
+#         noise: times the usual noise, dark: share of the light that is left,
+#         fade: seconds from a good link to none, slip: how many times faster the wheels turn
+string sensor
+string kind
+bool active
+float32 value
+---
+bool ok
+string message  # why it was refused, or what is active now
