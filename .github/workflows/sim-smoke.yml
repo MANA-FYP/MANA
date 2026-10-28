@@ -37,3 +37,12 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           tools/sim_smoke.sh
+      - name: The smoke test fails when the core is not started
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          if tools/sim_smoke.sh --no-core --timeout 30; then
+            echo "::error::the smoke test passed without the core"
+            exit 1
+          fi
