@@ -105,6 +105,7 @@ even when only this sensor sees it (#60).
 |---|---|---|
 | `depth/image` (in) | `sensor_msgs/Image` | depth, 32FC1 in metres or 16UC1 in millimetres (REP 118); a frame stamped 0 gets the time it arrived |
 | `depth/camera_info` (in) | `sensor_msgs/CameraInfo` | focal lengths and principal point |
+| `motion` (in) | `mana_msgs/MotionReport` | the chair's pitch, added to the camera's tilt (REP 103: nose down is positive) |
 | `ground` (out) | `mana_msgs/GroundReport` | one report per frame, source `DEPTH_CAMERA` |
 
 | Parameter | Default | Meaning |
@@ -114,6 +115,7 @@ even when only this sensor sees it (#60).
 | `max_range_m` | `3.0` | farthest ground read |
 | `rate_hz` | `10.0` | most reports per second |
 | `trust` | `0.9` | trust of a reading; `UNKNOWN` (no ground in view) is sent with trust 0 |
+| `motion_max_age_s` | `0.5` | a `motion` report older than this is not used, and the tilt is the mounting's alone |
 
 **Tested on rendered frames.** Until the Gazebo world exists (#13, #14), `mana_perception/synthetic.py`
 renders depth frames of known ground by casting a ray for every pixel, and both the tests and
@@ -152,8 +154,11 @@ Known limits:
 - The camera tilt must be set right: an error of 2 degrees looks like a 3.5 % slope, under the
   5 % ramp limit. The mounting height must be right to about 5 cm, or level ground just past the
   blind zone looks like a step there.
-- The tilt is a fixed parameter. On a ramp, or on tracks on the stairs, the chair's own pitch
-  changes it; adding the IMU pitch from `motion` to it is a follow-up.
+- **The chair's own pitch** is added to the camera's tilt from the latest trusted `motion` report
+  (at most 0.5 s old). Without it, a chair pitched 0.2 rad over the crest of a ramp reads the level
+  ground ahead as a curb, and on tracks going down the stairs (0.48 rad) the steps below read as a
+  curb 0.85 m away; with it both read right. With no recent `motion` report the mounting tilt is
+  used alone. Roll is not corrected yet.
 - **Stairs up that start in the blind zone** are told from a wall only by risers climbing behind
   the first one in view; a single tall rise right in front is left to the obstacle sensors.
 
