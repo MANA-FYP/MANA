@@ -1,0 +1,39 @@
+name: Simulation smoke test
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sim-smoke:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-colcon-common-extensions python3-rosdep procps
+      - name: Build the simulation and the core
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          rosdep init || true
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+          colcon build --packages-select mana_msgs mana_perception mana_core mana_sim
+      - name: Gazebo starts headless and the core answers
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          tools/sim_smoke.sh
