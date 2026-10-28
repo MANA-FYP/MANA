@@ -114,6 +114,80 @@ def test_obstacle_stops_close_and_slows_further_out(distance, stop, speed):
     assert (d.stop, d.speed_limit) == (stop, speed)
 
 
+# ---- a stop holds through one reading (#97)
+
+
+def ticks(c, reports, start_s, seconds, obstacles=()):
+    """Feed the same readings at 10 Hz from start_s; return the decisions."""
+    out = []
+    for i in range(round(seconds * 10)):
+        t = NOW + start_s + i / 10
+        for o in obstacles:
+            c.on_obstacle(ObstacleReport(t, 0.9, LIDAR, o))
+        out.append(fed(c, reports, t))
+    return out
+
+
+def test_a_drop_stop_is_not_released_by_readings_just_past_the_edge():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4))
+    assert c.decision.stop
+    just_past = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + 0.05))
+    assert all(d.stop for d in ticks(c, just_past, 0.1, 2.0))  # within release_m: still held
+    gone = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + LIM.release_m + 0.05))
+    after = ticks(c, gone, 2.1, 1.0)
+    assert after[0].stop  # held for hold_s
+    assert after[-1].reason == "Drop ahead, slowing down"
+
+
+def test_an_obstacle_stop_is_not_released_by_readings_just_past_the_stop_distance():
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    c = core(*flat, obstacle(0.7))
+    assert c.decision.stop
+    assert all(d.stop for d in ticks(c, flat, 0.1, 2.0, obstacles=[0.85]))
+    after = ticks(c, flat, 2.1, 1.0, obstacles=[0.95])
+    assert after[0].stop
+    assert (after[-1].stop, after[-1].reason) == (False, "Obstacle ahead, slowing down")
+
+
+def test_a_drop_further_than_the_edge_does_not_stop_before_any_stop():
+    # the band past the limit counts only while a stop holds, not for the first stop
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + 0.05)).decision
+    assert (d.stop, d.reason) == (False, "Drop ahead, slowing down")
+
+
+def test_a_hold_counts_from_its_own_hazard_whichever_branch_stopped():
+    # the drop stops first; the obstacle seen at the same time still holds once the drop is gone
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4), obstacle(0.7))
+    assert c.decision.reason == "Drop ahead, stopping"
+    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
+    assert not d.stop  # both were last seen 0.6 s ago
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4), obstacle(0.7))
+    c.on_obstacle(ObstacleReport(NOW + 0.3, 0.9, LIDAR, 0.7))
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert fed(c, flat, NOW + 0.3).reason == "Drop ahead, stopping"  # the drop's hold, from 0 s
+    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
+    assert d.reason == "Obstacle ahead, stopping"  # seen at 0.3 s, behind the drop's stop
+
+
+def test_after_the_clock_goes_back_a_stop_from_before_is_not_held():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4))
+    assert c.decision.stop
+    for source in (CAM, DEPTH):  # a world reset: the clock starts again near 0
+        c.on_ground(GroundReport(1.0, 0.9, source, Ground.FLAT, 3.0))
+    c.on_motion(MotionReport(1.0, 0.9))
+    assert not c.tick(1.0).stop
+
+
+def test_a_user_go_is_not_held():
+    c = core()
+    c.on_command(Command.STOP, 0.9)
+    assert c.tick(NOW + 0.1).stop
+    c.on_command(Command.GO, 0.9)
+    assert not c.tick(NOW + 0.2).stop
+
+
 # ---- 3. manual mode: the user drives, safety still guards
 
 
@@ -613,6 +687,43 @@ def test_a_yes_heard_before_the_first_tick_does_not_approve_the_stairs():
     c = DecisionCore()
     c.on_command(Command.YES, 0.9)  # nothing has been asked: the core has not decided yet
     assert fed(c, stairs_down(), NOW).reason == ASK_DOWN
+
+
+def test_the_question_holds_through_one_lost_report_and_a_yes_then_still_counts():
+    c = core(*stairs_down())
+    one_sensor = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
+    assert fed(c, one_sensor, NOW + 0.1).reason == ASK_DOWN  # was "Possible step ahead"
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.2).reason == "Going down the stairs on tracks"
+
+
+def test_the_question_holds_while_the_stairs_read_just_past_the_step_distance():
+    c = core(*stairs_down(LIM.step_m - 0.1))
+    assert c.decision.reason == ASK_DOWN
+    just_past = stairs_down(LIM.step_m + 0.05)  # within release_m of step_m
+    assert all(d.reason == ASK_DOWN for d in ticks(c, just_past, 0.1, 2.0))
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, just_past, NOW + 2.1).reason == "Going down the stairs on tracks"
+
+
+def test_a_yes_just_after_the_question_still_answers_it():
+    # one reading can end the question a moment before the user's yes is heard
+    c = core(*stairs_down())
+    one_sensor = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
+    for t in (0.1, 0.6, 1.1):  # longer than hold_s, so the question has ended
+        fed(c, one_sensor, NOW + t)
+    assert c.decision.reason != ASK_DOWN
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 1.2).reason == "Going down the stairs on tracks"
+
+
+def test_a_yes_long_after_the_question_does_not_answer_it():
+    c = core(*stairs_down())
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    for t in (0.5, 1.0, 1.5, 2.0, 2.5):
+        fed(c, flat, NOW + t)
+    c.on_command(Command.YES, 0.9)  # more than answer_s after it was last asked
+    assert fed(c, stairs_down(), NOW + 2.6).reason == ASK_DOWN
 
 
 def test_stop_then_go_asks_again():

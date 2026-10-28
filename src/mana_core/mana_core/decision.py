@@ -85,6 +85,7 @@ STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
+STOPS = ("drop", "obstacle", "lone step", "stairs down")  # the stop branches that hold (#97)
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,9 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
+    hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
+    release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
+    answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
@@ -199,6 +203,8 @@ class DecisionCore:
         self.asking_down = False  # stopped at the top of stairs down, waiting for a yes
         self.down_ok = False  # the user said yes to the stairs down in sight
         self.down_seen_at = -math.inf
+        self.asked_at = -math.inf  # when the stairs-down question was last the decision
+        self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
         self.tree = self._build()
@@ -259,8 +265,10 @@ class DecisionCore:
         elif command in (Command.WHEELS, Command.TRACKS):
             self.automatic = False
             self.user_mode = Mode.WHEELS if command == Command.WHEELS else Mode.TRACKS
-        elif command == Command.YES and self.asking_down:
-            self.down_ok = True
+        elif command == Command.YES and (
+            self.asking_down or self.now - self.asked_at <= self.limits.answer_s
+        ):
+            self.down_ok = True  # also just after the question, which one reading can end
         elif command in (Command.SPEED_UP, Command.SLOW_DOWN):
             self.automatic = False
             step = SPEED_STEP if command == Command.SPEED_UP else -SPEED_STEP
@@ -278,13 +286,29 @@ class DecisionCore:
         self.level_since = (
             (now if self.level_since is None else self.level_since) if level else None
         )
-        if self._stairs_down():
+        # every tick, whichever branch fires, so that each hold counts from its own hazard; while
+        # a stop holds, its hazard still counts up to release_m past the limit (hysteresis)
+        past = {name: lim.release_m if self._held(name) else 0.0 for name in STOPS}
+        seen = {
+            "drop": self._drop_at_edge(lim.edge_m + past["drop"]),
+            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + past["obstacle"],
+            "lone step": self._lone_step_at_edge(lim.edge_m + past["lone step"]),
+            "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
+        }
+        if any(at > now for at in (*self._seen_at.values(), self.down_seen_at, self.asked_at)):
+            # the clock went back (a world reset, a bag played again): what was seen is gone
+            self._seen_at.clear()
+            self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
+        self._seen_at.update({name: now for name, s in seen.items() if s})
+        if seen["stairs down"]:
             self.down_seen_at = now
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         self.tree.tick_once()
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
+        if self.asking_down:
+            self.asked_at = now
         return self.decision
 
     # ---- what the reports say
@@ -305,34 +329,37 @@ class DecisionCore:
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
-    def _drop_at_edge(self) -> bool:
+    def _drop_at_edge(self, edge_m: float | None = None) -> bool:
         """A drop at the edge, or stairs going down at the edge that only one sensor sees: a fall
         needs no second opinion. Stairs down that two sensors confirm are left to the "stairs
         down" and "going down" branches, which stop and ask, so a yes can still take the chair
         down them. A stop needs a measured distance."""
         confirmed = self._stairs_down()
         return any(
-            r.distance_m <= self.limits.edge_m
+            r.distance_m <= (self.limits.edge_m if edge_m is None else edge_m)
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
 
-    def _lone_step_at_edge(self) -> bool:
+    def _lone_step_at_edge(self, edge_m: float | None = None) -> bool:
         """A step up or a curb measured within edge_m that no second sensor confirms, as when the
         camera cannot be trusted in the dark. A change of mode needs two sensors, but a stop needs
         none, so the chair stops instead of rolling onto it on wheels. A report without a
-        distance (the camera alone, a picture of stairs) only slows down. No stop on tracks, which
-        can climb it, or when the user has chosen tracks in manual mode to cross on purpose."""
-        if self.decision.mode == Mode.TRACKS or (
-            not self.automatic and self.user_mode == Mode.TRACKS
-        ):
-            return False
+        distance (the camera alone, a picture of stairs) only slows down."""
+        edge_m = self.limits.edge_m if edge_m is None else edge_m
         return self._confirmed_step() is None and any(
-            r.ground in (Ground.STAIRS_UP, Ground.CURB) and r.distance_m <= self.limits.edge_m
+            r.ground in (Ground.STAIRS_UP, Ground.CURB) and r.distance_m <= edge_m
             for r in self._grounds()
         )
 
-    def _confirmed_step(self) -> GroundReport | None:
+    def _may_cross_a_step(self) -> bool:
+        """No stop for a lone step on tracks, which can climb it, or when the user has chosen
+        tracks in manual mode to cross on purpose. Checked every tick, so it is never held."""
+        return self.decision.mode == Mode.TRACKS or (
+            not self.automatic and self.user_mode == Mode.TRACKS
+        )
+
+    def _confirmed_step(self, step_m: float | None = None) -> GroundReport | None:
         """The nearest report of a step that at least two different sensors both see close ahead.
 
         Ground reports come from the camera and the 3D camera. The ground classifier and the
@@ -344,15 +371,22 @@ class DecisionCore:
         agreeing = [r for r in self._grounds() if r.ground in STEPS]
         if len({SENSOR_OF.get(r.source, r.source) for r in agreeing}) < 2:
             return None
-        known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
+        step_m = self.limits.step_m if step_m is None else step_m
+        known = [r for r in agreeing if r.distance_m <= step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)
 
-    def _stairs_down(self) -> bool:
+    def _stairs_down(self, step_m: float | None = None) -> bool:
         """A step two sensors agree on, where any of them sees stairs going down. One sensor
         saying stairs down and the other a curb still asks: it never goes down unasked."""
-        return self._confirmed_step() is not None and any(
+        return self._confirmed_step(step_m) is not None and any(
             r.ground == Ground.STAIRS_DOWN for r in self._grounds()
         )
+
+    def _held(self, name: str) -> bool:
+        """The hazard of a stop branch was seen within hold_s: one reading over a limit, or one
+        lost report, does not release the stop, and while it holds a hazard up to release_m past
+        the limit still counts as seen (#97)."""
+        return self.now - self._seen_at.get(name, -math.inf) < self.limits.hold_s
 
     def _position_lost(self) -> bool:
         """A position module reports, but neither GPS nor the lidar map has a recent, trusted
@@ -405,7 +439,7 @@ class DecisionCore:
         self._set(self.mode, True, 0.0, reason, Priority.URGENT)
 
     def _tracks(self):
-        if self._stairs_down():
+        if self.down_ok and self._held("stairs down"):  # as the "going down" branch decides
             reason = "Going down the stairs on tracks"
         elif self._confirmed_step().ground == Ground.CURB:
             reason = "Curb ahead, changing to tracks"
@@ -428,23 +462,29 @@ class DecisionCore:
                 branch(
                     "user stop", lambda: self.stopped_by_user, lambda: self._stop("Stopped by you")
                 ),
-                branch("drop", self._drop_at_edge, lambda: self._stop("Drop ahead, stopping")),
+                branch(
+                    "drop",
+                    lambda: self._held("drop"),
+                    lambda: self._stop("Drop ahead, stopping"),
+                ),
                 branch(
                     "obstacle",
-                    lambda: self._nearest_obstacle() <= lim.obstacle_stop_m,
+                    lambda: self._held("obstacle"),
                     lambda: self._stop("Obstacle ahead, stopping"),
                 ),
                 branch(  # above manual too: a driving command does not roll onto it
-                    "lone step", self._lone_step_at_edge, lambda: self._stop(STEP_STOP)
+                    "lone step",
+                    lambda: self._held("lone step") and not self._may_cross_a_step(),
+                    lambda: self._stop(STEP_STOP),
                 ),
                 branch(  # above manual: a driving command at the question does not drive on
-                    "stairs down",
-                    lambda: self._stairs_down() and not self.down_ok,
+                    "stairs down",  # a yes ends the question at once; a lost report does not
+                    lambda: self._held("stairs down") and not self.down_ok,
                     lambda: self._stop(ASK_DOWN),
                 ),
                 branch(  # and after the yes, down on tracks whatever the mode
                     "going down",
-                    lambda: self._stairs_down() and self.down_ok,
+                    lambda: self._held("stairs down") and self.down_ok,
                     self._tracks,
                 ),
                 branch(

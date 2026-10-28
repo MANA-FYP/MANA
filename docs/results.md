@@ -35,11 +35,11 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 | Stairs | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Curb | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Spoken stop | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
-| Stairs down | 187/200 (89.2% to 96.2%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 97.4% (sd 9.9%) | 80.0% (sd 0.0%) |
-| Drop ahead (edge case) | 2/200 (0.3% to 3.6%) | 2/200 (0.3% to 3.6%) | 0/200 | 0/200 | 67.0% (sd 3.3%) | 67.0% (sd 3.3%) |
-| Manual mode at a drop (edge case) | 32/200 (11.6% to 21.7%) | 32/200 (11.6% to 21.7%) | 0/200 | 0/200 | 79.0% (sd 9.2%) | 79.0% (sd 9.2%) |
+| Stairs down | 200/200 (98.1% to 100.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 80.0% (sd 0.0%) |
+| Drop ahead (edge case) | 194/200 (93.6% to 98.6%) | 2/200 (0.3% to 3.6%) | 0/200 | 0/200 | 99.0% (sd 5.7%) | 67.0% (sd 3.3%) |
+| Manual mode at a drop (edge case) | 200/200 (98.1% to 100.0%) | 32/200 (11.6% to 21.7%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 79.0% (sd 9.2%) |
 | Picture of stairs (edge case) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.2% (sd 6.4%) | 73.1% (sd 6.6%) |
-| Dark corridor (failure case) | 1/200 (0.1% to 2.8%) | 3/200 (0.5% to 4.3%) | 0/200 | 0/200 | 66.8% (sd 2.4%) | 67.2% (sd 4.1%) |
+| Dark corridor (failure case) | 175/200 (82.2% to 91.4%) | 3/200 (0.5% to 4.3%) | 0/200 | 0/200 | 95.8% (sd 11.0%) | 67.2% (sd 4.1%) |
 | Stairs in the dark (failure case) | 200/200 (98.1% to 100.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 50.0% (sd 0.0%) |
 | Curb in the dark (failure case) | 200/200 (98.1% to 100.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 75.0% (sd 0.0%) |
 | IMU lost on the stairs (failure case) | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
@@ -49,17 +49,8 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 ### What the table shows
 
 - **Neither controller had a mishap in any of the 6,000 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
-- **A stop is released for a moment in nearly every noisy run, by both controllers alike: #97.** "Stops before" fails if the chair moves at all after its first stop for the hazard. After that first stop, one noisy distance over `edge_m` or `obstacle_stop_m` lets the chair move for a tick, and it happens again later in the run:
-
-  | Scenario | Runs where the stop was released (MANA) | Moved on after the first stop (median, most) | Closest to the hazard |
-  |---|---|---|---|
-  | Drop ahead | 198/200 | 0.11 m, 0.32 m | 0.34 m from the edge |
-  | Manual mode at a drop | 168/200 | 0.12 m, 0.24 m | 0.20 m from the edge |
-  | Dark corridor | 199/200 | 0.14 m, 0.32 m | 0.58 m from the person |
-
-  The baseline's numbers are the same within a few runs, because both stop on the same one reading. None of these runs reached the hazard, but the manual-mode runs came within 0.20 m of an edge that the rule keeps 0.5 m away. A stop should not depend on one reading.
-
-  The same cause loses a yes at **stairs down** (MANA 187 of 200). In the 13 other runs the yes is heard on a tick where one lost camera report has turned the question into "possible step ahead", so the yes does nothing and MANA asks until the end of the run (in run 0 it also crept 0.25 m towards the stairs while it asked).
+- **A stop holds through a noisy reading (#97).** "Stops before" fails if the chair moves at all after its first stop for the hazard. Before #97, one noisy distance over `edge_m` or `obstacle_stop_m` released the stop for a tick, and it happened again and again while the chair waited. MANA met the stop mark in 2 of 200 drop runs, 32 of 200 manual-mode drop runs and 1 of 200 dark-corridor runs, and came within 0.20 m of an edge the rule keeps 0.5 m away. Now a stop holds for 0.5 s after its hazard was last seen, and while it holds, a hazard up to 0.1 m past its limit still counts (`docs/decisions.md`, D5). Once the chair has stopped within the limit, it no longer moves on in any of the 200 runs of each scenario. Where MANA still misses the mark (6 drop runs, 25 dark-corridor runs), a noisy reading stopped it early: 0.57 to 0.68 m from the edge, 0.85 to 0.98 m from the person. Once the hold ran out, the chair moved on to the real limit and stopped there. The baseline still releases its stops in nearly every run.
+- **Stairs down: every mark in 200 of 200 runs.** Before #97 a yes was lost in 13 runs. It was heard on a tick where one lost camera report, or a reading just past `step_m`, had ended the question. The question now holds the same way, and a yes heard up to 2 s after it was last asked still answers it.
 - **Where the baseline falls short:**
   - **The picture of stairs** (0 of 200): one camera report is enough for it to ask for tracks.
   - **The ramp** (118 of 200): a single false camera report of stairs makes it ask for tracks on the ramp. **Building entry** (120 of 200) fails for the same reason, on its entrance ramp, so it is the same weakness, not a second one. With false reports turned off, the baseline meets every mark on both in 200 of 200 runs.
