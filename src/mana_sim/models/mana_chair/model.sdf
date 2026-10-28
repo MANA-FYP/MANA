@@ -55,6 +55,67 @@
           <ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse>
         </material>
       </visual>
+
+      <!-- ===== sensors. The poses are the same as in mana_sim/frames.py (a test compares them), and
+           gz_frame_id is the frame id the bridge puts in each ROS 2 message. x forward, y left, z up;
+           a positive pitch looks down. ===== -->
+      <!-- RGB camera, over the footplate, looking a little down -->
+      <sensor name="camera" type="camera">
+        <pose>0.35 0 0.65 0 0.3 0</pose>
+        <gz_frame_id>camera_link</gz_frame_id>
+        <topic>camera/image_raw</topic>
+        <update_rate>15</update_rate>
+        <always_on>true</always_on>
+        <camera>
+          <horizontal_fov>1.2</horizontal_fov>
+          <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+          <clip><near>0.1</near><far>30</far></clip>
+        </camera>
+      </sensor>
+      <!-- 3D camera, 1 m above the ground, pitched 0.6 rad down (the values depth_node assumes) -->
+      <sensor name="depth_camera" type="depth_camera">
+        <pose>0.35 0 0.6 0 0.6 0</pose>
+        <gz_frame_id>depth_link</gz_frame_id>
+        <topic>depth/image_raw</topic>
+        <update_rate>10</update_rate>
+        <always_on>true</always_on>
+        <camera>
+          <horizontal_fov>1.2</horizontal_fov>
+          <image><width>320</width><height>240</height><format>R_FLOAT32</format></image>
+          <clip><near>0.3</near><far>6</far></clip>
+        </camera>
+      </sensor>
+      <!-- 2D lidar, forward half plane, above the front ends of the tracks -->
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0.4 0 0.25 0 0 0</pose>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <topic>scan_raw</topic>
+        <update_rate>10</update_rate>
+        <always_on>true</always_on>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>180</samples><resolution>1</resolution>
+              <min_angle>-1.5708</min_angle><max_angle>1.5708</max_angle>
+            </horizontal>
+          </scan>
+          <range><min>0.3</min><max>12</max><resolution>0.01</resolution></range>
+        </lidar>
+      </sensor>
+      <sensor name="imu" type="imu">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>imu_link</gz_frame_id>
+        <topic>imu_raw</topic>
+        <update_rate>100</update_rate>
+        <always_on>true</always_on>
+      </sensor>
+      <sensor name="gps" type="navsat">
+        <pose>-0.3 0 0.75 0 0 0</pose>
+        <gz_frame_id>gps_link</gz_frame_id>
+        <topic>gps/fix_raw</topic>
+        <update_rate>5</update_rate>
+        <always_on>true</always_on>
+      </sensor>
     </link>
 
     <!-- ===== wheels: one carrier on a slide, four wheels on the carrier ===== -->
@@ -325,12 +386,23 @@
       <max_velocity>1.5</max_velocity>
     </plugin>
 
+    <!-- the angle of every wheel and slide, for the wheel encoders -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/model/mana_chair/joint_states</topic>
+      <joint_name>wheel_fl_joint</joint_name>
+      <joint_name>wheel_fr_joint</joint_name>
+      <joint_name>wheel_rl_joint</joint_name>
+      <joint_name>wheel_rr_joint</joint_name>
+    </plugin>
+
     <!-- where the chair is -->
     <plugin filename="gz-sim-odometry-publisher-system"
             name="gz::sim::systems::OdometryPublisher">
       <odom_frame>odom</odom_frame>
       <robot_base_frame>chassis</robot_base_frame>
       <odom_topic>/model/mana_chair/ground_truth</odom_topic>
+      <odom_publish_frequency>20</odom_publish_frequency>
       <dimensions>3</dimensions>
     </plugin>
   </model>
