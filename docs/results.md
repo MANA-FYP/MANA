@@ -40,13 +40,15 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 | Manual mode at a drop (edge case) | 32/200 (11.6% to 21.7%) | 32/200 (11.6% to 21.7%) | 0/200 | 0/200 | 79.0% (sd 9.2%) | 79.0% (sd 9.2%) |
 | Picture of stairs (edge case) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.2% (sd 6.4%) | 73.1% (sd 6.6%) |
 | Dark corridor (failure case) | 1/200 (0.1% to 2.8%) | 3/200 (0.5% to 4.3%) | 0/200 | 0/200 | 66.8% (sd 2.4%) | 67.2% (sd 4.1%) |
+| Stairs in the dark (failure case) | 200/200 (98.1% to 100.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 50.0% (sd 0.0%) |
+| Curb in the dark (failure case) | 200/200 (98.1% to 100.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 75.0% (sd 0.0%) |
 | IMU lost on the stairs (failure case) | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Building entry (full system) | 182/200 (86.2% to 94.2%) | 120/200 (53.1% to 66.5%) | 0/200 | 0/200 | 98.2% (sd 5.7%) | 90.2% (sd 13.1%) |
 | Wi-Fi drop (full system) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.8% (sd 4.3%) | 64.8% (sd 5.5%) |
 
 ### What the table shows
 
-- **Neither controller had a mishap in any of the 5,200 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
+- **Neither controller had a mishap in any of the 6,000 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
 - **A stop is released for a moment in nearly every noisy run, by both controllers alike: #97.** "Stops before" fails if the chair moves at all after its first stop for the hazard. After that first stop, one noisy distance over `edge_m` or `obstacle_stop_m` lets the chair move for a tick, and it happens again later in the run:
 
   | Scenario | Runs where the stop was released (MANA) | Moved on after the first stop (median, most) | Closest to the hazard |
@@ -63,6 +65,7 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
   - **The ramp** (118 of 200): a single false camera report of stairs makes it ask for tracks on the ramp. **Building entry** (120 of 200) fails for the same reason, on its entrance ramp, so it is the same weakness, not a second one. With false reports turned off, the baseline meets every mark on both in 200 of 200 runs.
   - **The Wi-Fi drop** (0 of 200): the alert link is not part of its rules, so it drives on at full speed while no alert could be sent.
   - **Stairs down** (0 of 200): its if-else rules have no question, so it never asks before going down.
+  - **Stairs and a curb in the dark** (0 of 200 each): one sensor is enough for it to change to tracks, so it crosses on the 3D camera alone without stopping. It has no mishap there, but it is the same one-sensor rule that asks for tracks on a wall at the picture of stairs. MANA stops and waits for the user to choose tracks, in 200 of 200 runs of each.
 - **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182) and the Wi-Fi drop (186), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all three in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
 
 To make the table without false reports:

@@ -323,7 +323,7 @@ Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The bas
 ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
 ```
 
-In the scripted world MANA meets 55 of 55 pass marks and the baseline 51: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), and it never asks before stairs down (`stairs_down`).
+In the scripted world MANA meets 63 of 63 pass marks and the baseline 56: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), it never asks before stairs down (`stairs_down`), and in the dark it crosses stairs and a curb on one sensor without stopping (`dark_stairs`, `dark_curb`).
 
 The scripted world is exact. To see how each controller copes with imperfect inputs, `repeat` runs every scenario many times with lost reports, noisy trust, distance and tilt, false one-sensor reports, and faults and spoken commands moved in time. MANA and the baseline get the same seed for the same run. The table for 200 runs, and what it shows, is in [docs/results.md](docs/results.md):
 
