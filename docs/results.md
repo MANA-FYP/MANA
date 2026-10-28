@@ -134,7 +134,7 @@ What MANA should do when one of its own nodes dies or hangs, then what it did. T
 | The clock jumps back (a world reset) | The core drops what it saw before (#109, #111). The host stands still on a request received "in the future" | `test_after_the_clock_goes_back_...` (core), `test_a_clock_gone_back_...` (host) | before #85 the host kept driving on the last request until the clock caught up |
 | The clock stops | On simulation time, every node's timer stops with it. If Gazebo is paused, the chair stands still. If the bridge died, see that row | not tested on its own | |
 
-Two slow-downs came early, after 1.43 s and 1.35 s. The cause was not found. Early is the safe side: the core thought the position or link was lost before the limit. On a real device, the motor controller needs its own command timeout, just as the drive plugin should have had one here.
+Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system clock, which is stepped while the tests run. The probe's clock is monotonic. The nodes stamp their reports with the system clock, and the core ages the reports by it. In a later run, two position reports came 5.2 s apart by the probe's clock, but their stamps were 8.1 s apart. In another, a link report came 0.09 s before the kill, stamped 3 s before it. A step forward makes every report look older at once, so the core slows down early: the safe side. A step back is the clock going back (#109). A real device's clock can be stepped the same way, by NTP. On a real device, the motor controller needs its own command timeout, just as the drive plugin should have had one here.
 
 ## Mutation testing (#83)
 
