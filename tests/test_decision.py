@@ -113,6 +113,52 @@ def test_obstacle_stops_close_and_slows_further_out(distance, stop, speed):
     assert (d.stop, d.speed_limit) == (stop, speed)
 
 
+# ---- a stop holds through one reading (#97)
+
+
+def test_one_reading_past_the_edge_does_not_release_a_drop_stop():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4))
+    assert c.decision.stop
+    noisy = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.55))  # over edge_m
+    assert fed(c, noisy, NOW + 0.1).reason == "Drop ahead, stopping"
+    assert fed(c, noisy, NOW + 0.1 + LIM.hold_s).reason == "Drop ahead, slowing down"
+
+
+def test_one_reading_past_the_stop_distance_does_not_release_an_obstacle_stop():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(0.7))
+    assert c.decision.stop
+    for t in (0.1, 0.4):  # the person is further than obstacle_stop_m, but not for long yet
+        c.on_obstacle(ObstacleReport(NOW + t, 0.9, LIDAR, 0.85))
+        assert fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + t).stop
+    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
+    assert (d.stop, d.reason) == (False, "Obstacle ahead, slowing down")
+
+
+def test_a_hold_counts_from_its_own_hazard_whichever_branch_stopped():
+    # the drop stops first; the obstacle seen at the same time still holds once the drop is gone
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4), obstacle(0.7))
+    assert c.decision.reason == "Drop ahead, stopping"
+    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
+    assert not d.stop  # both were last seen 0.6 s ago
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4), obstacle(0.7))
+    c.on_obstacle(ObstacleReport(NOW + 0.3, 0.9, LIDAR, 0.7))
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert fed(c, flat, NOW + 0.3).reason == "Drop ahead, stopping"  # the drop's hold, from 0 s
+    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
+    assert d.reason == "Obstacle ahead, stopping"  # seen at 0.3 s, behind the drop's stop
+
+
+def test_a_user_go_is_not_held():
+    c = core()
+    c.on_command(Command.STOP, 0.9)
+    assert c.tick(NOW + 0.1).stop
+    c.on_command(Command.GO, 0.9)
+    assert not c.tick(NOW + 0.2).stop
+
+
 # ---- 3. manual mode: the user drives, safety still guards
 
 
@@ -483,6 +529,14 @@ def test_a_yes_lapses_once_the_stairs_are_out_of_sight_even_without_level_ground
             c.on_ground(GroundReport(t, r.trust, r.source, r.ground, r.distance_m))
         c.tick(t)
     assert fed(c, stairs_down(), NOW + 2.0).reason == ASK_DOWN
+
+
+def test_the_question_holds_through_one_lost_report_and_a_yes_then_still_counts():
+    c = core(*stairs_down())
+    one_sensor = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
+    assert fed(c, one_sensor, NOW + 0.1).reason == ASK_DOWN  # was "Possible step ahead"
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.2).reason == "Going down the stairs on tracks"
 
 
 def test_stop_then_go_asks_again():

@@ -142,6 +142,7 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
+    hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
@@ -197,6 +198,7 @@ class DecisionCore:
         self.asking_down = False  # stopped at the top of stairs down, waiting for a yes
         self.down_ok = False  # the user said yes to the stairs down in sight
         self.down_seen_at = -math.inf
+        self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
         self.tree = self._build()
@@ -264,6 +266,12 @@ class DecisionCore:
             self.down_seen_at = now
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
+        seen = {  # every tick, whichever branch fires, so that each hold counts from its hazard
+            "drop": self._drop_at_edge(),
+            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m,
+            "stairs down": self._stairs_down(),
+        }
+        self._seen_at.update({name: now for name, s in seen.items() if s})
         self.tree.tick_once()
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
@@ -318,6 +326,11 @@ class DecisionCore:
         return self._confirmed_step() is not None and any(
             r.ground == Ground.STAIRS_DOWN for r in self._grounds()
         )
+
+    def _held(self, name: str) -> bool:
+        """The hazard of a stop branch was seen within hold_s: one reading over a limit, or one
+        lost report, does not release the stop (#97)."""
+        return self.now - self._seen_at.get(name, -math.inf) < self.limits.hold_s
 
     def _position_lost(self) -> bool:
         """A position module reports, but neither GPS nor the lidar map has a recent, trusted
@@ -393,15 +406,19 @@ class DecisionCore:
                 branch(
                     "user stop", lambda: self.stopped_by_user, lambda: self._stop("Stopped by you")
                 ),
-                branch("drop", self._drop_at_edge, lambda: self._stop("Drop ahead, stopping")),
+                branch(
+                    "drop",
+                    lambda: self._held("drop"),
+                    lambda: self._stop("Drop ahead, stopping"),
+                ),
                 branch(
                     "obstacle",
-                    lambda: self._nearest_obstacle() <= lim.obstacle_stop_m,
+                    lambda: self._held("obstacle"),
                     lambda: self._stop("Obstacle ahead, stopping"),
                 ),
                 branch(  # above manual: a driving command at the question does not drive on
-                    "stairs down",
-                    lambda: self._stairs_down() and not self.down_ok,
+                    "stairs down",  # a yes ends the question at once; a lost report does not
+                    lambda: self._held("stairs down") and not self.down_ok,
                     lambda: self._stop(ASK_DOWN),
                 ),
                 branch(  # and after the yes, down on tracks whatever the mode
