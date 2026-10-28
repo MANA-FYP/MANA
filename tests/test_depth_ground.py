@@ -228,7 +228,8 @@ def test_the_chairs_own_pitch_is_added_to_the_cameras_tilt():
 
 @pytest.mark.parametrize("chair_pitch", [0.2, -0.2])
 def test_a_pitched_chair_on_level_ground_reads_no_hazard_only_with_its_pitch(chair_pitch):
-    # nose down where a ramp meets level ground, or nose up: the mounting tilt alone reads a step.
+    # nose down where a ramp meets level ground, or nose up: the mounting tilt alone reads a step
+    # (nose up, CURB at 0 m) or a slope that is not there (nose down, RAMP at 0.5 m).
     # With the pitch it is RAMP at 0 m: against the plane the chair stands on, the ground ahead
     # does change slope there, and the core only slows down.
     image = render(flat, cam=dp.tilted(CAM, chair_pitch))
