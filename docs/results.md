@@ -78,3 +78,14 @@ python3 -m mana_core.repeat --runs 200 --seed 1 --no-false-reports
 - There is one kind of false report: the camera alone saying stairs, which MANA's two-sensor rule is built to reject. There are no false 3D camera or lidar reports, and no missed detections near steps, where needing two sensors could cost MANA. The table is biased towards MANA in that way.
 - The position module switches at once here, where the real node takes up to 2 s (#59). The alert link is up or down, without the heartbeat counting of the link node (#62).
 - The scripted world measures distances from the front of the device. The simulated sensors measure from where they are mounted, which matters on tracks: **#96**.
+
+## Mutation testing (#83)
+
+Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
+
+| Module | Mutants | Killed | Survived | Score |
+|---|---|---|---|---|
+| `mana_core/decision.py` | 347 | 293 | 54 | 84.4% |
+| `mana_core/messages.py` | 169 | 154 | 15 | 91.1% |
+| `mana_position/selector.py` | 34 | 33 | 1 | 97.1% |
+| `mana_connectivity/link.py` | 69 | 61 | 8 | 88.4% |
