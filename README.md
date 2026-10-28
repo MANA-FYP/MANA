@@ -251,6 +251,8 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 9. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
 10. Otherwise: wheels, full speed
 
+The tree branch by branch, with scenarios played through the real core and the branch that decides at each tick, is in [docs/diagrams/behaviour-tree.html](docs/diagrams/behaviour-tree.html) (picture: [behaviour-tree.png](docs/diagrams/behaviour-tree.png); rebuild with `python3 tools/behaviour_tree/build.py`).
+
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
 ### Position source (`mana_position`)
