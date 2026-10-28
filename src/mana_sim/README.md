@@ -1,8 +1,8 @@
 # mana_sim
 
-The Gazebo test route and the wheel-and-track test host. This is the first step of the simulation: a
-world and a chair that follows the core's `DriveRequest`. Sensors, faults and the scenarios come
-next (bridge, faults, ten scenarios, CI smoke test).
+The Gazebo test route, the wheel-and-track test host and its sensors. The chair follows the core's
+`DriveRequest` and publishes a camera, a 3D camera, a lidar, an IMU, a GPS and wheel encoders on ROS 2
+([docs/topics.md](docs/topics.md)). Faults, the ten scenarios and the CI smoke test come next.
 
 ## Run it
 
@@ -16,8 +16,11 @@ ros2 launch mana_sim world.launch.py                  # with the Gazebo window
 ros2 launch mana_sim world.launch.py headless:=true   # no window
 ```
 
-The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2 and starts the
-host node. It also unpauses the simulation, because the window sometimes starts paused.
+The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
+(`config/bridge.yaml`) and starts the host node, `sensors_node` (transforms, `odom`, and the `motion`,
+`position`, `link` and `obstacle` reports) and `depth_node` (the `ground` reports from the 3D camera). It
+also unpauses the simulation, because the window sometimes starts paused. The scripted perception
+stub is off; `stub:=true` starts it as well.
 
 Drive the chair by hand (the request must repeat: the chair stops 0.5 s after the last one):
 
@@ -81,9 +84,14 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 - The tracks (belt and sloping ends) are about 2.2 m long, against a 0.9 m chassis: the front of the
   chair is 1.1 m from its centre. Take that into account when a scenario measures the distance to an edge.
 - A drive request with a mode other than 0 or 1 is ignored (the chair stands still) and logged.
-- No sensors yet (the next issue bridges them).
+- The cameras and the lidar need the rendering engine. In a window or headless
+  (`--headless-rendering`) they run on the CPU in WSL, so the real-time factor drops a little.
+- The simulated GPS gives no covariance, so the error in `position` is the fixed 1.5 m.
+- The lidar is a single plane 63 cm above the ground: it does not see the curb, a low step or a drop.
 
 ## Tests
 
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
-stop) without Gazebo.
+stop) and `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in the
+model) without Gazebo. With the simulation running, `tools/check_topic_rates.sh` checks that every sensor
+publishes at the rate in [docs/topics.md](docs/topics.md).
