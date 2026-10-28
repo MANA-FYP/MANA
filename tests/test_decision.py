@@ -315,6 +315,33 @@ def test_manual_mode_before_any_mode_is_chosen_stays_on_wheels():
     assert (d.mode, d.reason) == (Mode.WHEELS, "Manual mode")
 
 
+# ---- reports that arrive late (#109)
+
+
+def test_an_older_report_arriving_late_does_not_replace_a_newer_one():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
+    assert c.decision.stop
+    c.on_ground(GroundReport(NOW - 0.4, 0.9, DEPTH, Ground.FLAT, 3.0))  # older, arrives later
+    assert c.tick(NOW).stop
+    c.on_obstacle(obstacle(0.5))
+    c.on_obstacle(ObstacleReport(NOW - 0.4, 0.9, LIDAR, 3.0))
+    assert c.obstacles[LIDAR].distance_m == 0.5
+    c.on_motion(MotionReport(NOW - 0.4, 0.9, pitch_rad=0.3))
+    assert c.motion.pitch_rad == 0.0
+    c.on_position(gps())
+    c.on_position(PositionReport(NOW - 0.4, 0.2, PositionSource.GPS, 50.0))
+    assert c.positions[PositionSource.GPS].trust == 0.9
+    c.on_link(wifi())
+    c.on_link(LinkReport(NOW - 0.4, 0.9, Link.WIFI, False, 5))
+    assert c.links[Link.WIFI].connected
+
+
+def test_a_report_with_the_same_stamp_replaces_the_one_held_even_untrusted():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
+    c.on_ground(GroundReport(NOW, 0.2, DEPTH, Ground.FLAT, 3.0))  # the newest frame counts
+    assert c.ground[DEPTH].trust == 0.2
+
+
 # ---- position and alert link
 
 

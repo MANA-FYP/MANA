@@ -202,22 +202,29 @@ class DecisionCore:
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
         self.tree = self._build()
 
-    # ---- inputs: the latest report per source wins
+    # ---- inputs: the latest report per source wins; one older than it, arriving late, does not
+
+    @staticmethod
+    def _keep(reports: dict, key, report) -> None:
+        old = reports.get(key)
+        if old is None or report.stamp >= old.stamp:
+            reports[key] = report
 
     def on_ground(self, report: GroundReport) -> None:
-        self.ground[report.source] = report
+        self._keep(self.ground, report.source, report)
 
     def on_obstacle(self, report: ObstacleReport) -> None:
-        self.obstacles[report.source] = report
+        self._keep(self.obstacles, report.source, report)
 
     def on_motion(self, report: MotionReport) -> None:
-        self.motion = report
+        if self.motion is None or report.stamp >= self.motion.stamp:
+            self.motion = report
 
     def on_position(self, report: PositionReport) -> None:
-        self.positions[report.source] = report
+        self._keep(self.positions, report.source, report)
 
     def on_link(self, report: LinkReport) -> None:
-        self.links[report.link] = report
+        self._keep(self.links, report.link, report)
 
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
