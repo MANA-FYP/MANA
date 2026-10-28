@@ -9,6 +9,7 @@ and the hazards the Gazebo world has: the ramp, the stairs up and down, the curb
 import math
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 for package in ("mana_perception", "mana_sim"):
     sys.path.insert(0, str(ROOT / "src" / package))
 
-from mana_sim.frames import depth_mount  # noqa: E402
+from mana_sim.frames import SENSORS, SETTLED_CHASSIS_M, depth_mount  # noqa: E402
 
 from mana_perception import depth as dp  # noqa: E402
 from mana_perception import synthetic as syn  # noqa: E402
@@ -73,12 +74,25 @@ def sim_camera() -> dp.Camera:
 CAM = sim_camera()
 
 
-def read_at(chair_x: float) -> dp.Reading:
+# Where the camera really is: the chassis settles lower than the rigid geometry (frames.py), and
+# differently on wheels and on tracks. Frames are rendered from there and read with the height
+# depth_node is told, so a told height drifting too far from the real one fails these tests.
+REAL_HEIGHTS = {s: h + SENSORS["depth_link"][2] for s, h in SETTLED_CHASSIS_M.items()}
+
+
+@pytest.fixture(params=sorted(REAL_HEIGHTS), ids=lambda s: f"on-{s}")
+def real(request):
+    return REAL_HEIGHTS[request.param]
+
+
+def read_at(chair_x: float, real_height: float) -> dp.Reading:
     """What the reader says with the chair's 3D camera at chair_x on the route (camera 0.35 m ahead
-    of the chassis), the chair standing on the ground under it."""
+    of the chassis), the chair standing on the ground under it, the camera really real_height up
+    and depth_node told depth_mount()."""
     camera_x = chair_x + 0.35
     floor = route_height(np.array([chair_x]))[0]
-    image = syn.render(lambda a: route_height(camera_x + a) - floor, CAM, CAM_ROWS, CAM_COLS)
+    seen_from = replace(CAM, height_m=real_height)
+    image = syn.render(lambda a: route_height(camera_x + a) - floor, seen_from, CAM_ROWS, CAM_COLS)
     return dp.read_ground(image, CAM)
 
 
@@ -92,44 +106,44 @@ def test_the_route_profile_has_the_hazards_the_readme_lists():
     )
 
 
-def test_the_sim_camera_sees_flat_ground_on_the_flat_start():
-    assert read_at(3.0).ground == dp.FLAT
+def test_the_sim_camera_sees_flat_ground_on_the_flat_start(real):
+    assert read_at(3.0, real).ground == dp.FLAT
 
 
-def test_the_ramp_is_a_ramp():
-    assert read_at(8.0 - 0.35 - 1.2).ground == dp.RAMP
+def test_the_ramp_is_a_ramp(real):
+    assert read_at(8.0 - 0.35 - 1.2, real).ground == dp.RAMP
 
 
 @pytest.mark.parametrize("ahead", [1.5, 1.0, 0.6])
-def test_the_stairs_up_are_stairs_up_at_the_first_riser(ahead):
-    r = read_at(22.0 - 0.35 - ahead)
+def test_the_stairs_up_are_stairs_up_at_the_first_riser(ahead, real):
+    r = read_at(22.0 - 0.35 - ahead, real)
     assert r.ground == dp.STAIRS_UP
     assert r.distance_m == pytest.approx(ahead, abs=0.1)
     assert r.step_height_m == pytest.approx(0.17, abs=0.04)
 
 
-def test_from_the_top_the_two_steps_down_are_stairs_down():
-    r = read_at(26.0 - 0.35 - 0.9)  # on the top step, 0.9 m from its edge
+def test_from_the_top_the_two_steps_down_are_stairs_down(real):
+    r = read_at(26.0 - 0.35 - 0.9, real)  # on the top step, 0.9 m from its edge
     assert r.ground == dp.STAIRS_DOWN
     assert r.distance_m == pytest.approx(0.9, abs=0.1)
 
 
 @pytest.mark.parametrize("edge, ahead", [(31.0, 1.0), (34.0, 1.0)])
-def test_the_curb_up_and_down_is_a_curb(edge, ahead):
-    r = read_at(edge - 0.35 - ahead)
+def test_the_curb_up_and_down_is_a_curb(edge, ahead, real):
+    r = read_at(edge - 0.35 - ahead, real)
     assert r.ground == dp.CURB
     assert r.step_height_m == pytest.approx(0.12, abs=0.03)
 
 
 @pytest.mark.parametrize("ahead", [1.5, 0.8, 0.5])
-def test_the_drop_is_a_drop_close_enough_for_the_core_to_stop(ahead):
-    r = read_at(38.0 - 0.35 - ahead)
+def test_the_drop_is_a_drop_close_enough_for_the_core_to_stop(ahead, real):
+    r = read_at(38.0 - 0.35 - ahead, real)
     assert r.ground == dp.DROP
     assert r.distance_m <= ahead + 0.1
 
 
-def test_the_drop_in_the_blind_zone_is_reported_at_0_m():
+def test_the_drop_in_the_blind_zone_is_reported_at_0_m(real):
     blind = dp.nearest_ground(CAM, CAM_ROWS)
     assert blind == pytest.approx(0.53, abs=0.03)
-    r = read_at(38.0 - 0.35 - 0.3)  # the edge 0.3 m ahead, inside the blind zone
+    r = read_at(38.0 - 0.35 - 0.3, real)  # the edge 0.3 m ahead, inside the blind zone
     assert r.ground == dp.DROP and r.distance_m == 0.0

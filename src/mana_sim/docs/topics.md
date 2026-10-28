@@ -48,7 +48,8 @@ joins, `sensors_node` should stop publishing `position`, or there would be two p
 ## Ground reports
 
 `depth_node` (package `mana_perception`) reads `depth/image` and `depth/camera_info` and publishes `ground`,
-with `camera_height_m` 0.97 and `camera_pitch_rad` 0.6 from `frames.depth_mount()`. Its blind zone with this
+with `camera_height_m` 0.945 and `camera_pitch_rad` 0.6 from `frames.depth_mount()`: the middle of where
+the camera settles on wheels (0.93 m) and on tracks (0.96 m), within 2 cm of both. Its blind zone with this
 camera is about 0.53 m. `tests/test_sim_route_depth.py` checks it on this route's own hazards, rendered with this
 camera. The scripted stub is off in this launch; `stub:=true` starts it too.
 

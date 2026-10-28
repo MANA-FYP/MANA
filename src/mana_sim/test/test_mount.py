@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
-from mana_sim.frames import CHASSIS_HEIGHT_M, SENSORS, depth_mount
+from mana_sim.frames import CHASSIS_HEIGHT_M, SENSORS, SETTLED_CHASSIS_M, depth_mount
 
 MODEL = (Path(__file__).parents[1] / "models" / "mana_chair" / "model.sdf").read_text()
 
@@ -24,8 +24,13 @@ def test_the_chassis_height_is_where_the_wheels_and_the_tracks_hold_it():
     assert -track[2] + tall / 2 == pytest.approx(CHASSIS_HEIGHT_M)
 
 
-def test_depth_node_is_told_the_height_and_tilt_of_the_3d_camera():
+def test_the_settled_heights_are_below_the_rigid_one_by_the_slides_give():
+    # the slides only give (P-only lift controllers), never lift the chassis higher
+    assert all(0.0 < CHASSIS_HEIGHT_M - h < 0.05 for h in SETTLED_CHASSIS_M.values())
+
+
+def test_depth_node_is_told_a_height_within_2_cm_of_where_the_camera_really_is():
     height, pitch = depth_mount()
-    assert height == pytest.approx(CHASSIS_HEIGHT_M + SENSORS["depth_link"][2])
-    assert height == pytest.approx(0.97)
+    for settled in SETTLED_CHASSIS_M.values():  # on wheels and on tracks
+        assert abs(height - (settled + SENSORS["depth_link"][2])) <= 0.02
     assert pitch == pytest.approx(SENSORS["depth_link"][4]) and pitch == pytest.approx(0.6)

@@ -22,16 +22,22 @@ SENSORS = {
 }
 
 
-# The chassis rides this high on either set (models/mana_chair/model.sdf): the wheel centres are
-# 0.22 m under it with a 0.15 m radius, and the track boxes are 0.28 m under it, 0.18 m tall.
+# The chassis would ride this high on either set with rigid slides (models/mana_chair/model.sdf):
+# the wheel centres are 0.22 m under it with a 0.15 m radius, and the track boxes are 0.28 m under
+# it, 0.18 m tall.
 CHASSIS_HEIGHT_M = 0.37
+# Where it settles in Gazebo. The lift controllers are P only, so the slides give under load: about
+# 3 cm on wheels (65 kg on wheel_lift) and 1 cm on tracks. Measured on #92.
+SETTLED_CHASSIS_M = {"wheels": 0.33, "tracks": 0.36}
 
 
 def depth_mount() -> tuple[float, float]:
     """(height above the ground, downward tilt) of the 3D camera: depth_node's camera_height_m and
-    camera_pitch_rad, which its ground reading depends on."""
+    camera_pitch_rad, which its ground reading depends on. The height is the middle of the two
+    settled heights, so it is within 2 cm of where the camera really is on either set."""
     _x, _y, z, _roll, pitch, _yaw = SENSORS["depth_link"]
-    return CHASSIS_HEIGHT_M + z, pitch
+    settled = sum(SETTLED_CHASSIS_M.values()) / len(SETTLED_CHASSIS_M)
+    return round(settled + z, 3), pitch
 
 
 def quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
