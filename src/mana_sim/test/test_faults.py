@@ -14,7 +14,7 @@ def test_with_no_fault_on_everything_is_as_it_was():
     x = f.Faults()
     assert not any(x.dropped(s) for s in ("camera", "depth", "lidar", "imu", "gps"))
     assert (x.noise_sigma("gps"), x.light_left(), x.slip_factor()) == (0.0, 1.0, 1.0)
-    assert x.wifi(100.0) == (True, f.FADE_START_DBM, 1.0, 0)
+    assert x.wifi_quality(100.0) == 1.0
     assert x.summary() == "none"
 
 
@@ -44,16 +44,17 @@ def test_the_strength_is_the_default_when_it_is_zero_or_not_a_number():
     assert x.noise_sigma("depth") == f.NOISE_SIGMA["depth"]
 
 
-def test_the_wifi_link_falls_over_the_fade_time():
+def test_the_wifi_heartbeats_get_lost_more_and_more_over_the_fade_time():
     x = f.Faults()
     x.set("wifi", "fade", True, 10.0, 100.0)
-    connected, rssi, trust, missed = x.wifi(105.0)
-    assert (connected, missed) == (True, 0)
-    assert rssi == pytest.approx(-72.5) and trust == pytest.approx(0.5)
-    connected, rssi, trust, missed = x.wifi(109.0)
-    assert connected and 0 < missed < 5
-    assert x.wifi(110.0) == (False, f.FADE_END_DBM, 0.0, 5)
-    assert x.wifi(500.0)[0] is False
+    assert x.wifi_quality(100.0) == 1.0
+    assert x.wifi_quality(105.0) == pytest.approx(0.5)
+    assert x.wifi_quality(109.0) == pytest.approx(0.1)
+    assert x.wifi_quality(110.0) == 0.0
+    assert x.wifi_quality(500.0) == 0.0  # and it stays gone
+    assert x.wifi_quality(50.0) == 1.0  # before it started
+    x.set("wifi", "fade", False, 0.0, 120.0)
+    assert x.wifi_quality(130.0) == 1.0
 
 
 def test_noise_has_the_size_asked_for_and_leaves_non_numbers_alone():
