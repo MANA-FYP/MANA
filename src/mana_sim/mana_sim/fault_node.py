@@ -9,7 +9,7 @@ with the service set_fault (mana_msgs/srv/SetFault), for example:
 `fault_state` (a String, latched) says which faults are on. The node also sends the heartbeats
 of the two radios, once a second, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`, which
 mana_connectivity's link_node turns into `link`. A Wi-Fi fade loses more and more of the Wi-Fi
-heartbeats until none arrives. Run it on simulation time.
+heartbeats, in the same pattern every run, until none arrives. Run it on simulation time.
 """
 
 import random
@@ -83,7 +83,7 @@ class FaultNode(Node):
     def send_beats(self) -> None:
         beat = Header(stamp=self.get_clock().now().to_msg())
         self.bluetooth_beat.publish(beat)
-        if self.rng.random() < self.faults.wifi_quality(self.now_s()):
+        if self.faults.wifi_beat(self.now_s()):
             self.wifi_beat.publish(beat)
 
     def fix_camera(self, m: Image) -> Image:

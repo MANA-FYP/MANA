@@ -7,7 +7,7 @@ they work the same on a recording.
 - noise (camera, depth, lidar, imu, gps): adds Gaussian noise; a GPS gets the matching covariance
 - dropout (the same sensors): the sensor sends nothing; a GPS dropout is the GPS loss
 - dark (camera): the image keeps a share of its light
-- fade (wifi): the Wi-Fi heartbeats get lost more and more, until none gets through
+- fade (wifi): the Wi-Fi heartbeats get lost more and more often, until none gets through
 - slip (wheels): the encoders say the wheels turn faster than the chair moves
 """
 
@@ -39,6 +39,7 @@ class Active:
 class Faults:
     def __init__(self) -> None:
         self.on: dict[tuple[str, str], Active] = {}
+        self._lost = 0.0  # the loss of the Wi-Fi heartbeats that has not been taken out yet
 
     def set(
         self, sensor: str, kind: str, active: bool, value: float, now: float
@@ -48,6 +49,7 @@ class Faults:
             return False, f"unknown kind {kind!r}; choose from {', '.join(KINDS)}"
         if sensor not in KINDS[kind]:
             return False, f"{kind} is for {', '.join(sorted(KINDS[kind]))}, not {sensor!r}"
+        self._lost = 0.0
         if active:
             strength = value if math.isfinite(value) and value > 0.0 else DEFAULT_VALUE[kind]
             self.on[(sensor, kind)] = Active(strength, now)
@@ -82,6 +84,16 @@ class Faults:
         if f is None:
             return 1.0
         return 1.0 - min(1.0, max(0.0, (now - f.since) / f.value))
+
+    def wifi_beat(self, now: float) -> bool:
+        """Whether this Wi-Fi heartbeat gets through. The loss of every heartbeat is added up and a
+        heartbeat is lost each time the sum reaches 1, so a fade is the same pattern every run:
+        no chance, and the heartbeats lost more and more often until none gets through."""
+        self._lost += 1.0 - self.wifi_quality(now)
+        if self._lost >= 1.0 - 1e-9:
+            self._lost -= 1.0
+            return False
+        return True
 
 
 def noisy(values: list[float], sigma: float, rng: random.Random) -> list[float]:

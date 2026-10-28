@@ -57,6 +57,57 @@ def test_the_wifi_heartbeats_get_lost_more_and_more_over_the_fade_time():
     assert x.wifi_quality(130.0) == 1.0
 
 
+def beats_during_a_fade(seconds: float, fade_s: float):
+    """Which Wi-Fi heartbeats (one a second) get through a fade of fade_s that starts at 100 s."""
+    x = f.Faults()
+    x.set("wifi", "fade", True, fade_s, 100.0)
+    return [x.wifi_beat(100.0 + t) for t in range(int(seconds))]
+
+
+def test_a_fade_is_the_same_pattern_every_time_and_ends_with_no_heartbeats():
+    a = beats_during_a_fade(14, 10.0)
+    assert a == beats_during_a_fade(14, 10.0)
+    assert a[0] and not any(a[10:])  # the first gets through, none after the fade
+    lost = [i for i, ok in enumerate(a[:10]) if not ok]
+    gaps = [b - a_ for a_, b in zip(lost, lost[1:], strict=False)]
+    assert gaps == sorted(gaps, reverse=True)  # lost more and more often
+
+
+def test_with_no_fade_every_wifi_heartbeat_gets_through():
+    x = f.Faults()
+    assert all(x.wifi_beat(float(t)) for t in range(50))
+
+
+def test_the_link_node_leaves_wifi_once_for_a_10_s_fade_and_comes_back_after():
+    # the real Heartbeat and LinkSelector of mana_connectivity, fed by the fade, 10 times a second
+    link = pytest.importorskip("mana_connectivity.link")
+    x = f.Faults()
+    beat = link.Heartbeat(1.0)
+    bluetooth = link.Heartbeat(1.0)
+    selector = link.LinkSelector(2, 5.0)
+    x.set("wifi", "fade", True, 10.0, 10.0)
+    beat.beat(0.0)
+    bluetooth.beat(0.0)
+    seen, last = [], None
+    for tick in range(0, 400):  # 40 s
+        now = tick / 10
+        if now == 30.0:
+            x.set("wifi", "fade", False, 0.0, now)
+        if now >= 10.0 and now == int(now):  # a heartbeat every second
+            bluetooth.beat(now)
+            if x.wifi_beat(now):
+                beat.beat(now)
+        elif now < 10.0 and now == int(now):
+            beat.beat(now)
+            bluetooth.beat(now)
+        active = selector.update(beat.missed(now), bluetooth.missed(now), now)
+        if active != last:
+            seen.append((round(now, 1), active))
+            last = active
+    away = [a for _, a in seen]
+    assert away == [link.Link.WIFI, link.Link.BLUETOOTH, link.Link.WIFI], seen
+
+
 def test_noise_has_the_size_asked_for_and_leaves_non_numbers_alone():
     rng = random.Random(1)
     out = f.noisy([2.0] * 2000 + [math.inf, math.nan], 0.1, rng)
