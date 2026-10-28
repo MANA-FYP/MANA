@@ -82,8 +82,13 @@ class MessageQueue:
 
     def push(self, message: Message, now: float) -> None:
         self._clock(now)
-        if any(w.text == message.text for w in self.waiting):
+        # the same text already waiting: keep whichever ranks higher, as release() ranks them
+        # (priority, then a decision before a direction), so a stop is never lost behind a copy
+        rank = (message.priority, message.kind == DECISION)
+        same = [w for w in self.waiting if w.text == message.text]
+        if any((w.priority, w.kind == DECISION) >= rank for w in same):
             return
+        self.waiting = [w for w in self.waiting if w not in same]
         if self._repeats(message):
             return
         if message.kind == DECISION:

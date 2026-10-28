@@ -529,3 +529,33 @@ def test_the_stop_is_never_held_back_by_a_direction():
         for t, m in told(name, cane=True):
             if m.kind == DECISION and m.priority == URGENT:
                 assert t - m.stamp < 0.2, (name, m.text)
+
+
+def test_a_stop_is_not_lost_behind_a_less_urgent_copy_of_the_same_text():
+    # found by the property tests (#83): the copy that was waiting was skipped as said
+    # recently, and the stop, dropped as a duplicate of it, was never said
+    q = MessageQueue()
+    q.push(Message("Drop ahead, stopping", Priority.INFO, True, 0.0), 0.0)
+    assert q.release(0.0).priority == Priority.INFO
+    q.push(Message("Stopped by you", Priority.INFO, True, 0.5), 0.5)  # so the next is no repeat
+    q.push(Message("Drop ahead, stopping", Priority.INFO, True, 0.5), 0.5)
+    q.push(Message("Drop ahead, stopping", Priority.URGENT, True, 0.5), 0.5)
+    said = []
+    for i in range(5, 100):
+        if out := q.release(i / 10):
+            said.append((out.text, out.priority))
+    assert ("Drop ahead, stopping", Priority.URGENT) in said
+
+
+def test_a_stop_is_not_lost_behind_a_waiting_direction_with_the_same_text():
+    # found by the property tests (#83): a waiting urgent direction is dropped when another stop
+    # is said, and the decision dropped as its duplicate went with it
+    q = MessageQueue()
+    q.push(Message("Drop ahead, stopping", Priority.URGENT, True, 0.0, DIRECTION), 0.0)
+    q.push(Message("Drop ahead, stopping", Priority.URGENT, True, 0.0), 0.0)
+    q.push(Message("Stopped by you", Priority.URGENT, True, 0.0), 0.0)
+    said = []
+    for i in range(100):
+        if out := q.release(i / 10):
+            said.append((out.text, out.kind))
+    assert ("Drop ahead, stopping", DECISION) in said
