@@ -4,7 +4,8 @@
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2 and starts
-the host node. The core node is started separately (ros2 run mana_core core_node).
+the host node. The core node is started separately, on the same clock:
+ros2 run mana_core core_node --ros-args -p use_sim_time:=true
 """
 
 import os
@@ -84,6 +85,12 @@ def generate_launch_description():
                 arguments=BRIDGE,
                 output="screen",
             ),
-            Node(package="mana_sim", executable="host_node", output="screen"),
+            # on the simulation clock: the 2.5 s slide switch and the watchdog count simulation seconds
+            Node(
+                package="mana_sim",
+                executable="host_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
         ]
     )

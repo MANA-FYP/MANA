@@ -11,8 +11,10 @@ def tree(source: str, target: str):
     out = {}
     for root, _, files in os.walk(source):
         if files:
-            dest = os.path.join("share", package_name, target, os.path.relpath(root, source))
-            out[dest.rstrip("/.")] = [os.path.join(root, f) for f in files]
+            dest = os.path.normpath(
+                os.path.join("share", package_name, target, os.path.relpath(root, source))
+            )
+            out[dest] = [os.path.join(root, f) for f in files]
     return list(out.items())
 
 
