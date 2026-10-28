@@ -54,6 +54,13 @@ m/s, `angular.z` turn in rad/s, positive to the left) from whoever drives: the s
 
 Without `driver:=true` the chair drives straight at the speed limit, as the scripted scenarios need.
 
+To drive as the autopilot would, by hand (`driver_select` passes it on to `cmd_vel`):
+
+```bash
+ros2 topic pub -r 10 /cmd_vel/autopilot geometry_msgs/msg/Twist \
+  "{linear: {x: 0.5}, angular: {z: 0.4}}"                       # forward 0.5 m/s, turning left
+```
+
 ### The supervisor's keyboard: taking over from the autopilot
 
 `driver:=true` also starts `driver_select`, which passes on the command of whoever drives: the
@@ -84,11 +91,6 @@ ros2 run mana_sim keyboard --ros-args -p use_sim_time:=true
 Taking the controls does **not** put the core in manual mode. In manual mode the core leaves the
 mode and the speed to the user, and skips its own change to tracks and its slow-downs, which is
 what a test drive is meant to show. `m` and `a` stay available as the user's own commands.
-
-```bash
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.5}, angular: {z: 0.4}}"                       # forward 0.5 m/s, turning left
-```
 
 ## Smoke test
 
