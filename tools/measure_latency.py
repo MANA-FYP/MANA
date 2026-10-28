@@ -107,6 +107,13 @@ def summary(values: list[float]) -> str:
     return f"{statistics.median(ms):6.0f} {p95:6.0f} {ms[-1]:6.0f}"
 
 
+def signal_group(p: subprocess.Popen, sig: int) -> None:
+    try:
+        os.killpg(p.pid, sig)
+    except ProcessLookupError:
+        pass  # the whole group has exited already
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     trials = int(args[args.index("--trials") + 1]) if "--trials" in args else 50
@@ -126,12 +133,13 @@ def main(argv: list[str] | None = None) -> int:
             probe.destroy_node()
         rclpy.shutdown()
         for p in procs:  # always, so that no node is left running
-            os.killpg(p.pid, signal.SIGINT)
+            signal_group(p, signal.SIGINT)
         for p in procs:
             try:
                 p.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                os.killpg(p.pid, signal.SIGKILL)
+                pass
+            signal_group(p, signal.SIGKILL)  # what is left: `ros2 run` can exit before its node
     if not r:
         print("no trial finished: is the workspace sourced and built?")
         return 1
