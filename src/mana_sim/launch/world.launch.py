@@ -12,7 +12,8 @@ The launch file sets the model path, starts Gazebo, bridges the chair's topics t
 and the depth node (the ground reports from the 3D camera, told where the camera is mounted).
 With detector:=true it also starts the object detector on the RGB camera, which needs
 `pip install ultralytics`. The core node is started separately, on the same clock:
-ros2 run mana_core core_node --ros-args -p use_sim_time:=true
+ros2 run mana_core core_node --ros-args --params-file <mana_sim share>/config/core.yaml
+(config/core.yaml: the simulation clock, and where the chair's front and sensors are, #96)
 """
 
 import os
