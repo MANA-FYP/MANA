@@ -22,6 +22,18 @@ SENSORS = {
 }
 
 
+# The chassis rides this high on either set (models/mana_chair/model.sdf): the wheel centres are
+# 0.22 m under it with a 0.15 m radius, and the track boxes are 0.28 m under it, 0.18 m tall.
+CHASSIS_HEIGHT_M = 0.37
+
+
+def depth_mount() -> tuple[float, float]:
+    """(height above the ground, downward tilt) of the 3D camera: depth_node's camera_height_m and
+    camera_pitch_rad, which its ground reading depends on."""
+    _x, _y, z, _roll, pitch, _yaw = SENSORS["depth_link"]
+    return CHASSIS_HEIGHT_M + z, pitch
+
+
 def quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
     """(x, y, z, w) for a rotation of yaw about z, then pitch about y, then roll about x."""
     cr, sr = math.cos(roll / 2), math.sin(roll / 2)
