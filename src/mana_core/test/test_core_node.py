@@ -77,3 +77,45 @@ def test_a_lost_alert_link_slows_down_and_warns_the_user(ros):
     assert warned and warned[0].speak and warned[0].priority == UserMessage.WARNING
     slowed = [d for d in drives if d.reason == "No alert link, slowing down"]
     assert slowed and all(d.speed_limit == pytest.approx(0.3) and not d.stop for d in slowed)
+
+
+def steps_ahead_messages(args):
+    """Run the node for a while with steps 1.5 m ahead, and return what the user was told."""
+    rclpy.init(args=args)
+    core, probe = CoreNode(), rclpy.create_node("probe")
+    messages = []
+    probe.create_subscription(UserMessage, "user_message", messages.append, 10)
+    ground = probe.create_publisher(GroundReport, "ground", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    end = time.monotonic() + 8.0  # the decision is said first, then the direction
+    while time.monotonic() < end:
+        stamp = core.get_clock().now().to_msg()
+        for source, distance in (
+            (GroundReport.CAMERA, float("nan")),
+            (GroundReport.DEPTH_CAMERA, 1.5),
+        ):
+            step = GroundReport(
+                source=source, ground=GroundReport.STAIRS_UP, trust=0.9, distance_m=distance
+            )
+            step.header.stamp = (
+                stamp  # two sensors agree: the camera names it, the 3D camera measures it
+            )
+            ground.publish(step)
+        for _ in range(6):  # one call handles one message: let the node take both reports
+            executor.spin_once(timeout_sec=0.01)
+    for node in (core, probe):
+        node.destroy_node()
+    rclpy.shutdown()
+    return [m.text for m in messages]
+
+
+def test_a_cane_host_is_told_what_is_ahead():
+    told = steps_ahead_messages(["--ros-args", "-p", "directions:=true"])
+    assert "Steps up ahead, 1 metre." in told
+
+
+def test_a_chair_host_gets_no_step_directions_by_default():
+    told = steps_ahead_messages([])
+    assert told and not any(text.startswith("Steps up ahead") for text in told)

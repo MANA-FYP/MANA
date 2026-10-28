@@ -640,3 +640,65 @@ def test_what_the_camera_sees_is_said_afresh_after_the_camera_was_off():
         m.on_detections([("person", 2.0)], now=t)
         m.tick(t)
     assert detection_lines(m) == ["Camera sees: person (about 2.0 m)."] * 2
+
+
+# ---- what the user hears: one message at a time, the most urgent first, step directions
+
+
+def drive_towards_steps(m, seconds):
+    t = 0.0
+    while t < seconds:
+        flat(m, t)
+        m.on_ground(Source.CAMERA, Ground.STAIRS_UP, 0.9, now=t)  # the camera names the step
+        m.on_ground(Source.DEPTH_CAMERA, Ground.STAIRS_UP, 0.9, 1.5, t)  # the 3D camera measures it
+        m.tick(t)
+        t = round(t + 0.1, 3)
+    return m.tick(t)["heard"]
+
+
+def test_the_stop_is_heard_as_urgent():
+    m = Middleware()
+    t = feed_flat(m, 0.0, 2.0)
+    m.on_command(Command.STOP, now=t)
+    t = feed_flat(m, t, 1.0)
+    heard = m.tick(t)["heard"]
+    assert heard[-1]["priority"] == "URGENT" and "deactivated" in heard[-1]["text"]
+
+
+def test_a_second_stop_is_answered_again_after_the_first_has_been_said():
+    m = Middleware()
+    t = feed_flat(m, 0.0, 2.0)
+    m.on_command(Command.STOP, now=t)
+    t = feed_flat(m, t, 1.0)
+    m.on_command(Command.STOP, now=t)
+    t = feed_flat(m, t, 6.0)
+    stops = [h for h in m.tick(t)["heard"] if "deactivated" in h["text"]]
+    assert len(stops) == 2
+
+
+def test_messages_come_one_at_a_time_with_a_gap():
+    m = Middleware()
+    t = feed_flat(m, 0.0, 2.0)
+    m.on_radio(wifi=False, bluetooth=True, now=t)  # a link change and a stop at the same time
+    m.on_command(Command.STOP, now=t)
+    t = feed_flat(m, t, 12.0)
+    times = [h["t"] for h in m.tick(t)["heard"]]
+    assert times == sorted(times)
+    assert all(b - a >= 1.5 for a, b in zip(times, times[1:], strict=False))
+
+
+def test_an_old_decision_is_not_said_late():
+    m = Middleware()
+    heard = drive_towards_steps(m, 1.0)
+    assert [h["n"] for h in heard] == [1]  # the one decision is said, and only once
+    assert heard[0]["speak"]
+
+
+def test_a_chair_demo_gets_no_step_directions():
+    heard = drive_towards_steps(Middleware(), 9.0)
+    assert not any(h["kind"] == "direction" for h in heard)
+
+
+def test_a_cane_demo_is_told_what_is_ahead():
+    heard = drive_towards_steps(Middleware(directions=True), 9.0)
+    assert "Steps up ahead, 1 metre." in [h["text"] for h in heard]

@@ -13,6 +13,8 @@ import sys
 
 from mana_core.baseline import BaselineController
 from mana_core.decision import DecisionCore, GroundReport, Limits, ObstacleReport, Priority
+from mana_core.messages import Message as Heard
+from mana_core.messages import MessageQueue, direction
 from mana_core.scenarios import SCENARIOS, Message, Sample, Scenario, Trace, check
 from mana_core.world import World
 
@@ -28,8 +30,14 @@ def feed(core: DecisionCore, report) -> None:
         core.on_motion(report)
 
 
-def run(scenario: Scenario, limits: Limits | None = None, controller=DecisionCore) -> Trace:
+def run(
+    scenario: Scenario, limits: Limits | None = None, controller=DecisionCore, cane: bool = False
+) -> Trace:
+    """Play a scenario. trace.messages has every change of reason, as the node makes them;
+    trace.heard has what the user would hear, one at a time, urgent first. With cane=True the
+    host also says what is ahead (step directions), as a smart cane would."""
     core, world, trace = controller(limits), World(scenario.route), Trace()
+    queue = MessageQueue()
     says = sorted(scenario.says, key=lambda s: s.at_s)
     t = 0.0
     while t <= scenario.duration_s and not world.finished:
@@ -41,7 +49,16 @@ def run(scenario: Scenario, limits: Limits | None = None, controller=DecisionCor
             trace.said.append((t, say.command))
         d = core.tick(t)
         if not trace.samples or d.reason != trace.samples[-1].reason:  # as the node does
-            trace.messages.append(Message(t, d.reason, d.priority >= Priority.WARNING))
+            speak = d.priority >= Priority.WARNING
+            trace.messages.append(Message(t, d.reason, speak))
+            queue.push(Heard(d.reason, d.priority, speak, t), t)
+        if cane:
+            if ahead := direction(core, t):
+                queue.push(ahead, t)
+            else:
+                queue.direction_gone()
+        if out := queue.release(t):
+            trace.heard.append((t, out))
         trace.samples.append(Sample(t, world.x, d.mode, d.stop, d.speed_limit, d.reason))
         world.move(d.mode, d.stop, d.speed_limit, DT)
         t = round(t + DT, 3)

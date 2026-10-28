@@ -344,7 +344,8 @@ async def broadcast(app: web.Application) -> None:
                 await ws.send_json(care)
     state = {"type": "state", "sensors": snap["sensors"], "decision": snap["decision"],
              "link": snap["link"], "position": snap["position"],
-             "manual": snap["manual"], "models": snap["models"]}  # fmt: skip
+             "manual": snap["manual"], "models": snap["models"],
+             "heard": snap["heard"]}  # fmt: skip
     for ws in list(app["phones"]):
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_json(state)
@@ -378,12 +379,14 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--directions", action="store_true",
+                   help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
 
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
-    app = build_app(detector=detector, classifier=classifier, recognizer=recognizer)
+    app = build_app(Middleware(directions=a.directions), detector, classifier, recognizer)
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")

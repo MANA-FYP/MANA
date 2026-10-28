@@ -1,9 +1,10 @@
 """ROS 2 node for the decision core.
 
 Listens to the module reports (ground, obstacle, motion, position and link) and the user's
-commands, decides at 10 Hz, and publishes a drive request for the host every tick and a message
-for the user whenever the reason for the decision changes. The thresholds in Limits are ROS
-parameters with the same names.
+commands, decides at 10 Hz, and publishes a drive request for the host every tick. Messages for
+the user go through a queue (messages.py): one at a time, the most urgent first. With the parameter
+directions set, the node also says what is ahead, for a host with no chair such as a smart cane.
+The thresholds in Limits are ROS parameters with the same names.
 """
 
 from dataclasses import fields
@@ -14,6 +15,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 from mana_core import decision as d
+from mana_core.messages import Message, MessageQueue, direction
 from mana_msgs.msg import (
     DriveRequest,
     GroundReport,
@@ -34,6 +36,13 @@ class CoreNode(Node):
         )
         self.core = d.DecisionCore(limits)
         self.last_reason = None
+        # what the user hears: one message at a time, the most urgent first (see messages.py)
+        self.queue = MessageQueue(
+            gap_s=self.declare_parameter("message_gap_s", 1.5).value,
+            max_age_s=self.declare_parameter("message_max_age_s", 6.0).value,
+        )
+        # step directions ("Steps up ahead, 2 metres.") for a host with no chair, such as a cane
+        self.directions = self.declare_parameter("directions", False).value
         self.create_subscription(GroundReport, "ground", self.on_ground, 10)
         self.create_subscription(ObstacleReport, "obstacle", self.on_obstacle, 10)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
@@ -110,15 +119,20 @@ class CoreNode(Node):
         )
         out.header.stamp = now.to_msg()
         self.drive.publish(out)
+        seconds = now.nanoseconds / 1e9
         if dec.reason != self.last_reason:
-            msg = UserMessage(
-                priority=int(dec.priority),
-                text=dec.reason,
-                speak=dec.priority >= d.Priority.WARNING,
-            )
+            speak = dec.priority >= d.Priority.WARNING
+            self.queue.push(Message(dec.reason, dec.priority, speak, seconds), seconds)
+            self.last_reason = dec.reason
+        if self.directions:
+            if ahead := direction(self.core, seconds):
+                self.queue.push(ahead, seconds)
+            else:
+                self.queue.direction_gone()
+        if said := self.queue.release(seconds):
+            msg = UserMessage(priority=int(said.priority), text=said.text, speak=said.speak)
             msg.header.stamp = out.header.stamp
             self.message.publish(msg)
-            self.last_reason = dec.reason
 
 
 def main(args=None):

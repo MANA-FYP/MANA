@@ -9,7 +9,7 @@ let boxes = [];
 let frameSize = { w: 0, h: 0 };
 let chipsKey = "";
 let streamKey = "";
-let lastDecision = null;
+let lastHeard = null;
 let linesKey = "";
 let inputsKey = "";
 let voiceOn = true;   // the spoken message comes from the laptop, not the phone
@@ -87,14 +87,18 @@ function render(s) {
     $("mode").innerHTML = html;
   }
 
-  // the voice says each new action, in order; a new one waits for the one still being spoken
-  const newest = last ? last.n : 0;
-  if (lastDecision === null) {
-    lastDecision = newest;   // what happened before the page opened is not spoken
-  } else if (newest > lastDecision) {
-    const fresh = log.filter((e) => e.n > lastDecision);
-    lastDecision = newest;
-    fresh.filter((e) => e.kind !== "detection").forEach((e) => speak(e.text));   // detections are shown, not spoken
+  // the voice says what the message queue lets out: one at a time, the most urgent first
+  const said = s.heard || [];
+  const newest = said.length ? said[said.length - 1].n : 0;
+  if (lastHeard === null) {
+    lastHeard = newest;   // what happened before the page opened is not spoken
+  } else if (newest > lastHeard) {
+    const fresh = said.filter((e) => e.n > lastHeard);
+    lastHeard = newest;
+    fresh.forEach((e) => {
+      if (e.priority === "URGENT" && voiceOn && "speechSynthesis" in window) speechSynthesis.cancel();   // a stop is not made to wait
+      if (e.speak) speak(e.text);
+    });
   }
 
   // box 4: only what the user says into the microphone

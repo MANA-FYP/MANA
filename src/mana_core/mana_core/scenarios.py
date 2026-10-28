@@ -48,6 +48,7 @@ class Message:
 class Trace:
     samples: list[Sample] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
+    heard: list[tuple[float, object]] = field(default_factory=list)  # (time, messages.Message)
     said: list[tuple[float, Command]] = field(default_factory=list)
     mishaps: list[str] = field(default_factory=list)
     end_m: float = 0.0

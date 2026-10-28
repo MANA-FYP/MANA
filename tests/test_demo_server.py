@@ -118,6 +118,7 @@ def test_the_phone_receives_the_sensor_states_and_the_decision():
                 break
         assert len(msg["sensors"]) == 8
         assert "mode" in msg["decision"] and "reason" in msg["decision"]
+        assert isinstance(msg["heard"], list)  # the same messages the laptop says
 
     run(with_clients(go))
 
