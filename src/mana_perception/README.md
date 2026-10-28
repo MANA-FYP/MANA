@@ -139,9 +139,11 @@ centimetres past the blind zone, reported at 0 m: closer than they are, which is
 
 **Depth noise.** Each image row's depth is taken as its median across the path strip before it is
 turned into points: an edge across the path runs along a row, so the median keeps it, and the noise
-of single pixels falls by about the square root of the strip's width. Without it, noise of a few
-centimetres per pixel made flat ground read as a curb right in front, because just inside the
-blind zone only the pixels whose noise shortened them land, and those sit higher. With the
+of single pixels falls by about the square root of the strip's width, less a quarter for taking
+the median rather than the mean (about 8 times over the simulation camera's 96-pixel strip).
+Without it, noise of a few centimetres per pixel made flat ground read as a curb right in front,
+because just inside the blind zone only the pixels whose noise shortened them land, and those sit
+higher. With the
 simulation's 3D camera and its `depth_noise` fault (5 cm per pixel, `src/mana_sim`), flat ground
 stays flat, the ramp stays a ramp, and stairs, curbs and the drop are read at their place, to within
 5 cm; the tests check this.
@@ -164,10 +166,24 @@ Known limits:
   5 % ramp limit. The mounting height must be right to about 5 cm, or level ground just past the
   blind zone looks like a step there.
 - **The chair's own pitch** is added to the camera's tilt from the latest trusted `motion` report
-  (at most 0.5 s old). Without it, a chair pitched 0.2 rad over the crest of a ramp reads the level
-  ground ahead as a curb, and on tracks going down the stairs (0.48 rad) the steps below read as a
-  curb 0.85 m away; with it both read right. With no recent `motion` report the mounting tilt is
-  used alone. Roll is not corrected yet.
+  (at most 0.5 s old by its stamp, as the core ages reports), and the camera's height becomes
+  `camera_height_m / cos(pitch)` above the ground under it. With the simulation's 3D camera (320 x
+  240, 1.2 rad, 0.97 m, 0.6 rad): without it, a chair pitched 0.2 rad nose down (the front reaching
+  level ground at the foot of a ramp) or nose up reads the level ground ahead as a curb at 0 m, and
+  on tracks going down the stairs (0.48 rad) the steps below read as a curb 0.85 m away; with it
+  both read right. Heights are then measured from a level plane, while the chair may stand on a
+  slope that goes on ahead: on the route's 7 degree ramp the nearest ground in view is about 7 cm
+  off that plane, so the blind-zone check allows for the slope under the chair (`blind_m` plus the
+  nearest ground's distance times the tangent of the pitch). On the ramp the reading is then RAMP,
+  and a 0.1 m curb or a 0.3 m drop on it is still found at its place; the check is looser while the
+  chair is pitched. With no recent or trusted `motion` report the mounting tilt is used alone. Roll
+  is not corrected yet.
+- **A hazard on less than half of the path strip is not seen.** Each row's median keeps what
+  covers most of the row, so a drop beside the path, on only a third of the strip, reads flat. The
+  strip is about 0.5 m wide at 1 m; what is beside the path is the lidar's and the core's to watch.
+- **A drop whose edge runs well across the path** (45 degrees) can read as stairs down rather than a
+  drop, at the right distance. The core stops for stairs down from one sensor at the edge just as
+  for a drop; only its message differs.
 - **Stairs up that start in the blind zone** are told from a wall only by risers climbing behind
   the first one in view; a single tall rise right in front is left to the obstacle sensors.
 
