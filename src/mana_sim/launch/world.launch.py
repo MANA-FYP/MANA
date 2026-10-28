@@ -19,25 +19,44 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
+    OpaqueFunction,
     SetEnvironmentVariable,
     TimerAction,
 )
-from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from mana_sim.world_variants import without_rendering_sensors
 
 
+def bare_world(world: str) -> str:
+    """A copy of the world with no cameras and no lidar, in a folder of this user. It is written to
+    a file of its own and moved into place, so two launches at once never read a half-written one."""
+    with open(world) as f:
+        text = without_rendering_sensors(f.read())
+    folder = os.path.join(tempfile.gettempdir(), f"mana_sim_{os.getuid()}")
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    fd, part = tempfile.mkstemp(dir=folder, suffix=".sdf")
+    with os.fdopen(fd, "w") as out:
+        out.write(text)
+    path = os.path.join(folder, "mana_route_no_rendering.sdf")
+    os.replace(part, path)
+    return path
+
+
+def gazebo(context):
+    """Gazebo, with the window or headless. sensors:=false starts it on the world with no cameras
+    and no lidar (a machine with no GPU), which is made only then."""
+    world = os.path.join(get_package_share_directory("mana_sim"), "worlds", "mana_route.sdf")
+    if LaunchConfiguration("sensors").perform(context) == "false":
+        world = bare_world(world)
+    headless = LaunchConfiguration("headless").perform(context) == "true"
+    server = ["-s", "--headless-rendering"] if headless else []
+    return [ExecuteProcess(cmd=["gz", "sim", "-r", *server, world], output="screen")]
+
+
 def generate_launch_description():
     share = get_package_share_directory("mana_sim")
-    full = os.path.join(share, "worlds", "mana_route.sdf")
-    # a world with no cameras and no lidar, for a machine that cannot render
-    bare = os.path.join(tempfile.gettempdir(), "mana_route_no_rendering.sdf")
-    with open(full) as f, open(bare, "w") as out:
-        out.write(without_rendering_sensors(f.read()))
-    world = PythonExpression(
-        [repr(full), " if '", LaunchConfiguration("sensors"), "' == 'true' else ", repr(bare)]
-    )
     models = os.path.join(share, "models")
     return LaunchDescription(
         [
@@ -54,16 +73,7 @@ def generate_launch_description():
                 "GZ_SIM_RESOURCE_PATH",
                 models + os.pathsep + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
             ),
-            ExecuteProcess(
-                cmd=["gz", "sim", "-r", world],
-                output="screen",
-                condition=UnlessCondition(LaunchConfiguration("headless")),
-            ),
-            ExecuteProcess(
-                cmd=["gz", "sim", "-r", "-s", "--headless-rendering", world],
-                output="screen",
-                condition=IfCondition(LaunchConfiguration("headless")),
-            ),
+            OpaqueFunction(function=gazebo),
             # the window sometimes starts paused: make sure the simulation runs
             TimerAction(
                 period=8.0,
