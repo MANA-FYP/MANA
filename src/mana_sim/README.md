@@ -15,6 +15,7 @@ colcon build --packages-select mana_msgs mana_sim
 source install/setup.bash
 ros2 launch mana_sim world.launch.py                  # with the Gazebo window
 ros2 launch mana_sim world.launch.py headless:=true   # no window
+ros2 launch mana_sim world.launch.py driver:=true     # a driver steers (see below)
 ```
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
@@ -22,7 +23,10 @@ The launch file sets the model path, starts Gazebo, bridges the chair's topics t
 `position` and `obstacle` reports), `fault_node` (the faults, and the `link` report) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
 stub is off; `stub:=true` starts it as well. `sensors:=false` leaves out the cameras and the lidar
-(for a machine with no GPU).
+(for a machine with no GPU). `depth_node` is told where the 3D camera is mounted (`frames.depth_mount()`,
+tilted 0.6 rad), because it reads the ground against that height. `detector:=true` also starts
+`detector_node` on the RGB camera (it needs `pip install ultralytics`; `weights:=yoloe-26n-mana.pt`
+picks the open-vocabulary model); with `sensors:=false` there is no camera image for it.
 
 Drive the chair by hand (the request must repeat: the chair stops 0.5 s after the last one):
 
@@ -37,6 +41,59 @@ To drive it with the decision core instead, start
 `ros2 run mana_core core_node --ros-args -p use_sim_time:=true` in another terminal. The host node runs
 on the simulation clock (`use_sim_time`), so the 2.5 s slide switch and the 0.5 s watchdog count
 simulation seconds, also when Gazebo runs slower than real time. The core must use the same clock.
+
+### Steering, with a driver
+
+With `driver:=true` the host also follows `cmd_vel` (`geometry_msgs/Twist`: `linear.x` forward in
+m/s, `angular.z` turn in rad/s, positive to the left) from whoever drives: the supervisor's keyboard
+(#77) or the autopilot (#78). MANA's drive request still decides, whoever drives:
+
+- the mode is always the drive request's, and nothing moves while the slides change;
+- forward is capped at `speed_limit` times 1.2 m/s, turning at 1.0 rad/s and reversing at 0.3 m/s;
+- after a stop, the driver can only turn on the spot or reverse, to move away from what stopped the
+  chair (docs/decisions.md, D3);
+- if the driver goes quiet for 0.5 s (keys let go), the chair stands still. It never drives on by
+  itself in this mode.
+
+Without `driver:=true` the chair drives straight at the speed limit, as the scripted scenarios need.
+
+To drive as the autopilot would, by hand (`driver_select` passes it on to `cmd_vel`):
+
+```bash
+ros2 topic pub -r 10 /cmd_vel/autopilot geometry_msgs/msg/Twist \
+  "{linear: {x: 0.5}, angular: {z: 0.4}}"                       # forward 0.5 m/s, turning left
+```
+
+### The supervisor's keyboard: taking over from the autopilot
+
+`driver:=true` also starts `driver_select`, which passes on the command of whoever drives: the
+autopilot (`cmd_vel/autopilot`, #78) or the supervisor (`cmd_vel/supervisor`). It publishes who
+drives on `driver` (`std_msgs/String`). Taking the controls is a latch: once the supervisor drives,
+the autopilot is ignored until the supervisor hands back. A driver that goes quiet for 0.5 s gives
+no motion; the chair never falls back to the other driver by itself.
+
+Run the keyboard in a terminal of its own:
+
+```bash
+ros2 run mana_sim keyboard --ros-args -p use_sim_time:=true
+```
+
+| Key | What it does |
+|---|---|
+| arrows | up and down change the speed by 0.1 m/s, left and right the turn by 0.2 rad/s; the first one takes the controls |
+| `x` | stand still, keeping the controls |
+| `h` | hand the controls back to the autopilot |
+| space | STOP to the core (and the supervisor's own motion to 0) |
+| `g` | GO |
+| `y` / `n` | YES / NO, to answer MANA's question about stairs down |
+| `m` / `a` | MANUAL / AUTOMATIC |
+| `w` / `t` | WHEELS / TRACKS |
+| `+` / `-` | speed up / slow down |
+| `q` | quit |
+
+Taking the controls does **not** put the core in manual mode. In manual mode the core leaves the
+mode and the speed to the user, and skips its own change to tracks and its slow-downs, which is
+what a test drive is meant to show. `m` and `a` stay available as the user's own commands.
 
 ## Smoke test
 
@@ -87,13 +144,22 @@ it in ROS 2, and stops the chair when no request has arrived for `watchdog_s` (0
 | `drive_request` | `mana_msgs/DriveRequest` | what the host follows (mode, stop, speed_limit) |
 | `/model/mana_chair/ground_truth` | `nav_msgs/Odometry` | where the chair really is |
 
-Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
+Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world. With a driver it
+is the driver's speed, capped there.
 
 ## Known limits
 
 - The tracks climb the 17 cm steps (the step height of the scripted world), the ramps and the curb at
   up to 0.5 m/s. Faster, they have not been tried on the stairs.
-- The chair drives straight; there is no steering command yet.
+- Without a driver the chair drives straight; steering needs `driver:=true` and `cmd_vel`.
+- On wheels the chair turns at about 60 percent of the asked turn rate (0.8 rad/s for 2 s gave
+  about 55 degrees, not 92): four wheels steered as two sides skid. The tracks turn at about the
+  asked rate. A driver corrects for it by steering; the autopilot (#78) closes the loop itself.
+- The route is 3 m wide with nothing beyond its sides: steer far off the centre line and the chair
+  falls off. Free driving needs the open test world (#79).
+- Turning on the spot after a stop swings the ends of the chair: on tracks the front is 1.1 m from the
+  centre (below), so near a drop the turn itself can bring an end over the edge. Nothing behind the
+  chair is sensed, which is why reversing is slow.
 - The slides are open loop: both sets move at once for the 2.5 s of a mode change, so for a moment
   neither fully carries the chassis, and the host does not check that the slides have arrived.
 - The tracks (belt and sloping ends) are about 2.2 m long, against a 0.9 m chassis: the front of the
@@ -107,6 +173,9 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 ## Tests
 
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
-stop) and `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in the
-model) and `test/test_faults.py` (the faults and their scenarios) without Gazebo. With the simulation running, `tools/check_topic_rates.sh` checks that every sensor
-publishes at the rate in [docs/topics.md](docs/topics.md).
+stop, and a driver's steering capped by the drive request), `test/test_driver.py` (who drives, and
+the keys), `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in
+the model) and `test/test_faults.py` (the faults and their scenarios) without Gazebo, and
+`test/test_driver_select_node.py` in ROS 2. With the simulation running,
+`tools/check_topic_rates.sh` checks that every sensor publishes at the rate in
+[docs/topics.md](docs/topics.md).
