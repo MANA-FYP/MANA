@@ -242,14 +242,17 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
-3. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
-4. Manual mode: follow the user's mode and speed
-5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
-6. On tracks and not yet level for 2 s: stay on tracks
-7. No trusted ground report: slow down
-8. An obstacle, drop, ramp or possible step ahead: slow down
-9. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
-10. Otherwise: wheels, full speed
+3. A step up or a curb measured within 0.5 m by one sensor only, as when the camera cannot be trusted in the dark: stop. A change of mode needs two sensors, but a stop needs none. In manual mode the user can choose tracks to cross it.
+4. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
+5. Manual mode: follow the user's mode and speed
+6. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
+7. On tracks and not yet level for 2 s: stay on tracks
+8. No trusted ground report: slow down
+9. An obstacle, drop, ramp or possible step ahead: slow down
+10. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
+11. Otherwise: wheels, full speed
+
+The tree branch by branch, with scenarios played through the real core and the branch that decides at each tick, is in [docs/diagrams/behaviour-tree.html](docs/diagrams/behaviour-tree.html) (picture: [behaviour-tree.png](docs/diagrams/behaviour-tree.png); rebuild with `python3 tools/behaviour_tree/build.py`).
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
 
@@ -305,6 +308,8 @@ Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a 
 | `picture` | Edge case: only the camera sees stairs (a picture), so MANA slows down but does not change mode |
 | `dark` | Failure case: the camera is not trusted in the dark; the lidar still sees a person, and MANA stops and says why |
 | `imu_lost` | Failure case: the IMU stops during the climb, so MANA cannot confirm level ground and stays on tracks |
+| `entry` | Full system: up the entrance ramp on GPS, then inside without GPS; the lidar map keeps the position, so MANA does not slow down for it |
+| `wifi_drop` | Full system: Wi-Fi fades and Bluetooth carries the alerts at full speed; with both gone MANA slows down until one is back |
 
 The pass marks are the team's targets: no track request on flat ground or ramps, tracks requested at least 1.5 m before the first step, a stop acted on within 1 s, and obstacles still announced in the dark. No scenario may end with the chair on a step on wheels, over a drop or against an obstacle.
 
@@ -320,7 +325,13 @@ Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The bas
 ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
 ```
 
-In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
+In the scripted world MANA meets 63 of 63 pass marks and the baseline 56: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), it never asks before stairs down (`stairs_down`), and in the dark it crosses stairs and a curb on one sensor without stopping (`dark_stairs`, `dark_curb`).
+
+The scripted world is exact. To see how each controller copes with imperfect inputs, `repeat` runs every scenario many times with lost reports, noisy trust, distance and tilt, false one-sensor reports, and faults and spoken commands moved in time. MANA and the baseline get the same seed for the same run. The table for 200 runs, and what it shows, is in [docs/results.md](docs/results.md):
+
+```bash
+python3 -m mana_core.repeat --runs 200 --seed 1   # or name scenarios; several minutes for all
+```
 
 Which hazard each sensor, rule and test covers, and the gaps that are left, is in [docs/coverage.md](docs/coverage.md).
 

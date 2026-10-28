@@ -4,12 +4,26 @@ and the scenario node runs them live against the core node.
 
 The sensor model follows the design: the camera names the ground but cannot measure distance, the
 3D camera measures distance and step height, the lidar sees obstacles, and the IMU gives the tilt.
+A full-system route also has the position and alert-link modules: the position module reports GPS,
+or the lidar map when GPS is lost (it switches at once here; the real node takes up to 2 s), and the
+link module reports Wi-Fi and Bluetooth.
 """
 
 import math
 from dataclasses import dataclass
 
-from mana_core.decision import Ground, GroundReport, Mode, MotionReport, ObstacleReport, Source
+from mana_core.decision import (
+    Ground,
+    GroundReport,
+    Link,
+    LinkReport,
+    Mode,
+    MotionReport,
+    ObstacleReport,
+    PositionReport,
+    PositionSource,
+    Source,
+)
 
 TOP_SPEED = 1.2  # m/s at speed limit 1.0, walking speed
 RANGE_M = {Source.CAMERA: 5.0, Source.DEPTH_CAMERA: 4.0, Source.LIDAR: 8.0}
@@ -41,7 +55,7 @@ class Obstacle:
 class Fault:
     """A sensor fault while the chair is between from_m and to_m. trust=None means no reports."""
 
-    sensor: str  # "camera", "depth", "lidar" or "imu"
+    sensor: str  # "camera", "depth", "lidar", "imu", "gps", "lidar_map", "wifi" or "bluetooth"
     from_m: float = 0.0
     to_m: float = math.inf
     trust: float | None = None
@@ -53,9 +67,12 @@ class Route:
     stretches: tuple[Stretch, ...] = ()
     obstacles: tuple[Obstacle, ...] = ()
     faults: tuple[Fault, ...] = ()
+    full_system: bool = False  # also the position and alert-link modules
 
 
 SENSOR = {"camera": Source.CAMERA, "depth": Source.DEPTH_CAMERA, "lidar": Source.LIDAR}
+POSITIONS = (("gps", PositionSource.GPS), ("lidar_map", PositionSource.LIDAR_MAP))
+RADIOS = (("wifi", Link.WIFI), ("bluetooth", Link.BLUETOOTH))
 
 
 class World:
@@ -110,6 +127,19 @@ class World:
         if trust is not None:
             under = self._under()
             reports.append(MotionReport(t, trust, pitch_rad=under.pitch_rad if under else 0.0))
+        if self.route.full_system:
+            reports += self._modules(t)
+        return reports
+
+    def _modules(self, t: float) -> list:
+        """The position report (GPS first, then the lidar map, else odometry) and one link report
+        per radio; a radio with a fault reports that it is not connected."""
+        working = [(self._trust(n), s) for n, s in POSITIONS if self._trust(n) is not None]
+        trust, source = working[0] if working else (0.6, PositionSource.ODOMETRY)
+        reports = [PositionReport(t, trust, source)]
+        for name, link in RADIOS:
+            trust = self._trust(name)
+            reports.append(LinkReport(t, TRUST, link, connected=trust is not None))
         return reports
 
     def move(self, mode: Mode, stop: bool, speed_limit: float, dt: float) -> None:

@@ -3,12 +3,15 @@
     ros2 launch mana_sim world.launch.py              # with the Gazebo window
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
     ros2 launch mana_sim world.launch.py stub:=true       # also the scripted perception stub
+    ros2 launch mana_sim world.launch.py detector:=true   # also the object detector on the camera
     ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (config/bridge.yaml) and starts the host node, the sensors node and the depth node (the ground
-reports from the 3D camera). The core node is started separately, on the same clock:
+reports from the 3D camera, told where the camera is mounted). With detector:=true it also starts
+the object detector on the RGB camera, which needs `pip install ultralytics`. The core node is
+started separately, on the same clock:
 ros2 run mana_core core_node --ros-args -p use_sim_time:=true
 """
 
@@ -28,6 +31,7 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from mana_sim.frames import depth_mount
 from mana_sim.world_variants import without_rendering_sensors
 
 
@@ -60,6 +64,7 @@ def gazebo(context):
 def generate_launch_description():
     share = get_package_share_directory("mana_sim")
     models = os.path.join(share, "models")
+    depth_height_m, depth_pitch_rad = depth_mount()
     return LaunchDescription(
         [
             DeclareLaunchArgument("headless", default_value="false", description="no window"),
@@ -70,6 +75,12 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "stub", default_value="false", description="also start the scripted perception stub"
+            ),
+            DeclareLaunchArgument(
+                "detector", default_value="false", description="also start the object detector"
+            ),
+            DeclareLaunchArgument(
+                "weights", default_value="yolo26n.pt", description="the object detector's weights"
             ),
             DeclareLaunchArgument(
                 "driver",
@@ -109,6 +120,15 @@ def generate_launch_description():
                 parameters=[{"config_file": os.path.join(share, "config", "bridge.yaml")}],
                 output="screen",
             ),
+            # with a driver: who drives (supervisor or autopilot) is chosen here, then capped by
+            # MANA in the host. The supervisor's keyboard runs in its own terminal.
+            Node(
+                package="mana_sim",
+                executable="driver_select",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+                condition=IfCondition(LaunchConfiguration("driver")),
+            ),
             # on the simulation clock: the 2.5 s slide switch and the watchdog count its seconds
             Node(
                 package="mana_sim",
@@ -136,12 +156,27 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": True}],
             ),
-            # ground reports from the simulated 3D camera (depth/image, depth/camera_info)
+            # ground reports from the simulated 3D camera (depth/image, depth/camera_info), told
+            # where the camera is: the reading compares the nearest ground with the mounting height
             Node(
                 package="mana_perception",
                 executable="depth_node",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[
+                    {
+                        "use_sim_time": True,
+                        "camera_height_m": depth_height_m,
+                        "camera_pitch_rad": depth_pitch_rad,
+                    }
+                ],
+            ),
+            # obstacles from the simulated RGB camera (camera/image, camera/camera_info)
+            Node(
+                package="mana_perception",
+                executable="detector_node",
+                output="screen",
+                parameters=[{"use_sim_time": True, "weights": LaunchConfiguration("weights")}],
+                condition=IfCondition(LaunchConfiguration("detector")),
             ),
             Node(
                 package="mana_perception",

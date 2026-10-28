@@ -10,7 +10,7 @@ an obstacle.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mana_core.decision import ASK_DOWN, Command, Ground, Limits, Mode, Source
+from mana_core.decision import ASK_DOWN, STEP_STOP, Command, Ground, Limits, Mode, Source
 from mana_core.world import Fault, Obstacle, Route, Stretch
 
 SLOW = Limits().slow
@@ -136,6 +136,17 @@ def full_speed(after_s: float = 1.0) -> Mark:
     return Mark("Full speed on wheels", test)
 
 
+def full_speed_on(start_m: float, end_m: float, what: str) -> Mark:
+    def test(tr):
+        on = [s for s in tr.samples if start_m <= s.x_m < end_m]
+        slowest = min((0.0 if s.stop else s.speed_limit for s in on), default=None)
+        if slowest is None:
+            return False, f"never reached the {what}"
+        return slowest == 1.0, f"slowest {slowest:.0%} of top speed on the {what}"
+
+    return Mark(f"Full speed on the {what}", test)
+
+
 def stop_within() -> Mark:
     def test(tr):
         sent = tr.said_at(Command.STOP)
@@ -170,12 +181,13 @@ def moves_after_go() -> Mark:
 
 def stops_before(at_m: float, what: str) -> Mark:
     def test(tr):
-        gap = at_m - tr.end_m
-        ok = not tr.mishaps and gap > 0 and tr.samples[-1].stop
-        return (
-            ok,
-            f"stopped {gap:.2f} m before the {what}" if ok else f"did not stop for the {what}",
-        )
+        first = tr.first(lambda s: s.stop)
+        gap = at_m - tr.end_m  # the closest it came: the chair never goes back
+        if tr.mishaps or first is None or gap <= 0 or not tr.samples[-1].stop:
+            return False, f"did not stop for the {what}"
+        if (on := tr.end_m - first.x_m) > 0:  # the stop was released for a moment
+            return False, f"stopped, then moved on {on:.2f} m, to {gap:.2f} m before the {what}"
+        return True, f"stopped {gap:.2f} m before the {what}"
 
     return Mark(f"Stops before the {what}", test)
 
@@ -196,14 +208,14 @@ def follows_user() -> Mark:
     return Mark("Follows the user in manual mode", test)
 
 
-def waits_for_yes_before(at_m: float) -> Mark:
+def waits_before(at_m: float, command: Command, what: str) -> Mark:
     def test(tr):
-        yes = tr.said_at(Command.YES)
-        before = [s for s in tr.samples if yes is None or s.t < yes]
+        said = tr.said_at(command)
+        before = [s for s in tr.samples if said is None or s.t < said]
         furthest = max((s.x_m for s in before), default=0.0)
-        return furthest < at_m, f"{at_m - furthest:.2f} m before the stairs until the yes"
+        return furthest < at_m, f"{at_m - furthest:.2f} m before the {what} until {command.name}"
 
-    return Mark("Waits before the stairs until the user says yes", test)
+    return Mark(f"Waits before the {what} until the user says {command.name}", test)
 
 
 def reaches_end(length_m: float) -> Mark:
@@ -287,7 +299,7 @@ SCENARIOS = {
             says=(Say(12.0, Command.YES),),
             marks=(
                 tells(ASK_DOWN),
-                waits_for_yes_before(6.0),
+                waits_before(6.0, Command.YES, "stairs"),
                 wheels_after(8.0),
                 reaches_end(12.0),
             ),
@@ -340,6 +352,35 @@ SCENARIOS = {
             marks=(stops_before(8.0, "person"), tells("Obstacle ahead, stopping")),
         ),
         Scenario(
+            "dark_stairs",
+            "Stairs in the dark (failure case)",
+            "The camera cannot be trusted, so only the 3D camera sees the stairs. One sensor is "
+            "not enough to change mode, so MANA stops at the first step instead of rolling onto "
+            "it on wheels; the user then chooses tracks to climb.",
+            Route(11.0, (STAIRS,), faults=(Fault("camera", trust=0.2),)),
+            40.0,
+            says=(Say(15.0, Command.TRACKS),),
+            marks=(
+                tells(STEP_STOP),
+                waits_before(6.0, Command.TRACKS, "stairs"),
+                reaches_end(11.0),
+            ),
+        ),
+        Scenario(
+            "dark_curb",
+            "Curb in the dark (failure case)",
+            "Only the 3D camera sees the 12 cm curb. MANA stops before it rather than mount it on "
+            "wheels; the user then chooses tracks to cross.",
+            Route(
+                9.0,
+                (Stretch(5.0, 5.3, Ground.CURB, pitch_rad=0.3, height_m=0.12),),
+                faults=(Fault("camera", trust=0.2),),
+            ),
+            30.0,
+            says=(Say(12.0, Command.TRACKS),),
+            marks=(tells(STEP_STOP), waits_before(5.0, Command.TRACKS, "curb"), reaches_end(9.0)),
+        ),
+        Scenario(
             "imu_lost",
             "IMU lost on the stairs (failure case)",
             "The IMU stops reporting during the climb. Without the tilt MANA cannot confirm "
@@ -350,6 +391,46 @@ SCENARIOS = {
                 tracks_before(6.0),
                 tracks_from(8.0),
                 tells("On tracks until the ground is level", aloud=False),
+            ),
+        ),
+        Scenario(
+            "entry",
+            "Building entry (full system)",
+            "Up the entrance ramp on GPS, then inside, where GPS is lost. The lidar map still "
+            "knows where the user is, so MANA does not slow down for the position.",
+            Route(
+                14.0,
+                (Stretch(4.0, 7.0, Ground.RAMP, pitch_rad=0.08),),
+                faults=(Fault("gps", from_m=8.0),),
+                full_system=True,
+            ),
+            40.0,
+            marks=(
+                no_tracks(),
+                slower_on(4.0, 7.0, "entrance ramp"),
+                full_speed_on(8.5, 14.0, "way inside, without GPS"),
+                reaches_end(14.0),
+            ),
+        ),
+        Scenario(
+            "wifi_drop",
+            "Wi-Fi drop (full system)",
+            "Wi-Fi fades at 4 m and Bluetooth carries the alerts, so MANA keeps its speed. From 8 "
+            "to 10 m Bluetooth is out of range too: no alert could be sent, so MANA slows down.",
+            Route(
+                14.0,
+                faults=(Fault("wifi", from_m=4.0), Fault("bluetooth", from_m=8.0, to_m=10.0)),
+                full_system=True,
+            ),
+            40.0,
+            # each mark keeps clear of the fault edges, which the repeated runs move up to 0.5 m,
+            # and of the tick it takes to react at full speed (0.12 m)
+            marks=(
+                full_speed_on(4.5, 7.5, "stretch on Bluetooth"),
+                slower_on(8.7, 9.3, "stretch with no alert link"),
+                tells("No alert link, slowing down"),
+                full_speed_on(11.0, 14.0, "stretch with Bluetooth back"),
+                reaches_end(14.0),
             ),
         ),
     )

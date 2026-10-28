@@ -104,17 +104,42 @@ def test_the_picture_of_stairs_is_where_the_baseline_falls_short():
     assert not run(SCENARIOS["picture"]).mishaps and met(SCENARIOS["picture"], DecisionCore)[0] == 4
 
 
+def test_with_no_alert_link_the_baseline_drives_on_at_full_speed():
+    # the alert link is not part of the baseline's rules; MANA slows while no alert could be sent
+    trace = run(SCENARIOS["wifi_drop"], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS["wifi_drop"], trace) if not ok]
+    assert failed == [
+        "Slower on the stretch with no alert link, on wheels",
+        'Says "No alert link, slowing down"',
+    ]
+
+
 def test_the_baseline_never_asks_about_stairs_down():
     # its if-else rules have no question, so a user cannot say no to the stairs
     trace = run(SCENARIOS["stairs_down"], controller=BaselineController)
     failed = [m.text for m, ok, _ in check(SCENARIOS["stairs_down"], trace) if not ok]
     assert failed == ['Says "Stairs down ahead. Say yes to go down on tracks"']
+
+
+@pytest.mark.parametrize(
+    ("name", "misses"),
+    [
+        ("dark_stairs", ["Waits before the stairs until the user says TRACKS"]),
+        ("dark_curb", []),  # on tracks from the start, it is still slow short of the curb at 12 s
+    ],
+)
+def test_in_the_dark_the_baseline_crosses_on_one_sensor_without_stopping(name, misses):
+    # one source is enough for the baseline to change to tracks: here that gets it across,
+    # at the picture of stairs the same rule asks for tracks on a wall
+    trace = run(SCENARIOS[name], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS[name], trace) if not ok]
+    assert failed == ['Says "Step ahead, stopping"', *misses]
     assert not trace.mishaps
 
 
 def test_the_baseline_meets_every_other_scenario():
     for name, scenario in SCENARIOS.items():
-        if name not in ("picture", "stairs_down"):
+        if name not in ("picture", "wifi_drop", "stairs_down", "dark_stairs", "dark_curb"):
             base, marks, _ = met(scenario, BaselineController)
             assert base == marks, name
 

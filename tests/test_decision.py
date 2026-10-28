@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from mana_core.decision import (
     ASK_DOWN,
+    STEP_STOP,
     Command,
     DecisionCore,
     Ground,
@@ -234,6 +235,26 @@ def test_stairs_further_than_the_step_distance_only_slow_down():
 def test_wheel_slip_changes_to_tracks():
     d = core(motion=level(slip=True)).decision
     assert (d.mode, d.reason) == (Mode.TRACKS, "Wheel slip, changing to tracks")
+    assert (d.stop, d.speed_limit) == (False, LIM.slow)  # slip slows down, it does not stop
+
+
+def test_each_limit_is_reached_at_its_own_value():
+    """A report exactly max_age_s old or exactly at min_trust is used, and a hazard exactly at
+    its distance is acted on, as the limits are written: "this close", "older than this"."""
+    assert core(*stairs(distance=LIM.step_m)).decision.mode == Mode.TRACKS
+    one = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_UP, LIM.step_m)).decision
+    assert one.reason == "Possible step ahead, slowing down"
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(LIM.obstacle_slow_m))
+    assert d.decision.reason == "Obstacle ahead, slowing down"
+    at_limits = (
+        ground(CAM, Ground.STAIRS_UP, trust=LIM.min_trust, age=LIM.max_age_s),
+        ground(DEPTH, Ground.STAIRS_UP, 1.5, trust=LIM.min_trust, age=LIM.max_age_s),
+    )
+    assert core(*at_limits).decision.mode == Mode.TRACKS
+    c = core()
+    c.on_command(Command.STOP, 0.9)
+    c.on_command(Command.GO, LIM.min_trust)
+    assert not c.tick(NOW + 0.1).stop
 
 
 # ---- 4b. two sensors must agree: the vision models on one camera image count as the camera
@@ -308,6 +329,7 @@ def test_stays_on_tracks_when_the_imu_is_lost():
     c.on_motion(level(age=5.0))  # stale: level cannot be confirmed
     d = c.tick(NOW + 3.0)
     assert d.mode == Mode.TRACKS
+    assert (d.stop, d.reason) == (False, "On tracks until the ground is level")
 
 
 def test_dark_corridor_untrusted_camera_is_ignored_but_depth_still_stops():
@@ -320,6 +342,7 @@ def test_dark_corridor_untrusted_camera_is_ignored_but_depth_still_stops():
 def test_stale_reports_are_ignored_and_the_core_slows_down():
     d = core(ground(CAM, Ground.FLAT, age=2.0), ground(DEPTH, Ground.FLAT, age=2.0)).decision
     assert (d.speed_limit, d.reason) == (LIM.slow, "Ground sensors not available, slowing down")
+    assert not d.stop
 
 
 def test_untrusted_obstacle_is_ignored():
@@ -332,6 +355,29 @@ def test_untrusted_obstacle_is_ignored():
 def test_ramp_slows_down_on_wheels():
     d = core(ground(CAM, Ground.RAMP), ground(DEPTH, Ground.RAMP, 1.0)).decision
     assert (d.mode, d.reason) == (Mode.WHEELS, "Ramp ahead, slowing down")
+
+
+# ---- the first tick
+
+
+def test_the_first_tick_decides_before_any_imu_report():
+    c = DecisionCore()
+    for r in (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)):
+        c.on_ground(r)
+    d = c.tick(NOW)  # no motion report yet: the tilt is unknown, which is no hazard on wheels
+    assert (d.mode, d.stop) == (Mode.WHEELS, False)
+
+
+def test_a_stop_on_the_first_tick_keeps_the_wheels():
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3)).decision
+    assert (d.mode, d.stop) == (Mode.WHEELS, True)
+
+
+def test_manual_mode_before_any_mode_is_chosen_stays_on_wheels():
+    c = DecisionCore()
+    c.on_command(Command.MANUAL, 0.9)
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW)
+    assert (d.mode, d.reason) == (Mode.WHEELS, "Manual mode")
 
 
 # ---- position and alert link
@@ -550,6 +596,20 @@ def test_a_yes_lapses_once_the_stairs_are_out_of_sight_even_without_level_ground
     assert fed(c, stairs_down(), NOW + 2.0).reason == ASK_DOWN
 
 
+def test_a_yes_is_kept_when_the_stairs_drop_out_of_sight_for_a_moment():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.2)  # one lost frame
+    assert fed(c, stairs_down(), NOW + 0.3).reason == "Going down the stairs on tracks"
+
+
+def test_a_yes_heard_before_the_first_tick_does_not_approve_the_stairs():
+    c = DecisionCore()
+    c.on_command(Command.YES, 0.9)  # nothing has been asked: the core has not decided yet
+    assert fed(c, stairs_down(), NOW).reason == ASK_DOWN
+
+
 def test_the_question_holds_through_one_lost_report_and_a_yes_then_still_counts():
     c = core(*stairs_down())
     one_sensor = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
@@ -645,3 +705,57 @@ def test_after_a_yes_stairs_down_seen_by_one_sensor_at_the_edge_still_stop():
     c.on_command(Command.YES, 0.9)
     d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)), NOW + 0.1)
     assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+# ---- a step that only one sensor sees (#103): stop at the edge, as in the dark
+
+
+@pytest.mark.parametrize("kind", [Ground.STAIRS_UP, Ground.CURB])
+def test_a_step_one_sensor_measures_at_the_edge_stops_the_chair(kind):
+    # the camera cannot be trusted in the dark, so only the 3D camera sees the step
+    d = core(ground(CAM, Ground.FLAT, trust=0.2), ground(DEPTH, kind, 0.4)).decision
+    assert (d.stop, d.reason, d.priority) == (True, STEP_STOP, Priority.URGENT)
+    assert d.mode == Mode.WHEELS  # one sensor is still not enough to change mode
+
+
+def test_a_lone_step_further_than_the_edge_only_slows_down():
+    d = core(ground(CAM, Ground.FLAT, trust=0.2), ground(DEPTH, Ground.STAIRS_UP, 1.0)).decision
+    assert (d.stop, d.reason) == (False, "Possible step ahead, slowing down")
+
+
+def test_a_lone_step_without_a_distance_only_slows_down():
+    # the picture of stairs: the camera alone, and it measures no distance
+    d = core(ground(CAM, Ground.STAIRS_UP), ground(DEPTH, Ground.FLAT)).decision
+    assert (d.stop, d.reason) == (False, "Possible step ahead, slowing down")
+
+
+def test_a_confirmed_step_at_the_edge_still_changes_to_tracks():
+    d = core(*stairs(0.4)).decision
+    assert (d.mode, d.stop) == (Mode.TRACKS, False)
+
+
+def test_already_on_tracks_a_lone_step_does_not_stop():
+    c = core(*stairs(1.5))
+    assert c.decision.mode == Mode.TRACKS
+    c.on_ground(GroundReport(NOW + 0.1, 0.2, CAM, Ground.STAIRS_UP))  # the camera goes dark
+    c.on_ground(GroundReport(NOW + 0.1, 0.9, DEPTH, Ground.STAIRS_UP, 0.4))
+    c.on_motion(MotionReport(NOW + 0.1, 0.9))
+    assert not c.tick(NOW + 0.1).stop
+
+
+def test_the_user_can_cross_a_lone_step_on_tracks_in_manual_mode():
+    c = core(ground(CAM, Ground.FLAT, trust=0.2), ground(DEPTH, Ground.STAIRS_UP, 0.4))
+    assert c.decision.stop
+    c.on_command(Command.TRACKS, 0.9)  # touch or button: manual mode, on tracks
+    c.on_ground(GroundReport(NOW + 0.1, 0.9, DEPTH, Ground.STAIRS_UP, 0.4))
+    c.on_motion(MotionReport(NOW + 0.1, 0.9))
+    d = c.tick(NOW + 0.1)
+    assert (d.mode, d.stop, d.reason) == (Mode.TRACKS, False, "Manual mode")
+
+
+def test_manual_mode_on_wheels_still_stops_at_a_lone_step():
+    c = DecisionCore()
+    c.on_command(Command.SPEED_UP, 0.9)  # manual mode, on wheels
+    c.on_ground(ground(DEPTH, Ground.CURB, 0.3))
+    c.on_motion(level())
+    assert c.tick(NOW).reason == STEP_STOP

@@ -84,7 +84,8 @@ class Priority(IntEnum):
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
-STOPS = ("drop", "obstacle", "stairs down")  # the stop branches that hold (#97)
+STEP_STOP = "Step ahead, stopping"
+STOPS = ("drop", "obstacle", "lone step", "stairs down")  # the stop branches that hold (#97)
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,7 @@ class DecisionCore:
         seen = {
             "drop": self._drop_at_edge(lim.edge_m + past["drop"]),
             "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + past["obstacle"],
+            "lone step": self._lone_step_at_edge(lim.edge_m + past["lone step"]),
             "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
         self._seen_at.update({name: now for name, s in seen.items() if s})
@@ -308,6 +310,24 @@ class DecisionCore:
             r.distance_m <= (self.limits.edge_m if edge_m is None else edge_m)
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
+        )
+
+    def _lone_step_at_edge(self, edge_m: float | None = None) -> bool:
+        """A step up or a curb measured within edge_m that no second sensor confirms, as when the
+        camera cannot be trusted in the dark. A change of mode needs two sensors, but a stop needs
+        none, so the chair stops instead of rolling onto it on wheels. A report without a
+        distance (the camera alone, a picture of stairs) only slows down."""
+        edge_m = self.limits.edge_m if edge_m is None else edge_m
+        return self._confirmed_step() is None and any(
+            r.ground in (Ground.STAIRS_UP, Ground.CURB) and r.distance_m <= edge_m
+            for r in self._grounds()
+        )
+
+    def _may_cross_a_step(self) -> bool:
+        """No stop for a lone step on tracks, which can climb it, or when the user has chosen
+        tracks in manual mode to cross on purpose. Checked every tick, so it is never held."""
+        return self.decision.mode == Mode.TRACKS or (
+            not self.automatic and self.user_mode == Mode.TRACKS
         )
 
     def _confirmed_step(self, step_m: float | None = None) -> GroundReport | None:
@@ -422,6 +442,11 @@ class DecisionCore:
                     "obstacle",
                     lambda: self._held("obstacle"),
                     lambda: self._stop("Obstacle ahead, stopping"),
+                ),
+                branch(  # above manual too: a driving command does not roll onto it
+                    "lone step",
+                    lambda: self._held("lone step") and not self._may_cross_a_step(),
+                    lambda: self._stop(STEP_STOP),
                 ),
                 branch(  # above manual: a driving command at the question does not drive on
                     "stairs down",  # a yes ends the question at once; a lost report does not
