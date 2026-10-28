@@ -118,6 +118,24 @@ What this shows:
 - **An obstacle that appears close is the case that decides.** A chair at top speed reaches a person who steps out 1.2 m ahead if it brakes at 0.5 m/s². At 1.0 m/s² it stops only 0.12 to 0.24 m short of them. From 1.5 m/s² it keeps 0.36 m or more.
 - **For #86:** at 1.5 m/s² or more, the chair keeps 0.35 m or more from every hazard in the table, with either reaction time. Below that, either the top speed should come down, or the stop distance for obstacles should grow, and the tool shows what either change gives. The real chair's deceleration must be measured first. That number is the input this check is waiting for.
 
+## Fail-safe: one of MANA's own parts dies mid-drive (#85)
+
+What MANA should do when one of its own nodes dies or hangs, then what it did. The node cases are in `src/mana_sim/test/test_failsafe.py`. It runs the real nodes as processes (`ros2 run`), on a ROS domain of their own. A probe feeds them what the sensors would, then kills one node (SIGKILL) or freezes it (SIGSTOP). The times are from the kill to the first message that shows the safe behaviour. They come from 3 or 4 runs of the file in WSL. The test checks each against the limit it gives, plus 0.3 s for the timers and a loaded machine.
+
+| Case | Expected | Test | Measured |
+|---|---|---|---|
+| The core node is killed, or hangs | The host's watchdog stops the chair `watchdog_s` (0.5 s) after the last drive request | `test_when_the_core_dies_or_hangs_...` | the wheels' command is 0 after 0.50 s, both ways, in 4 runs, and stays 0 |
+| A perception node dies or a camera topic stalls | Its reports age out after `max_age_s` (0.5 s). With no ground sensor left, MANA slows down: "Ground sensors not available, slowing down", speed 0.3 | `test_when_the_ground_reports_stop_...` | slowed after 0.50 s in 4 runs |
+| The position node dies | Its reports age out after `position_max_age_s` (2.5 s): "Position unknown, slowing down" | `test_when_the_position_or_link_node_dies_...` | slowed after 2.54 and 2.59 s, and once after 1.43 s |
+| The link node dies | Its reports age out after `link_max_age_s` (2.5 s): "No alert link, slowing down" | same | slowed after 2.50 to 2.58 s, and once after 1.35 s |
+| The bridge to Gazebo dies | The host cannot stop the chair: the drive plugins keep the last command they got. So the launch file starts the bridge again (`respawn`, after 0.5 s) | by hand, in Gazebo without cameras | **without respawn** the chair drove on at 0.36 m/s for at least 10 s of simulation time. **With respawn** a new bridge was up within 3 s, and a stop said after the kill stopped the chair |
+| The user's commands stop coming, in manual mode | Commands are single events, not a stream. MANA keeps manual mode, and its stops still apply. A driver that goes quiet is stood still by the host (D7) | `test_when_following_a_driver_the_chair_stands_still_...` (host) | as expected |
+| All ground sensors lost in manual mode | MANA cannot see a drop, so it slows down as in automatic mode, on the user's undercarriage (D7) | `test_in_manual_mode_with_no_ground_sensor_...` | before #85 it kept the user's speed |
+| The clock jumps back (a world reset) | The core drops what it saw before (#109, #111). The host stands still on a request received "in the future" | `test_after_the_clock_goes_back_...` (core), `test_a_clock_gone_back_...` (host) | before #85 the host kept driving on the last request until the clock caught up |
+| The clock stops | On simulation time, every node's timer stops with it. If Gazebo is paused, the chair stands still. If the bridge died, see that row | not tested on its own | |
+
+Two slow-downs came early, after 1.43 s and 1.35 s. The cause was not found. Early is the safe side: the core thought the position or link was lost before the limit. On a real device, the motor controller needs its own command timeout, just as the drive plugin should have had one here.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).

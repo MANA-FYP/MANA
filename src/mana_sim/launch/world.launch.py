@@ -114,11 +114,15 @@ def generate_launch_description():
                     )
                 ],
             ),
+            # started again if it dies: the drive plugins keep the last command they got, so
+            # without the bridge the host cannot stop the chair (#85)
             Node(
                 package="ros_gz_bridge",
                 executable="parameter_bridge",
                 parameters=[{"config_file": os.path.join(share, "config", "bridge.yaml")}],
                 output="screen",
+                respawn=True,
+                respawn_delay=0.5,
             ),
             # with a driver: who drives (supervisor or autopilot) is chosen here, then capped by
             # MANA in the host. The supervisor's keyboard runs in its own terminal.

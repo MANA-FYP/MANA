@@ -82,6 +82,7 @@ class Priority(IntEnum):
 
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
+NO_GROUND = "Ground sensors not available, slowing down"
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
@@ -438,6 +439,15 @@ class DecisionCore:
     def _stop(self, reason):
         self._set(self.mode, True, 0.0, reason, Priority.URGENT)
 
+    def _manual(self):
+        """The user drives, on the undercarriage they chose. With no ground sensor at all MANA
+        cannot see a drop, so it slows down as in automatic mode (#85)."""
+        if self._grounds():
+            self._set(self.user_mode, False, self.user_speed, "Manual mode", Priority.INFO)
+        else:
+            speed = min(self.user_speed, self.limits.slow)
+            self._set(self.user_mode, False, speed, NO_GROUND, Priority.WARNING)
+
     def _tracks(self):
         if self.down_ok and self._held("stairs down"):  # as the "going down" branch decides
             reason = "Going down the stairs on tracks"
@@ -490,9 +500,7 @@ class DecisionCore:
                 branch(
                     "manual",
                     lambda: not self.automatic,
-                    lambda: self._set(
-                        self.user_mode, False, self.user_speed, "Manual mode", Priority.INFO
-                    ),
+                    self._manual,
                 ),
                 branch("step", lambda: self._confirmed_step() is not None, self._tracks),
                 branch(
@@ -524,7 +532,7 @@ class DecisionCore:
                         Mode.WHEELS,
                         False,
                         lim.slow,
-                        "Ground sensors not available, slowing down",
+                        NO_GROUND,
                         Priority.WARNING,
                     ),
                 ),

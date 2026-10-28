@@ -97,3 +97,17 @@ Before this, each tick decided from the latest reports alone. In the noisy runs 
 | **Hold, and `release_m` past the limit** | 0 of 200 in all three | A hazard that really is gone is waited for 0.5 s more |
 
 Why 0.5 s: it is as long as a report counts (`max_age_s`), so a stop never holds on a hazard older than any report the core would still use. Why 0.1 m: the noise assumed in #54 is 0.02 m plus 5 % of the distance, about 0.04 m at the drop's 0.5 m and 0.06 m at the obstacle's 0.8 m, so a reading past 0.1 m is rare while the hazard is still at the limit.
+
+## D7. Manual mode when the user's input or the ground sensors go (#85)
+
+**Chosen:**
+- **The user's input stops.** The user's commands (stop, go, mode, speed) are single events, not a stream, so silence is not a command. MANA keeps manual mode and the speed the user chose. Its stops still apply. The host stands the chair still when the driver's own stream (`cmd_vel`) goes quiet for `watchdog_s` (D3).
+- **Every ground sensor is gone.** MANA slows down to `slow` in manual mode too, on the undercarriage the user chose, with the same message as in automatic mode. Before, manual mode came first in the tree and kept the user's speed, with nothing able to see a drop.
+
+| Option | Problem |
+|---|---|
+| Leave manual mode when the user is silent | A user who drives on without speaking would be taken out of manual mode. That is not their choice, and nothing is unsafe in silence while MANA's stops apply |
+| Keep the user's speed with no ground sensor | A drop can no longer be seen, so no stop can come in time at full speed |
+| **Slow down, keep the user's undercarriage** | The user drives slower until a ground sensor is back |
+| Stop until a ground sensor is back | A dead camera would leave the user stuck where they are. Automatic mode slows down for this, it does not stop |
+

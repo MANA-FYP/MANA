@@ -203,6 +203,20 @@ def test_manual_mode_follows_the_user_but_safety_still_stops():
     assert c.tick(NOW).reason != "Manual mode"
 
 
+def test_in_manual_mode_with_no_ground_sensor_mana_slows_down_on_the_users_undercarriage():
+    # it cannot see a drop: as in automatic mode it slows, but keeps the mode the user chose (#85)
+    c = core(ground(CAM, Ground.FLAT, age=1.0), ground(DEPTH, Ground.FLAT, age=1.0))
+    c.on_command(Command.TRACKS, 0.9)
+    d = c.tick(NOW)
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.TRACKS, False, pytest.approx(0.3))
+    assert (d.reason, d.priority) == (
+        "Ground sensors not available, slowing down",
+        Priority.WARNING,
+    )
+    c.on_ground(ground(DEPTH, Ground.FLAT))  # one ground sensor back: the user's speed again
+    assert (c.tick(NOW).reason, c.decision.speed_limit) == ("Manual mode", 1.0)
+
+
 def test_speed_commands_stay_within_range():
     c = core()
     for _ in range(10):

@@ -41,7 +41,7 @@ Rows that an open pull request covers say so: they become **covered** when it me
 | Wi-Fi lost | Wi-Fi and Bluetooth heartbeats | no alert link: slow when neither can carry an alert | `wifi_drop` | `test_no_alert_link_slows_down`, `test_bluetooth_carries_the_alerts_when_wifi_is_gone`; `mana_connectivity` 25 tests | #44 | covered |
 | The user says stop | voice, touch, button | user stop, at any trust, until a trusted GO | `stop` | `test_spoken_stop_wins_over_everything_until_go`, `test_stop_is_obeyed_even_at_low_trust` | none | covered |
 | Manual mode at a hazard | user commands | manual sits below drop, obstacle and stairs down | `manual_drop` | `test_manual_mode_follows_the_user_but_safety_still_stops` | none | covered |
-| A part of MANA dies | node, topic, bridge | the host stops after 0.5 s without a drive request | none | `mana_sim` host tests | #85 | partly: only the host's watchdog is tested |
+| A part of MANA dies | node, topic, bridge, clock | the host stops 0.5 s after the last drive request; lost reports age out and MANA slows down; the bridge is started again | none | `mana_sim` `test_failsafe.py` (real nodes killed or frozen), host tests | #85 | yes, but the bridge only by hand in Gazebo; see results.md |
 
 ## Requirements
 

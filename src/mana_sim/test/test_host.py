@@ -93,6 +93,15 @@ def test_an_old_request_is_not_replayed():
     assert h.follow((WHEELS, False, 1.0), 0.0, WATCHDOG_S + 0.1).wheels_mps == 0.0
 
 
+def test_a_clock_gone_back_does_not_keep_an_old_request_alive():
+    # a world reset: the last request was received at 100 s and it is now 10 s (#85)
+    h, request = Host(), (WHEELS, False, 1.0)
+    assert h.follow(request, 100.0, 100.0).wheels_mps == pytest.approx(TOP_SPEED)
+    assert h.follow(request, 100.0, 10.0).wheels_mps == 0.0
+    c = h.follow(request, 10.0, 10.0, driver=(0.5, 0.2), driver_at=100.0, follow_driver=True)
+    assert (c.wheels_mps, c.wheels_turn) == (0.0, 0.0)  # nor an old driver command
+
+
 def test_a_stop_during_a_mode_change_keeps_the_chair_still():
     h = Host()
     h.follow((TRACKS, False, 1.0), 0.0, 0.0)
