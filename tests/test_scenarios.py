@@ -47,3 +47,15 @@ def test_command_line(capsys):
     out = capsys.readouterr().out
     assert "PASS  Stop acted on within 1 s" in out and "All pass marks met." in out
     assert main(["nowhere"]) == 2
+
+
+def test_the_world_option_is_checked(capsys):
+    assert main(["--world", "mars"]) == 2
+    assert "unknown world mars" in capsys.readouterr().out
+    assert main(["--world"]) == 2
+
+
+def test_the_gazebo_world_names_only_the_scenarios_that_play_there(capsys):
+    pytest.importorskip("mana_sim")  # built and sourced workspace
+    assert main(["--world", "gazebo", "entry"]) == 2
+    assert "not in Gazebo: entry" in capsys.readouterr().out

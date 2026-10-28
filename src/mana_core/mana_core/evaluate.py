@@ -4,9 +4,15 @@ pass mark. tests/test_scenarios.py runs it in CI; from a shell:
     python3 -m mana_core.evaluate [scenario ...]     # or: ros2 run mana_core evaluate
     python3 -m mana_core.evaluate --baseline [scenario ...]   # the if-else baseline instead
     python3 -m mana_core.evaluate --compare [scenario ...]    # both, side by side
+    python3 -m mana_core.evaluate --world gazebo [scenario ...]   # in Gazebo, same pass marks
 
 It prints one line per pass mark and exits with 1 if any of them fails. --compare prints the pass
 marks each controller met and exits with 1 only if MANA misses one.
+
+--world gazebo plays the original ten scenarios in Gazebo (mana_sim, a built and sourced workspace),
+one simulation each, and scores what the chair did with the same pass marks. The traces are kept in
+--traces DIR (default gazebo_traces); a scenario with a trace there is not played again unless
+--rerun is given.
 """
 
 import sys
@@ -115,13 +121,57 @@ def compare(names: list[str]) -> int:
     return totals[2] - totals[0]
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    options = [a for a in args if a.startswith("--")]
-    if bad := [o for o in options if o not in ("--baseline", "--compare")]:
-        print(f"unknown option {', '.join(bad)}; use --baseline or --compare")
+def gazebo(names: list[str], traces: str, rerun: bool) -> int:
+    """The scenarios in Gazebo, scored with the same marks; returns how many marks failed."""
+    from pathlib import Path
+
+    try:
+        from mana_sim import gazebo_run as gr
+        from mana_sim import gazebo_scenarios as gs
+    except ImportError:
+        print("--world gazebo needs the mana_sim package: build and source the workspace")
+        return 1
+    names = names or list(gs.RUNS)
+    if bad := [n for n in names if n not in gs.RUNS]:
+        print(f"not in Gazebo: {', '.join(bad)}; choose from: {', '.join(gs.RUNS)}")
         return 2
-    names = [a for a in args if not a.startswith("--")] or list(SCENARIOS)
+    failed = 0
+    for n in names:
+        path = Path(traces) / f"{n}.json"
+        if rerun or not path.exists():
+            print(f"{n}: playing in Gazebo ...", flush=True)
+            path = gr.play(n, Path(traces))
+        print(f"\n{gs.RUNS[n].scenario().title} [{n}]: {gs.RUNS[n].scenario().shows}")
+        for text, ok, measured in gr.score(n, path):
+            failed += not ok
+            print(f"  {'PASS' if ok else 'FAIL'}  {text:<70} {measured}")
+    print("\nAll pass marks met." if not failed else f"\n{failed} pass mark(s) failed.")
+    return 1 if failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    world, traces = "scripted", "gazebo_traces"
+    for option in ("--world", "--traces"):
+        if option in args:
+            i = args.index(option)
+            if i + 1 >= len(args):
+                print(f"{option} needs a value")
+                return 2
+            value = args[i + 1]
+            del args[i : i + 2]
+            world, traces = (value, traces) if option == "--world" else (world, value)
+    if world not in ("scripted", "gazebo"):
+        print(f"unknown world {world}; use scripted or gazebo")
+        return 2
+    options = [a for a in args if a.startswith("--")]
+    if bad := [o for o in options if o not in ("--baseline", "--compare", "--rerun")]:
+        print(f"unknown option {', '.join(bad)}; use --baseline, --compare, --world or --traces")
+        return 2
+    names = [a for a in args if not a.startswith("--")]
+    if world == "gazebo":
+        return gazebo(names, traces, "--rerun" in args)
+    names = names or list(SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
         print(f"unknown scenario {', '.join(unknown)}; choose from: {', '.join(SCENARIOS)}")
