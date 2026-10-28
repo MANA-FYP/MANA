@@ -217,3 +217,46 @@ def test_how_far_the_camera_sees_the_ground_depends_on_its_tilt():
     assert dp.visible_until(level, ROWS, 3.0) == 3.0  # the top row looks above the horizon
     steep = dp.Camera.from_fov(COLS, ROWS, math.radians(87.0), height_m=1.0, pitch_rad=1.2)
     assert dp.visible_until(steep, ROWS, 3.0) < 3.0
+
+
+# the simulation's 3D camera (src/mana_sim, #92): 1.2 rad across, 320 x 240, 0.97 m up, 0.6 rad down
+SIM_CAM = dp.Camera.from_fov(320, 240, 1.2, 0.97, 0.6)
+
+
+def with_noise(ground, sigma_m, seed):
+    """A frame from the simulation's camera with Gaussian noise of sigma_m on every pixel, as the
+    simulation's depth_noise fault adds it (src/mana_sim/mana_sim/faults.py)."""
+    image = render(ground, cam=SIM_CAM, rows=240, cols=320)
+    rng = np.random.default_rng(seed)
+    return np.where(np.isfinite(image), image + rng.normal(0.0, sigma_m, image.shape), image)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_depth_noise_of_5_cm_does_not_make_a_flat_floor_a_step(seed):
+    # before rows were taken as medians, this read as a CURB in front every time
+    assert dp.read_ground(with_noise(flat, 0.05, seed), SIM_CAM).ground == dp.FLAT
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_depth_noise_of_5_cm_keeps_every_hazard_and_where_it_is(seed):
+    cases = [
+        (stairs(1.0, 0.17), dp.STAIRS_UP, 1.0),
+        (step(1.0, 0.12), dp.CURB, 1.0),
+        (stairs(0.9, -0.17), dp.STAIRS_DOWN, 0.9),
+        (step(0.8, -1.0), dp.DROP, 0.8),  # read as a CURB before
+    ]
+    for ground, kind, at in cases:
+        r = dp.read_ground(with_noise(ground, 0.05, seed), SIM_CAM)
+        assert r.ground == kind
+        assert at - 0.15 <= r.distance_m <= at + 0.1
+    blind = dp.read_ground(with_noise(step(0.3, -1.0), 0.05, seed), SIM_CAM)
+    assert blind.ground == dp.DROP and blind.distance_m == 0.0
+
+
+def test_a_row_with_too_few_readings_is_left_out():
+    image = render(flat, cam=SIM_CAM, rows=240, cols=320)
+    image[200:, :] = np.nan
+    empty = dp.ground_points(image, SIM_CAM)
+    image[200:, 160] = 9.0  # one stray reading in each of the bottom rows: too few to count
+    stray = dp.ground_points(image, SIM_CAM)
+    assert all(np.array_equal(a, b) for a, b in zip(empty, stray, strict=True))

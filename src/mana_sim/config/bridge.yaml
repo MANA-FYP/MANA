@@ -1,0 +1,22 @@
+# gz transport <-> ROS 2, read by ros_gz_bridge (launch/world.launch.py). One entry per topic.
+# ros_topic_name is what the rest of MANA reads; docs/topics.md lists them with rates and frames.
+
+# ROS 2 -> Gazebo: what the host node asks of the chair
+- {ros_topic_name: /model/mana_chair/wheels_cmd_vel, gz_topic_name: /model/mana_chair/wheels_cmd_vel, ros_type_name: geometry_msgs/msg/Twist, gz_type_name: gz.msgs.Twist, direction: ROS_TO_GZ}
+- {ros_topic_name: /model/mana_chair/tracks_cmd_vel, gz_topic_name: /model/mana_chair/tracks_cmd_vel, ros_type_name: geometry_msgs/msg/Twist, gz_type_name: gz.msgs.Twist, direction: ROS_TO_GZ}
+- {ros_topic_name: /model/mana_chair/joint/wheel_lift/cmd_pos, gz_topic_name: /model/mana_chair/joint/wheel_lift/cmd_pos, ros_type_name: std_msgs/msg/Float64, gz_type_name: gz.msgs.Double, direction: ROS_TO_GZ}
+- {ros_topic_name: /model/mana_chair/joint/track_lift_left/cmd_pos, gz_topic_name: /model/mana_chair/joint/track_lift_left/cmd_pos, ros_type_name: std_msgs/msg/Float64, gz_type_name: gz.msgs.Double, direction: ROS_TO_GZ}
+- {ros_topic_name: /model/mana_chair/joint/track_lift_right/cmd_pos, gz_topic_name: /model/mana_chair/joint/track_lift_right/cmd_pos, ros_type_name: std_msgs/msg/Float64, gz_type_name: gz.msgs.Double, direction: ROS_TO_GZ}
+
+# Gazebo -> ROS 2: the clock, where the chair really is, and the sensors. The sensors that can
+# fail come out as *_raw; fault_node passes them on under the name the others read.
+- {ros_topic_name: /clock, gz_topic_name: /clock, ros_type_name: rosgraph_msgs/msg/Clock, gz_type_name: gz.msgs.Clock, direction: GZ_TO_ROS}
+- {ros_topic_name: /model/mana_chair/ground_truth, gz_topic_name: /model/mana_chair/ground_truth, ros_type_name: nav_msgs/msg/Odometry, gz_type_name: gz.msgs.Odometry, direction: GZ_TO_ROS}
+- {ros_topic_name: joint_states_raw, gz_topic_name: /model/mana_chair/joint_states, ros_type_name: sensor_msgs/msg/JointState, gz_type_name: gz.msgs.Model, direction: GZ_TO_ROS}
+- {ros_topic_name: camera/image_raw, gz_topic_name: /camera/image_raw, ros_type_name: sensor_msgs/msg/Image, gz_type_name: gz.msgs.Image, direction: GZ_TO_ROS}
+- {ros_topic_name: camera/camera_info_raw, gz_topic_name: /camera/camera_info, ros_type_name: sensor_msgs/msg/CameraInfo, gz_type_name: gz.msgs.CameraInfo, direction: GZ_TO_ROS}
+- {ros_topic_name: depth/image_raw, gz_topic_name: /depth/image_raw, ros_type_name: sensor_msgs/msg/Image, gz_type_name: gz.msgs.Image, direction: GZ_TO_ROS}
+- {ros_topic_name: depth/camera_info_raw, gz_topic_name: /depth/camera_info, ros_type_name: sensor_msgs/msg/CameraInfo, gz_type_name: gz.msgs.CameraInfo, direction: GZ_TO_ROS}
+- {ros_topic_name: scan_raw, gz_topic_name: /scan_raw, ros_type_name: sensor_msgs/msg/LaserScan, gz_type_name: gz.msgs.LaserScan, direction: GZ_TO_ROS}
+- {ros_topic_name: imu_raw, gz_topic_name: /imu_raw, ros_type_name: sensor_msgs/msg/Imu, gz_type_name: gz.msgs.IMU, direction: GZ_TO_ROS}
+- {ros_topic_name: gps/fix_raw, gz_topic_name: /gps/fix_raw, ros_type_name: sensor_msgs/msg/NavSatFix, gz_type_name: gz.msgs.NavSat, direction: GZ_TO_ROS}
