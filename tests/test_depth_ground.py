@@ -220,23 +220,24 @@ def test_how_far_the_camera_sees_the_ground_depends_on_its_tilt():
 
 
 def test_the_chairs_own_pitch_is_added_to_the_cameras_tilt():
-    assert dp.tilted(CAM, 0.2).pitch_rad == pytest.approx(CAM.pitch_rad + 0.2)
-    assert dp.tilted(CAM, 0.2).height_m == CAM.height_m and dp.tilted(CAM, 0.0) == CAM
+    on_slope = dp.tilted(CAM, 0.2)
+    assert on_slope.pitch_rad == pytest.approx(CAM.pitch_rad + 0.2)
+    assert on_slope.height_m == pytest.approx(CAM.height_m / math.cos(0.2))  # over the ground below
+    assert dp.tilted(CAM, 0.0) == CAM
 
 
 @pytest.mark.parametrize("chair_pitch", [0.2, -0.2])
 def test_a_pitched_chair_on_level_ground_reads_flat_only_with_its_pitch(chair_pitch):
-    # over the crest of a ramp, or on the slope of one: the mounting tilt alone reads a step
+    # nose down where a ramp meets level ground, or nose up: the mounting tilt alone reads a step
     image = render(flat, cam=dp.tilted(CAM, chair_pitch))
     assert dp.read_ground(image, CAM).ground != dp.FLAT
-    assert dp.read_ground(image, dp.tilted(CAM, chair_pitch)).ground == dp.FLAT
+    assert dp.read_ground(image, CAM, chair_pitch_rad=chair_pitch).ground == dp.FLAT
 
 
 def test_on_the_way_down_the_stairs_the_steps_below_are_stairs_down():
     slope = math.atan(0.17 / 0.33)  # the simulation's stairs (src/mana_sim, #74)
-    on_stairs = dp.tilted(CAM, slope)
-    image = render(stairs(0.0, -0.17, run=0.33), cam=on_stairs)
-    assert dp.read_ground(image, on_stairs).ground == dp.STAIRS_DOWN
+    image = render(stairs(0.0, -0.17, run=0.33), cam=dp.tilted(CAM, slope))
+    assert dp.read_ground(image, CAM, chair_pitch_rad=slope).ground == dp.STAIRS_DOWN
 
 
 # the simulation's 3D camera (src/mana_sim, #92): 1.2 rad across, 320 x 240, 0.97 m up, 0.6 rad down
@@ -280,3 +281,63 @@ def test_a_row_with_too_few_readings_is_left_out():
     image[200:, 160] = 9.0  # one stray reading in each of the bottom rows: too few to count
     stray = dp.ground_points(image, SIM_CAM)
     assert all(np.array_equal(a, b) for a, b in zip(empty, stray, strict=True))
+
+
+RAMP_RAD = 0.1244  # the ramps of the simulation's route (mana_route.sdf)
+
+
+def on_slope(pitch, extra=None):
+    """The ground seen from a chair standing on a slope that goes on ahead (nose down positive),
+    with something else on it from extra(ahead)."""
+    return lambda a: -a * math.tan(pitch) + (extra(a) if extra else 0.0)
+
+
+@pytest.mark.parametrize("pitch", [-RAMP_RAD, RAMP_RAD], ids=["going-up", "going-down"])
+def test_on_the_routes_ramp_the_ramp_itself_is_not_a_step(pitch):
+    # with the pitch added, the nearest ground in view is about 7 cm off the level plane, which
+    # read as a curb at 0 m before the blind-zone check allowed for the slope
+    rng = np.random.default_rng(1)
+    for noise in (0.0, 0.01):
+        image = render(on_slope(pitch), cam=dp.tilted(SIM_CAM, pitch), rows=240, cols=320)
+        if noise:
+            image = image * (1.0 + rng.normal(0.0, noise, image.shape))
+        r = dp.read_ground(image, SIM_CAM, chair_pitch_rad=pitch)
+        assert r.ground in (dp.FLAT, dp.RAMP), r
+
+
+@pytest.mark.parametrize("pitch", [-RAMP_RAD, RAMP_RAD], ids=["going-up", "going-down"])
+def test_a_curb_or_a_drop_on_the_ramp_is_still_found_where_it_is(pitch):
+    cam = dp.tilted(SIM_CAM, pitch)
+    for extra, kind in ((step(1.0, 0.1), dp.CURB), (step(1.0, -0.3), dp.DROP)):
+        image = render(on_slope(pitch, extra), cam=cam, rows=240, cols=320)
+        r = dp.read_ground(image, SIM_CAM, chair_pitch_rad=pitch)
+        assert r.ground == kind and r.distance_m == pytest.approx(1.0, abs=0.1)
+
+
+def render_across(ground, cam, rows=120, cols=160, far=6.0):
+    """Like synthetic.render, but the ground may change across the path too: ground(ahead, left)
+    is the height there. Each pixel's ray is marched on its own, so it is slower; a small image."""
+    z = np.arange(0.05, far, 0.005)
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    image = np.full((rows, cols), np.inf)
+    for v in range(rows):
+        yn = (v - cam.cy) / cam.fy
+        ahead = z * (c - yn * s)
+        height = cam.height_m - z * (yn * c + s)
+        for u in range(cols):
+            left = -z * (u - cam.cx) / cam.fx
+            hit = np.nonzero(height <= ground(ahead, left))[0]
+            if hit.size:
+                image[v, u] = z[hit[0]]
+    return image
+
+
+def test_a_drop_whose_edge_runs_at_an_angle_across_the_path_is_still_a_fall():
+    # the row median keeps what covers most of a row; an edge 30 degrees across the path still
+    # gives a drop (or stairs down, which the core stops for the same way) at or before its centre
+    cam = dp.Camera.from_fov(160, 120, 1.2, 0.97, 0.6)
+    edge = math.tan(math.radians(30))
+    image = render_across(lambda a, y: np.where(a + y * edge >= 1.0, -1.0, 0.0), cam)
+    r = dp.read_ground(image, cam)
+    assert r.ground in (dp.DROP, dp.STAIRS_DOWN)
+    assert r.distance_m <= 1.15

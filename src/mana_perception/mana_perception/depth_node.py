@@ -18,8 +18,9 @@ Parameters:
   max_range_m       farthest ground read, in metres (default 3.0)
   rate_hz           most reports per second; extra frames are skipped (default 10.0)
   trust             trust given to a reading (default 0.9); UNKNOWN is always sent with trust 0
-  motion_max_age_s  a motion report older than this is not used, and the tilt is the mounting's
-                    alone (default 0.5, as the core's max_age_s)
+  motion_max_age_s  a motion report older than this (by its header stamp, as the core ages it) is
+                    not used, and the tilt is the mounting's alone (default 0.5, as max_age_s);
+                    an untrusted or NaN report clears the pitch
 """
 
 import rclpy
@@ -56,8 +57,12 @@ class DepthNode(Node):
             self.cam = dp.Camera(fx, fy, cx, cy, self.height_m, self.pitch_rad)
 
     def on_motion(self, m: MotionReport) -> None:
-        if m.trust >= 0.5 and m.pitch_rad == m.pitch_rad:  # trusted, and not NaN
-            self.chair_pitch = (float(m.pitch_rad), self.get_clock().now())
+        if m.trust < 0.5 or m.pitch_rad != m.pitch_rad:  # untrusted, or NaN: no pitch to go by
+            self.chair_pitch = None
+            return
+        stamped = m.header.stamp.sec or m.header.stamp.nanosec  # aged as the core ages it
+        at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
+        self.chair_pitch = (float(m.pitch_rad), at)
 
     def pitch_now(self, now: Time) -> float:
         """The chair's pitch if a recent motion report gave it, else 0: the mounting tilt alone."""
@@ -83,7 +88,7 @@ class DepthNode(Node):
             self.warn_once(f"depth encoding {m.encoding!r} is not supported; use 32FC1 or 16UC1")
             return
         self.last = now
-        r = dp.read_ground(image, dp.tilted(self.cam, self.pitch_now(now)), self.settings)
+        r = dp.read_ground(image, self.cam, self.settings, self.pitch_now(now))
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,

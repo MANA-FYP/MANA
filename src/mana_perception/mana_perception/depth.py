@@ -107,8 +107,13 @@ class Profile:
 def tilted(cam: Camera, chair_pitch_rad: float) -> Camera:
     """The camera as the chair's own pitch tilts it: on a ramp, or on tracks on the stairs, the
     mounting tilt alone would make level ground ahead look like a slope or a step. REP 103: a
-    chair pitched nose down (positive) tilts the camera further down."""
-    return replace(cam, pitch_rad=cam.pitch_rad + chair_pitch_rad)
+    chair pitched nose down (positive) tilts the camera further down. On a slope the camera is
+    also height_m / cos(pitch) above the ground straight under it, not height_m."""
+    return replace(
+        cam,
+        pitch_rad=cam.pitch_rad + chair_pitch_rad,
+        height_m=cam.height_m / math.cos(chair_pitch_rad),
+    )
 
 
 def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3, row_share: float = 0.25):
@@ -116,7 +121,8 @@ def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3, row_share:
 
     Each row's depth is first replaced by its median across the strip. An edge across the path
     (a riser, a curb, a drop) runs along an image row, so the median keeps it, while the noise of
-    single pixels drops by about the square root of the strip's width. Without this, noise biases
+    single pixels drops by about the square root of the strip's width (a median is a quarter
+    noisier than a mean: about 8 times over 96 pixels). Without this, noise biases
     the edges of what the camera sees: just in front of the nearest ground in view only pixels
     whose noise made them shorter land, and those sit higher, which looks like a raised edge. A
     row needs row_share of its strip to have a reading, or it is left out.
@@ -245,8 +251,14 @@ def _ramp(d, h, settings):
     return start, slope
 
 
-def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
-    """One ground reading from a profile: the nearest change in the ground ahead."""
+def classify(prof: Profile, settings: Settings = DEFAULTS, chair_pitch_rad: float = 0.0) -> Reading:
+    """One ground reading from a profile: the nearest change in the ground ahead.
+
+    chair_pitch_rad is the chair's own pitch, already in the profile's camera (tilted()). Heights
+    are then measured from a level plane, while the chair may stand on a slope that goes on ahead:
+    on the route's 7 degree ramp the nearest ground in view is about 7 cm off that plane. So the
+    blind-zone check allows for the slope the chair stands on.
+    """
     have = ~np.isnan(prof.height_m)
     d, h = prof.distance_m[have], prof.height_m[have]
     if not d.size:
@@ -269,7 +281,8 @@ def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
     # see is clearly lower or higher than the ground the chair stands on, the edge is in that
     # blind zone. Where in it is unknown, so it is reported at 0 m: the worst case.
     blind = []
-    if abs(level) > settings.blind_m:
+    slope_m = d[0] * abs(math.tan(chair_pitch_rad))  # where a slope under the chair would be
+    if abs(level) > settings.blind_m + slope_m:
         blind = [(0.0, level)]
     elif d[0] > settings.near_max_m:
         return Reading(UNKNOWN)  # level ground only far away: the near ground is missing data
@@ -347,6 +360,10 @@ def to_metres(encoding: str, rows: int, cols: int, step: int, data, big_endian=F
     return image
 
 
-def read_ground(depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS) -> Reading:
-    """The ground ahead in one depth image."""
-    return classify(profile(depth, cam, settings), settings)
+def read_ground(
+    depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS, chair_pitch_rad: float = 0.0
+) -> Reading:
+    """The ground ahead in one depth image, with the camera as mounted and the chair's own pitch
+    (REP 103: nose down is positive; 0 when unknown)."""
+    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
+    return classify(profile(depth, seen_by, settings), settings, chair_pitch_rad)
