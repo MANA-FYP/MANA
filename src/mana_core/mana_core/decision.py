@@ -168,6 +168,17 @@ class Mount:
     depth_camera_m: float = 0.0
     lidar_m: float = 0.0
     switch_s: float = 2.5  # the slides take this long: until then the longer front counts
+    # how far the chair goes after a stop is decided: at the speed it was last allowed, for
+    # reaction_s, then braking at decel_mps2. A stop distance then holds where the chair stands
+    # still, not where the stop was decided. 0: no allowance, as in the scripted world.
+    top_mps: float = 0.0  # the host's top speed, at speed limit 1.0
+    reaction_s: float = 0.0  # from a sensor frame to the wheels braking
+    decel_mps2: float = 0.0
+
+    def travel_m(self, speed_limit: float) -> float:
+        """How far the chair goes at this speed limit, from a stop decided to standing still."""
+        v = speed_limit * self.top_mps
+        return v * self.reaction_s + (v * v / (2.0 * self.decel_mps2) if self.decel_mps2 else 0.0)
 
     def ahead_of_sensor(self, source: Source, mode: Mode, switching: bool) -> float:
         """How far the front is ahead of the sensor of this source."""
@@ -218,6 +229,7 @@ class DecisionCore:
         self.limits = limits or Limits()
         self.mount = mount or Mount()
         self.mode_changed_at = -math.inf
+        self.moving_speed = 1.0  # the speed limit of the last decision that was not a stop
         self.ground: dict[Source, GroundReport] = {}
         self.obstacles: dict[Source, ObstacleReport] = {}
         self.motion: MotionReport | None = None
@@ -327,10 +339,11 @@ class DecisionCore:
         # every tick, whichever branch fires, so that each hold counts from its own hazard; while
         # a stop holds, its hazard still counts up to release_m past the limit (hysteresis)
         past = {name: lim.release_m if self._held(name) else 0.0 for name in STOPS}
+        reach = self.mount.travel_m(self.moving_speed)  # the stop distances hold at standstill
         seen = {
-            "drop": self._drop_at_edge(lim.edge_m + past["drop"]),
-            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + past["obstacle"],
-            "lone step": self._lone_step_at_edge(lim.edge_m + past["lone step"]),
+            "drop": self._drop_at_edge(lim.edge_m + reach + past["drop"]),
+            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + reach + past["obstacle"],
+            "lone step": self._lone_step_at_edge(lim.edge_m + reach + past["lone step"]),
             "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
         if any(at > now for at in (*self._seen_at.values(), self.down_seen_at, self.asked_at)):
@@ -345,6 +358,8 @@ class DecisionCore:
         self.tree.tick_once()
         if self.decision.mode != self.mode:
             self.mode_changed_at = now
+        if not self.decision.stop:
+            self.moving_speed = self.decision.speed_limit
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
         if self.asking_down:

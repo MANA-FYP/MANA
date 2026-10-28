@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from mana_sim.frames import SENSORS, quaternion
+from mana_sim.host import TOP_SPEED
 
 from mana_sim import converters as c
 
@@ -113,3 +114,16 @@ def test_the_cores_mount_is_the_models():
     axle = float(re.search(r"<link name=\"wheel_fl\">\s*<pose>([0-9.]+)", model).group(1))
     radius = float(re.search(r"<cylinder><radius>([0-9.]+)", model).group(1))
     assert float(core["front_wheels_m"]) == round(axle + radius, 2)
+
+
+def test_the_cores_travel_after_a_stop_is_the_hosts():
+    # the host's top speed and the drive plugin's braking, as config/core.yaml tells the core
+    share = Path(__file__).resolve().parents[1]
+    core = dict(
+        re.findall(r"^\s+(\w+): ([0-9.]+)$", (share / "config/core.yaml").read_text(), re.M)
+    )
+    model = (share / "models/mana_chair/model.sdf").read_text()
+    braking = re.search(r"<min_linear_acceleration>-([0-9.]+)<", model).group(1)
+    assert float(core["top_mps"]) == TOP_SPEED
+    assert float(core["decel_mps2"]) == float(braking)
+    assert float(core["reaction_s"]) > 0

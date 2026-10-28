@@ -102,6 +102,14 @@ Why 0.5 s: it is as long as a report counts (`max_age_s`), so a stop never holds
 
 **Chosen:** the reports keep giving distances from their own sensor. The core turns them into distances from the device's front, for the current mode, from a `Mount`: where the front is on wheels and on tracks, and where each sensor is, all ahead of one point of the device. `edge_m` and `obstacle_stop_m` then hold from the front. While the slides change mode (2.5 s), the longer front counts. With all values at 0, the default, the distances are used as reported, as the scripted world's already are. The simulated chair's values are in `src/mana_sim/config/core.yaml`: front 0.47 m ahead of the centre on wheels and 1.1 m on tracks, the cameras 0.35 m and the lidar 0.4 m.
 
+The device also moves on after a stop is decided: through the reaction (from a sensor frame to the wheels braking), then while it brakes. In Gazebo, with the distances from the front alone, the front stopped 0.34 to 0.35 m before the edge on wheels and 0.015 to 0.15 m on tracks. So `edge_m` and `obstacle_stop_m` (and the lone step's edge) are widened by that travel: `v × reaction_s + v² / (2 × decel_mps2)`, with `v` the speed limit of the last decision that was not a stop, times `top_mps`. The last moving speed counts, not the current one, because the speed limit is 0 while stopped, and the stop would release. A slowed device gets a shorter allowance than one at full speed. All three values are 0 by default (no allowance). The simulated chair uses the host's top speed (1.2 m/s), the drive plugin's braking (3 m/s²) and a reaction of 0.5 s. A ground report comes every 0.2 s of simulation time, the core ticks every 0.1 s and the host every 0.05 s. With 0.4 s, one of 11 drop runs on wheels stopped 0.497 m before the edge. At full speed, 0.5 s adds 0.84 m; at the slow-down speed (0.3), 0.20 m.
+
+| Gazebo drop runs (front to the edge, standing still) | Wheels | Tracks |
+|---|---|---|
+| Distances from the sensors (before) | 0.24 to 0.28 m | past the edge by 0.57 to 0.71 m |
+| From the front | 0.34 to 0.35 m | 0.015 to 0.15 m |
+| **From the front, with the travel (reaction 0.5 s), 10 runs each** | 0.53 to 0.61 m | 0.85 to 0.98 m |
+
 | Option | Who knows what | Problem |
 |---|---|---|
 | Each sensor node subtracts the front | The node knows its own mount | It does not know the mode, and the front on tracks is 0.63 m further ahead than on wheels. Every node would need the mode |

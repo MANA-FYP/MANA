@@ -9,3 +9,10 @@ mana_core:
     camera_m: 0.35  # frames.SENSORS camera_link
     depth_camera_m: 0.35  # depth_link
     lidar_m: 0.4  # lidar_link
+    # how far the chair goes after a stop is decided, so that the stop distances hold where it
+    # stands still: the host's top speed (host.TOP_SPEED), the drive plugin's deceleration
+    # (model.sdf), and the reaction in Gazebo: ground reports every 0.2 s of simulation time, the
+    # core's 0.1 s tick and the host's 0.05 s. 0.4 s left one drop run on wheels 3 mm short (#96)
+    top_mps: 1.2
+    reaction_s: 0.5
+    decel_mps2: 3.0

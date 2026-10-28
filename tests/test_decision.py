@@ -515,6 +515,46 @@ def test_with_no_mount_the_distances_are_as_reported():
     assert c.ground[DEPTH].distance_m == 0.55
 
 
+# ---- the stop distances hold where the device stands still, not where the stop is decided
+
+BRAKES = Mount(top_mps=1.2, reaction_s=0.4, decel_mps2=3.0)
+
+
+def test_the_travel_is_the_reaction_then_the_braking():
+    assert BRAKES.travel_m(1.0) == pytest.approx(1.2 * 0.4 + 1.2**2 / 6)  # 0.72 m
+    assert BRAKES.travel_m(0.3) == pytest.approx(0.36 * 0.4 + 0.36**2 / 6)  # 0.17 m
+    assert Mount(top_mps=1.2, reaction_s=0.4).travel_m(1.0) == pytest.approx(0.48)  # no braking
+    assert Mount().travel_m(1.0) == 0.0
+
+
+def braked(*steps):
+    """A core with BRAKES, ticked once per (drop distance, time) step."""
+    c = DecisionCore(mount=BRAKES)
+    for distance, at in steps:
+        c.on_ground(GroundReport(at, 0.9, CAM, Ground.FLAT))
+        c.on_ground(GroundReport(at, 0.9, DEPTH, Ground.DROP, distance))
+        c.on_motion(MotionReport(at, 0.9))
+        c.tick(at)
+    return c
+
+
+def test_at_full_speed_a_drop_the_device_cannot_stop_short_of_stops_it_now():
+    assert not core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 1.0)).decision.stop
+    assert braked((1.0, NOW)).decision.stop  # 0.5 m + 0.72 m
+
+
+def test_slowed_down_the_same_drop_does_not_stop_it_yet():
+    c = braked((1.9, NOW), (1.0, NOW + 0.1))
+    assert not c.decision.stop and c.decision.speed_limit == pytest.approx(0.3)
+    assert braked((1.9, NOW), (1.0, NOW + 0.1), (0.6, NOW + 0.2)).decision.stop  # 0.5 + 0.17 m
+
+
+def test_once_stopped_the_travel_of_the_last_speed_still_counts():
+    # standing still, the speed limit is 0: the stop must not release because the travel at 0 is 0
+    c = braked((1.0, NOW), (1.1, NOW + 0.1), (1.2, NOW + 0.2))
+    assert c.decision.stop and c.moving_speed == 1.0
+
+
 # ---- position and alert link
 
 
