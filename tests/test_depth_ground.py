@@ -314,6 +314,45 @@ def test_a_curb_or_a_drop_on_the_ramp_is_still_found_where_it_is(pitch):
         assert r.ground == kind and r.distance_m == pytest.approx(1.0, abs=0.1)
 
 
+@pytest.mark.parametrize("start", [0.0, 0.2, 0.35])
+@pytest.mark.parametrize("slope", [math.tan(RAMP_RAD), -math.tan(RAMP_RAD)], ids=["foot", "crest"])
+@pytest.mark.parametrize("height_error", [-0.015, 0.015])
+def test_a_ramp_that_starts_in_the_blind_zone_is_a_ramp_not_an_edge(start, slope, height_error):
+    # at the foot or the crest of the route's ramp the chair is still level while the nearest
+    # ground in view is already 6 to 9 cm up or down the slope: a false curb at 0 m on #100's
+    # Gazebo run. The camera is really height_error off the height depth_node is told.
+    seen_from = dp.Camera.from_fov(320, 240, 1.2, SIM_CAM.height_m + height_error, 0.6)
+    rng = np.random.default_rng(2)
+    image = render(ramp(start, slope), cam=seen_from, rows=240, cols=320)
+    for frame in (image, syn.noisy(image, rng)):
+        r = dp.read_ground(frame, SIM_CAM)
+        assert r.ground == dp.RAMP, r
+        assert r.distance_m <= max(start, dp.nearest_ground(SIM_CAM, 240)) + 0.1
+
+
+@pytest.mark.parametrize("height_error", [-0.015, 0.015])
+@pytest.mark.parametrize(
+    "at, height, slope, kind",
+    [(0.3, 0.1, 0.125, dp.CURB), (0.2, 0.08, 0.125, dp.CURB), (0.3, -0.1, -0.125, dp.CURB),
+     (0.3, -0.3, -0.125, dp.DROP)],
+    ids=["curb-then-ramp-up", "low-curb-then-ramp-up", "step-down-then-ramp-down",
+         "drop-then-ramp-down"],
+)  # fmt: skip
+def test_an_edge_in_the_blind_zone_with_a_ramp_behind_it_is_still_an_edge(
+    at, height, slope, kind, height_error
+):
+    # the slope behind the edge meets the chair's level on the near side, not in the blind zone
+    seen_from = dp.Camera.from_fov(320, 240, 1.2, SIM_CAM.height_m + height_error, 0.6)
+    edge = lambda a: np.where(a < at, 0.0, height + slope * np.clip(a - at, 0.0, None))  # noqa: E731
+    r = dp.read_ground(render(edge, cam=seen_from, rows=240, cols=320), SIM_CAM)
+    assert r.ground == kind and r.distance_m == 0.0
+
+
+def test_a_slope_too_steep_for_a_ramp_from_the_blind_zone_is_still_an_edge():
+    r = dp.read_ground(render(ramp(0.3, 0.3), cam=SIM_CAM, rows=240, cols=320), SIM_CAM)
+    assert r.ground == dp.CURB and r.distance_m == 0.0
+
+
 def render_across(ground, cam, rows=120, cols=160, far=6.0):
     """Like synthetic.render, but the ground may change across the path too: ground(ahead, left)
     is the height there. Each pixel's ray is marched on its own, so it is slower; a small image."""

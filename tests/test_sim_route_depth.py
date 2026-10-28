@@ -114,6 +114,17 @@ def test_the_ramp_is_a_ramp(real):
     assert read_at(8.0 - 0.35 - 1.2, real).ground == dp.RAMP
 
 
+# the chair still level, both axles off the slope, with the slope already under the camera
+@pytest.mark.parametrize("chair_x", [7.5, 7.6, 7.7], ids=lambda x: f"foot-{x}")
+def test_at_the_foot_of_the_ramp_the_ramp_is_not_a_curb(chair_x, real):
+    assert read_at(chair_x, real).ground == dp.RAMP
+
+
+@pytest.mark.parametrize("chair_x", [13.5, 13.6, 13.7], ids=lambda x: f"crest-{x}")
+def test_at_the_crest_of_the_ramp_the_way_down_is_not_a_curb(chair_x, real):
+    assert read_at(chair_x, real).ground == dp.RAMP
+
+
 @pytest.mark.parametrize("ahead", [1.5, 1.0, 0.6])
 def test_the_stairs_up_are_stairs_up_at_the_first_riser(ahead, real):
     r = read_at(22.0 - 0.35 - ahead, real)

@@ -178,6 +178,13 @@ Known limits:
   and a 0.1 m curb or a 0.3 m drop on it is still found at its place; the check is looser while the
   chair is pitched. With no recent or trusted `motion` report the mounting tilt is used alone. Roll
   is not corrected yet.
+- **At the foot or the crest of a ramp** the chair is still level while the nearest ground in view
+  is already 6 to 9 cm up or down the slope, so the pitch does not help there (single frames of
+  `CURB 0.00 m` on the Gazebo run of #100). It is no edge if that ground is one straight slope, no
+  steeper than 25 %, that meets the chair's level in the blind zone, within 3 cm (`ramp_join_m`,
+  for the mounting height's error): the reading is then RAMP. A curb with a ramp up behind it, or
+  a step down with a ramp down behind it, meets that level on the near side and is still an edge
+  at 0 m.
 - **A hazard on less than half of the path strip is not seen.** Each row's median keeps what
   covers most of the row, so a drop beside the path, on only a third of the strip, reads flat. The
   strip is about 0.5 m wide at 1 m; what is beside the path is the lidar's and the core's to watch.
