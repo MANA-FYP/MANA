@@ -286,10 +286,14 @@ class DecisionCore:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
     def _drop_at_edge(self) -> bool:
-        """A drop, or stairs going down, at the edge, seen by any one sensor: a fall needs no
-        second opinion. A stop needs a measured distance."""
+        """A drop at the edge, or stairs going down at the edge that only one sensor sees: a fall
+        needs no second opinion. Stairs down that two sensors confirm are left to the "stairs
+        down" and "going down" branches, which stop and ask, so a yes can still take the chair
+        down them. A stop needs a measured distance."""
+        confirmed = self._stairs_down()
         return any(
-            r.ground in (Ground.DROP, Ground.STAIRS_DOWN) and r.distance_m <= self.limits.edge_m
+            r.distance_m <= self.limits.edge_m
+            and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
 
