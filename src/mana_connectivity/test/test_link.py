@@ -131,3 +131,50 @@ def test_the_oldest_unanswered_alert_is_dropped_past_the_cap():
     box.add("two")
     box.add("three")
     assert first not in box.pending and len(box.pending) == 2 and box.dropped == 1
+
+
+def test_heartbeats_are_counted_in_periods_of_the_heartbeat():
+    beat = Heartbeat(period_s=0.5)
+    beat.beat(10.0)
+    assert [beat.missed(t) for t in (10.2, 10.8, 11.3)] == [0, 1, 2]
+
+
+def test_the_cap_is_the_largest_count_the_message_can_carry():
+    msg = Path(__file__).parents[2] / "mana_msgs/msg/LinkReport.msg"
+    assert re.search(r"^uint8 missed_heartbeats", msg.read_text(), re.M)
+    assert MAX_MISSED == 2**8 - 1
+
+
+def test_a_radio_that_missed_missed_to_leave_beats_cannot_carry_alerts():
+    s = LinkSelector(missed_to_leave=2)
+    assert s.update(2, 1, 0.0) == Link.BLUETOOTH
+    assert LinkSelector(missed_to_leave=2).update(2, 2, 0.0) is None
+
+
+def test_wifi_steady_for_exactly_back_s_takes_the_alerts_back():
+    s = LinkSelector(back_s=5.0)
+    assert s.update(5, 0, 0.0) == Link.BLUETOOTH
+    assert s.update(0, 0, 1.0) == Link.BLUETOOTH  # steady from here
+    assert s.update(0, 0, 5.5) == Link.BLUETOOTH
+    assert s.update(0, 0, 6.0) == Link.WIFI
+
+
+def test_alert_ids_count_up_from_one_after_the_boot_id():
+    box = Outbox(boot="b")
+    assert [box.add("a"), box.add("b"), box.add("c")] == ["b-1", "b-2", "b-3"]
+    assert re.fullmatch(r"[0-9a-f]{6}", Outbox().boot)  # a random boot id when none is given
+
+
+def test_an_alert_is_not_resent_over_the_same_link_before_resend_s():
+    box = Outbox(resend_s=1.0, boot="b")
+    box.add("Drop ahead, stopping")
+    assert [i for i, _ in box.due(Link.WIFI, 10.0)] == ["b-1"]  # not 0 s, which equals Link.WIFI
+    assert box.due(Link.WIFI, 10.5) == []
+    assert [i for i, _ in box.due(Link.WIFI, 11.0)] == ["b-1"]
+
+
+def test_every_alert_dropped_past_the_cap_is_counted():
+    box = Outbox(max_pending=2, boot="b")
+    for text in "abcd":
+        box.add(text)
+    assert (list(box.pending), box.dropped) == (["b-3", "b-4"], 2)
