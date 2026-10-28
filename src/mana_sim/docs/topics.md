@@ -34,7 +34,7 @@ Every node that reads these must run on simulation time (`-p use_sim_time:=true`
 |---|---|---|---|---|
 | `odom` | `nav_msgs/Odometry` | 20 Hz | `odom` > `base_link` | the ground truth, with the frame ids of REP 105 |
 | `motion` | `mana_msgs/MotionReport` | 100 Hz | `base_link` | pitch and roll from the IMU orientation; `wheel_slip` when the wheels turn at a different speed than the chair moves (only judged in wheels mode) |
-| `position` | `mana_msgs/PositionReport` | 10 Hz | `gps_origin` | made by `position_node` (`mana_position`) from `gps/fix`: metres east and north of the first fix, with its GPS to lidar map switching; the error is 1.5 m (the simulated GPS gives no covariance), or the covariance a GPS noise fault sets |
+| `position` | `mana_msgs/PositionReport` | 10 Hz | `gps_origin` | made by `position_node` (`mana_position`) from `gps/fix`: metres east and north of the first fix. The lidar map has no input in the simulation, so the only switch is GPS to odometry, and with no `odometry/filtered` nothing is published until the GPS is back; the error is 1.5 m (the simulated GPS gives no covariance), or the covariance a GPS noise fault sets |
 | `obstacle` | `mana_msgs/ObstacleReport` | 10 Hz, only when something is there | `lidar_link` | the nearest lidar echo within 0.35 rad of straight ahead and 4 m, source LIDAR |
 | `link` | `mana_msgs/LinkReport` | 20 Hz (both radios, 10 Hz each) | none | made by `link_node` (`mana_connectivity`) from the heartbeats; a Wi-Fi fade loses the Wi-Fi heartbeats |
 | `link/wifi/heartbeat`, `link/bluetooth/heartbeat` | `std_msgs/Header` | 1 Hz | none | made by `fault_node`; the Wi-Fi ones stop during a Wi-Fi fade |
