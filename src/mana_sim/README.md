@@ -23,7 +23,10 @@ The launch file sets the model path, starts Gazebo, bridges the chair's topics t
 `position` and `obstacle` reports), `fault_node` (the faults, and the `link` report) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
 stub is off; `stub:=true` starts it as well. `sensors:=false` leaves out the cameras and the lidar
-(for a machine with no GPU).
+(for a machine with no GPU). `depth_node` is told where the 3D camera is mounted (`frames.depth_mount()`,
+tilted 0.6 rad), because it reads the ground against that height. `detector:=true` also starts
+`detector_node` on the RGB camera (it needs `pip install ultralytics`; `weights:=yoloe-26n-mana.pt`
+picks the open-vocabulary model); with `sensors:=false` there is no camera image for it.
 
 Drive the chair by hand (the request must repeat: the chair stops 0.5 s after the last one):
 
