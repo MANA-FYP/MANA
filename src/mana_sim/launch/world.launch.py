@@ -2,6 +2,7 @@
 
     ros2 launch mana_sim world.launch.py              # with the Gazebo window
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
+    ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2 and starts
 the host node. The core node is started separately, on the same clock:
@@ -21,6 +22,7 @@ from launch.actions import (
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 CHAIR = "/model/mana_chair"
 BRIDGE = [
@@ -43,6 +45,11 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("headless", default_value="false", description="no window"),
+            DeclareLaunchArgument(
+                "driver",
+                default_value="false",
+                description="follow cmd_vel (forward and turn) from a driver, capped by MANA",
+            ),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 models + os.pathsep + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
@@ -90,7 +97,14 @@ def generate_launch_description():
                 package="mana_sim",
                 executable="host_node",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[
+                    {
+                        "use_sim_time": True,
+                        "follow_driver": ParameterValue(
+                            LaunchConfiguration("driver"), value_type=bool
+                        ),
+                    }
+                ],
             ),
         ]
     )
