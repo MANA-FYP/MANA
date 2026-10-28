@@ -9,7 +9,8 @@ from mana_perception.depth_node import DepthNode
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport
+from mana_msgs.msg import GroundReport, MotionReport
+from mana_perception import depth as dp
 from mana_perception import synthetic as syn
 
 CAM = syn.CAMERA
@@ -70,3 +71,40 @@ def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros, stamped):
         assert (r.header.stamp.sec, r.header.stamp.nanosec) == (1_700_000_000, 5)
     else:  # a camera that leaves the stamp at 0 still gives reports the core will not drop
         assert r.header.stamp.sec > 0
+
+
+@pytest.mark.parametrize("with_motion", [True, False], ids=["pitch-known", "no-motion"])
+def test_the_chairs_pitch_from_motion_keeps_level_ground_level(ros, with_motion):
+    """The chair is pitched 0.2 rad nose down, over the crest of a ramp, on level ground."""
+    node, probe = DepthNode(), rclpy.create_node("probe")
+    reports = []
+    probe.create_subscription(GroundReport, "ground", reports.append, 10)
+    info_pub = probe.create_publisher(CameraInfo, "depth/camera_info", 10)
+    image_pub = probe.create_publisher(Image, "depth/image", 10)
+    motion_pub = probe.create_publisher(MotionReport, "motion", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    executor.add_node(probe)
+
+    info = CameraInfo(width=syn.COLS, height=syn.ROWS)
+    info.k = [CAM.fx, 0.0, CAM.cx, 0.0, CAM.fy, CAM.cy, 0.0, 0.0, 1.0]
+    metres = syn.render(syn.flat, dp.tilted(CAM, 0.2)).astype("<f4")
+    image = Image(height=syn.ROWS, width=syn.COLS, encoding="32FC1", is_bigendian=0)
+    image.step = syn.COLS * 4
+    image.data = metres.tobytes()
+
+    end = time.monotonic() + 4.0
+    while time.monotonic() < end and len(reports) < 10:
+        if with_motion:
+            motion_pub.publish(MotionReport(trust=0.9, pitch_rad=0.2))
+        info_pub.publish(info)
+        image_pub.publish(image)
+        executor.spin_once(timeout_sec=0.05)
+    for n in (node, probe):
+        n.destroy_node()
+
+    assert reports, "no ground report was published"
+    if with_motion:
+        assert reports[-1].ground == GroundReport.FLAT
+    else:  # the mounting tilt alone reads the level ground ahead as a step
+        assert all(r.ground != GroundReport.FLAT for r in reports)

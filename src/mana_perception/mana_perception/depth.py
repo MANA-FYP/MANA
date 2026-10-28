@@ -26,7 +26,7 @@ within about 2 degrees (2 degrees of error also looks like a slope of 3.5 %).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -102,6 +102,13 @@ class Profile:
     visible_until_m: float  # how far ahead the camera can see the ground at all
     nearest_m: float = 0.0  # the nearest flat ground in view: closer is the camera's blind zone
     far_points: int = 0  # valid points beyond max_range_m: the image is not empty
+
+
+def tilted(cam: Camera, chair_pitch_rad: float) -> Camera:
+    """The camera as the chair's own pitch tilts it: on a ramp, or on tracks on the stairs, the
+    mounting tilt alone would make level ground ahead look like a slope or a step. REP 103: a
+    chair pitched nose down (positive) tilts the camera further down."""
+    return replace(cam, pitch_rad=cam.pitch_rad + chair_pitch_rad)
 
 
 def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3):

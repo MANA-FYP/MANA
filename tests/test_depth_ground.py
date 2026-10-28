@@ -217,3 +217,23 @@ def test_how_far_the_camera_sees_the_ground_depends_on_its_tilt():
     assert dp.visible_until(level, ROWS, 3.0) == 3.0  # the top row looks above the horizon
     steep = dp.Camera.from_fov(COLS, ROWS, math.radians(87.0), height_m=1.0, pitch_rad=1.2)
     assert dp.visible_until(steep, ROWS, 3.0) < 3.0
+
+
+def test_the_chairs_own_pitch_is_added_to_the_cameras_tilt():
+    assert dp.tilted(CAM, 0.2).pitch_rad == pytest.approx(CAM.pitch_rad + 0.2)
+    assert dp.tilted(CAM, 0.2).height_m == CAM.height_m and dp.tilted(CAM, 0.0) == CAM
+
+
+@pytest.mark.parametrize("chair_pitch", [0.2, -0.2])
+def test_a_pitched_chair_on_level_ground_reads_flat_only_with_its_pitch(chair_pitch):
+    # over the crest of a ramp, or on the slope of one: the mounting tilt alone reads a step
+    image = render(flat, cam=dp.tilted(CAM, chair_pitch))
+    assert dp.read_ground(image, CAM).ground != dp.FLAT
+    assert dp.read_ground(image, dp.tilted(CAM, chair_pitch)).ground == dp.FLAT
+
+
+def test_on_the_way_down_the_stairs_the_steps_below_are_stairs_down():
+    slope = math.atan(0.17 / 0.33)  # the simulation's stairs (src/mana_sim, #74)
+    on_stairs = dp.tilted(CAM, slope)
+    image = render(stairs(0.0, -0.17, run=0.33), cam=on_stairs)
+    assert dp.read_ground(image, on_stairs).ground == dp.STAIRS_DOWN
