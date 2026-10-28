@@ -39,7 +39,7 @@ ros2 topic pub -r 10 /drive_request mana_msgs/msg/DriveRequest \
 ```
 
 To drive it with the decision core instead, start
-`ros2 run mana_core core_node --ros-args -p use_sim_time:=true` in another terminal. The host node runs
+`ros2 run mana_core core_node --ros-args --params-file $(ros2 pkg prefix mana_sim)/share/mana_sim/config/core.yaml` in another terminal. `config/core.yaml` sets the simulation clock and where the chair's front and sensors are, so that the core's stop distances count from the front of the chair: 0.47 m ahead of its centre on wheels, 1.1 m on tracks (#96). The host node runs
 on the simulation clock (`use_sim_time`), so the 2.5 s slide switch and the 0.5 s watchdog count
 simulation seconds, also when Gazebo runs slower than real time. The core must use the same clock.
 

@@ -18,6 +18,7 @@ from mana_core.decision import (
     LinkReport,
     Mode,
     MotionReport,
+    Mount,
     ObstacleReport,
     PositionReport,
     PositionSource,
@@ -457,6 +458,61 @@ def test_a_report_with_the_same_stamp_replaces_the_one_held_even_untrusted():
     c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
     c.on_ground(GroundReport(NOW, 0.2, DEPTH, Ground.FLAT, 3.0))  # the newest frame counts
     assert c.ground[DEPTH].trust == 0.2
+
+
+# ---- distances from the device's front, not from each sensor (#96)
+
+CHAIR = Mount(
+    front_wheels_m=0.45, front_tracks_m=1.1, camera_m=0.35, depth_camera_m=0.35, lidar_m=0.4
+)
+
+
+def mounted(*reports, mode=Mode.WHEELS, at=NOW):
+    c = DecisionCore(mount=CHAIR)
+    c.mode = mode
+    for r in reports:
+        (c.on_obstacle if isinstance(r, ObstacleReport) else c.on_ground)(r)
+    c.on_motion(level())
+    c.tick(at)
+    return c
+
+
+def test_a_drop_past_the_edge_from_the_camera_but_within_it_from_the_front_stops():
+    # on wheels the front is 0.10 m ahead of the 3D camera
+    reports = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.55))
+    assert not core(*reports).decision.stop  # measured from the sensor: 0.55 m
+    c = mounted(*reports)
+    assert c.decision.stop and c.ground[DEPTH].distance_m == pytest.approx(0.45)
+
+
+def test_on_tracks_the_front_is_further_ahead():
+    c = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 1.2), mode=Mode.TRACKS)
+    assert c.ground[DEPTH].distance_m == pytest.approx(0.45) and c.decision.stop
+
+
+def test_while_the_slides_move_the_longer_front_counts():
+    c = mounted(*stairs(1.5))  # changes to tracks on this tick
+    assert c.decision.mode == Mode.TRACKS
+    c.mode = Mode.WHEELS  # as if it had just changed back
+    c.mode_changed_at = NOW
+    c.on_ground(GroundReport(NOW + 0.1, 0.9, DEPTH, Ground.DROP, 1.2))
+    assert c.ground[DEPTH].distance_m == pytest.approx(0.45)  # the tracks' front, 0.75 m ahead
+
+
+def test_an_obstacle_from_the_lidar_is_measured_from_the_front_too():
+    c = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(0.85))
+    assert c.obstacles[LIDAR].distance_m == pytest.approx(0.80) and c.decision.stop
+
+
+def test_an_unknown_distance_stays_unknown_and_a_hazard_under_the_front_is_at_0_m():
+    c = mounted(ground(CAM, Ground.STAIRS_UP), ground(DEPTH, Ground.DROP, 0.05))
+    assert math.isnan(c.ground[CAM].distance_m)
+    assert c.ground[DEPTH].distance_m == 0.0
+
+
+def test_with_no_mount_the_distances_are_as_reported():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.55))
+    assert c.ground[DEPTH].distance_m == 0.55
 
 
 # ---- position and alert link

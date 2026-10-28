@@ -1,0 +1,11 @@
+# core_node's parameters for the simulated chair: where its front and its sensors are, in metres
+# ahead of the chair's centre (base_link), so the stop distances hold from the front (#96).
+#   ros2 run mana_core core_node --ros-args --params-file $(ros2 pkg prefix mana_sim)/share/mana_sim/config/core.yaml
+mana_core:
+  ros__parameters:
+    use_sim_time: true
+    front_wheels_m: 0.47  # the front wheels' edge: axle 0.32 m ahead, radius 0.15 m
+    front_tracks_m: 1.1  # the tracks' front end: 2.2 m long, centred on the chassis
+    camera_m: 0.35  # frames.SENSORS camera_link
+    depth_camera_m: 0.35  # depth_link
+    lidar_m: 0.4  # lidar_link

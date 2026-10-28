@@ -95,3 +95,21 @@ def test_the_frames_in_the_code_are_the_ones_in_the_model():
         sensor = re.search(rf"<pose>([^<]*)</pose>\s*<gz_frame_id>{frame}</gz_frame_id>", sdf)
         assert sensor, f"{frame} is not in the model"
         assert [float(v) for v in sensor.group(1).split()] == pytest.approx(pose)
+
+
+def test_the_cores_mount_is_the_models():
+    # config/core.yaml tells the core where the chair's sensors and front are (#96)
+    share = Path(__file__).resolve().parents[1]
+    core = dict(
+        re.findall(r"^\s+(\w+_m): ([0-9.]+)", (share / "config/core.yaml").read_text(), re.M)
+    )
+    for name, frame in (
+        ("camera_m", "camera_link"),
+        ("depth_camera_m", "depth_link"),
+        ("lidar_m", "lidar_link"),
+    ):
+        assert float(core[name]) == SENSORS[frame][0]
+    model = (share / "models/mana_chair/model.sdf").read_text()
+    axle = float(re.search(r"<link name=\"wheel_fl\">\s*<pose>([0-9.]+)", model).group(1))
+    radius = float(re.search(r"<cylinder><radius>([0-9.]+)", model).group(1))
+    assert float(core["front_wheels_m"]) == round(axle + radius, 2)
