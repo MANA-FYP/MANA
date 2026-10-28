@@ -340,6 +340,20 @@ SCENARIOS = {
             ),
         ),
         Scenario(
+            "dark_curb",
+            "Curb in the dark (failure case)",
+            "Only the 3D camera sees the 12 cm curb. MANA stops before it rather than mount it on "
+            "wheels; the user then chooses tracks to cross.",
+            Route(
+                9.0,
+                (Stretch(5.0, 5.3, Ground.CURB, pitch_rad=0.3, height_m=0.12),),
+                faults=(Fault("camera", trust=0.2),),
+            ),
+            30.0,
+            says=(Say(12.0, Command.TRACKS),),
+            marks=(tells(STEP_STOP), waits_before(5.0, Command.TRACKS, "curb"), reaches_end(9.0)),
+        ),
+        Scenario(
             "imu_lost",
             "IMU lost on the stairs (failure case)",
             "The IMU stops reporting during the climb. Without the tilt MANA cannot confirm "
