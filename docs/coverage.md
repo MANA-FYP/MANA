@@ -1,6 +1,6 @@
 # Hazard coverage
 
-For every hazard a user can meet: which sensor sees it, which rule of the decision core acts on it, and which test shows it. **Covered** means a rule, a scripted scenario and unit tests; **partly** means some of these; **not covered** means no rule acts on it yet. "Gazebo" is the simulation test, which waits for the simulated sensors (#92) and the scenario runner (#16).
+For every hazard a user can meet: which sensor sees it, which rule of the decision core acts on it, and which test shows it. **Covered** means a rule, a scripted scenario and unit tests; **partly** means some of these; **not covered** means no rule acts on it yet. "Gazebo" is the simulation test, which waits for the scenario runner (#16); the simulated sensors are in (#92, #94, #112).
 
 Rows that an open pull request covers say so: they become **covered** when it merges. The rule names are the branches of the behaviour tree in `mana_core/decision.py`, highest priority first: user stop, drop, obstacle, lone step, stairs down, going down, manual, step, slip, hold tracks, no ground, slow, no alert link, no position.
 
@@ -16,9 +16,9 @@ Rows that an open pull request covers say so: they become **covered** when it me
 | Curb, only one sensor | 3D camera | as for stairs above | `dark_curb` | `test_a_step_one_sensor_measures_at_the_edge_stops_the_chair` | #16 | covered |
 | Stairs down | camera and 3D camera | stairs down: stop and ask; going down after a yes | `stairs_down` | the stairs-down tests in `tests/test_decision.py` | #52 | covered |
 | Stairs down, only one sensor | 3D camera (StairNet has no stairs down) | drop: stop at `edge_m` | none | `test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop` | #52 | partly: no scenario |
-| Drop, platform edge | 3D camera (0.3 m of missing ground) | drop: stop at `edge_m`, one sensor is enough | `drop`, `manual_drop` | `test_drop_stops_at_the_edge_and_slows_before_it` | #16 | covered; one noisy reading can release the stop for a tick (#97); distance from the sensor, not the front (#96) |
+| Drop, platform edge | 3D camera (0.3 m of missing ground) | drop: stop at `edge_m`, one sensor is enough | `drop`, `manual_drop` | `test_drop_stops_at_the_edge_and_slows_before_it` | #16 | covered; the stop holds through a noisy reading (#97); distance from the sensor, not the front of the device: #96 |
 | Pothole, small drop | 3D camera, if at least 0.3 m of ground is missing along the path | drop | none | `tests/test_depth_ground.py` (the depth reader) | none | partly: less missing ground than `hole_m` (0.3 m) is not a drop to the depth reader |
-| Obstacle ahead (person, furniture) | lidar, detector, 3D camera | obstacle: stop at 0.8 m, slow from 2 m | `dark` | `test_obstacle_stops_close_and_slows_further_out` | #16 | covered; release on one reading (#97) |
+| Obstacle ahead (person, furniture) | lidar, detector, 3D camera | obstacle: stop at 0.8 m, slow from 2 m | `dark` | `test_obstacle_stops_close_and_slows_further_out` | #16 | covered; the stop holds through a noisy reading (#97) |
 | Moving people, crowds | detector (nearest only), lidar | obstacle, on the nearest only | none: scripted obstacles stand still | none | none | not covered: no motion or prediction |
 | Glass door | detector (`glass door` in YOLOE's names) | obstacle | none | none | none | partly: a detector class only. Real lidars can see through glass; Gazebo's cannot show that |
 | Narrow doorway | lidar, by bearing | none | none | none | none | not covered: nothing checks the width ahead against the device |
@@ -26,7 +26,7 @@ Rows that an open pull request covers say so: they become **covered** when it me
 | Low obstacle, under the lidar plane | 3D camera (a rise over 0.25 m is "an object, not a step") | none | none | `tests/test_depth_ground.py` | none | not covered: the 3D camera sees it, but `depth_node` sends only ground reports, never an obstacle |
 | Vehicle | detector (car, bus, truck, motorcycle) | obstacle | none | `tests/test_detection.py` | none | partly: as any obstacle |
 | Siren or horn | microphone (#47) | none yet | none | none | none | not covered: #47 is open |
-| Wet or slippery floor | wheel encoders against ground speed (slip) | slip: tracks | none | `test_wheel_slip_changes_to_tracks` | #15 | partly: no scenario; in #92's sensors node a turn on the spot reads as slip (its review) |
+| Wet or slippery floor | wheel encoders against ground speed (slip) | slip: tracks | none | `test_wheel_slip_changes_to_tracks` | #15 | partly: no scenario. The simulation reads slip from the wheels against the ground speed, and in a turn against the gyro (#112) |
 | Gravel, uneven ground | IMU (tilt) | hold tracks, only on a steady tilt | none | none | none | not covered: nothing reads roughness |
 | Picture of stairs (a false step) | camera alone | two-sensor rule: only slow | `picture` | `test_one_camera_is_not_enough_to_change_mode` | none | covered |
 
@@ -36,9 +36,9 @@ Rows that an open pull request covers say so: they become **covered** when it me
 |---|---|---|---|---|---|---|
 | Darkness | camera trust × the light factor (#73) | untrusted reports are ignored | `dark` | `test_dark_corridor_untrusted_camera_is_ignored_but_depth_still_stops` | #15 | covered, also for steps in the dark |
 | IMU lost on the stairs | IMU | hold tracks until the tilt is known | `imu_lost` | `test_stays_on_tracks_when_the_imu_is_lost` | #15 | covered |
-| A stale or doubtful report | any | reports older than 0.5 s or under trust 0.5 are ignored | lost and doubtful reports in the noisy runs (#102) | `test_stale_reports_are_ignored_and_the_core_slows_down`, `test_untrusted_obstacle_is_ignored` | none | covered |
-| GPS lost indoors | GPS, lidar localisation (#43) | no position: slow only when neither GPS nor the lidar map has one | `entry` (#102) | `test_a_lost_position_slows_down`, `test_any_one_fresh_position_source_is_enough`; `mana_position` 23 tests | #42 | covered by unit tests; scenario with #102 |
-| Wi-Fi lost | Wi-Fi and Bluetooth heartbeats | no alert link: slow when neither can carry an alert | `wifi_drop` (#102) | `test_no_alert_link_slows_down`, `test_bluetooth_carries_the_alerts_when_wifi_is_gone`; `mana_connectivity` 16 tests | #44 | covered by unit tests; scenario with #102 |
+| A stale or doubtful report | any | reports older than 0.5 s or under trust 0.5 are ignored | lost and doubtful reports in the noisy runs (`python3 -m mana_core.repeat`) | `test_stale_reports_are_ignored_and_the_core_slows_down`, `test_untrusted_obstacle_is_ignored` | none | covered |
+| GPS lost indoors | GPS, lidar localisation (#43) | no position: slow only when neither GPS nor the lidar map has one | `entry` | `test_a_lost_position_slows_down`, `test_any_one_fresh_position_source_is_enough`; `mana_position` 26 tests | #42 | covered; `entry` does not lose the lidar map, so it does not test the rule itself (`docs/results.md`) |
+| Wi-Fi lost | Wi-Fi and Bluetooth heartbeats | no alert link: slow when neither can carry an alert | `wifi_drop` | `test_no_alert_link_slows_down`, `test_bluetooth_carries_the_alerts_when_wifi_is_gone`; `mana_connectivity` 25 tests | #44 | covered |
 | The user says stop | voice, touch, button | user stop, at any trust, until a trusted GO | `stop` | `test_spoken_stop_wins_over_everything_until_go`, `test_stop_is_obeyed_even_at_low_trust` | none | covered |
 | Manual mode at a hazard | user commands | manual sits below drop, obstacle and stairs down | `manual_drop` | `test_manual_mode_follows_the_user_but_safety_still_stops` | none | covered |
 | A part of MANA dies | node, topic, bridge | the host stops after 0.5 s without a drive request | none | `mana_sim` host tests | #85 | partly: only the host's watchdog is tested |
@@ -66,6 +66,16 @@ FR-4 is named in #48 only, without its text; the report's own list should be che
 
 ## Gaps, and where each is tracked
 
-- A stop released by one noisy reading: **#97**.
+- A stop released by one noisy reading: fixed (#97).
 - Stop distances from the sensor, not the front of the device: **#96**.
-- No issue yet, to decide with the team: moving people (prediction), narrow doorways (width), obstacles at head height and low obstacles (height), uneven ground. For the report, each is either a new issue or a stated limit.
+- How far the chair travels before it stands still, against the stop distances: measured (#84, `docs/results.md`). A real chair's deceleration is still to be measured (#86).
+
+### Limits of this version
+
+These have no rule, and they are stated as limits in the report rather than tracked as issues for this version:
+- **Moving people and crowds:** the core acts on the nearest obstacle as it is now, with no prediction of where it is going.
+- **Narrow doorways:** nothing compares the width ahead with the device's width.
+- **Obstacles at head height** (a table edge, a branch) **and low obstacles under the lidar plane:** nothing compares an obstacle's height with the device or the user. The 3D camera sees a low object but `depth_node` reports only the ground.
+- **Gravel and uneven ground:** nothing reads how rough the ground is. Only a steady tilt is held on tracks.
+- **Small potholes:** less missing ground than `hole_m` (0.3 m) is not a drop to the depth reader.
+- **Sirens and horns:** no microphone input yet (#47).
