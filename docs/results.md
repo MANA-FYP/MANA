@@ -73,6 +73,51 @@ python3 -m mana_core.repeat --runs 200 --seed 1 --no-false-reports
 - The position module switches at once here, where the real node takes up to 2 s (#59). The alert link is up or down, without the heartbeat counting of the link node (#62).
 - The scripted world measures distances from the front of the device. The simulated sensors measure from where they are mounted, which matters on tracks: **#96**.
 
+## Reaction time and stopping distance (#84)
+
+How far the chair travels between a hazard appearing and the chair standing still, and whether the stop distances leave room for it.
+
+### From a depth frame to the wheels at 0
+
+`tools/measure_latency.py` runs the real `depth_node`, `core_node` and `host_node` (ROS 2 Jazzy in WSL, on the AMD Ryzen 7 7730U laptop, 8 cores). It sends them 30 depth frames a second. Each trial is level ground, then, at a random moment, a drop in the blind zone, which stops the chair from one sensor. The times are taken by the probe's own clock when each message arrives. Gazebo is not needed, because the host's wheel command is where a chair starts to brake.
+
+```bash
+python3 tools/measure_latency.py --trials 50   # in a built and sourced workspace
+```
+
+| Stage, 50 trials | Median | 95th percentile | Most |
+|---|---|---|---|
+| frame to DROP report (`depth_node`) | 45 ms | 105 ms | 119 ms |
+| DROP report to stop request (`core_node`) | 16 ms | 77 ms | 103 ms |
+| stop request to wheels at 0 (`host_node`) | 29 ms | 30 ms | 31 ms |
+| **frame to wheels at 0** | **116 ms** | **150 ms** | **184 ms** |
+
+Most of the time is waiting, not computing. `depth_node` reads at most 10 frames a second, so a frame can wait up to 100 ms for its turn. `core_node` ticks at 10 Hz, so a report can wait up to 100 ms. `host_node` ticks at 20 Hz, so up to 50 ms. The host's share is nearly fixed within one launch (29 to 31 ms here, 45 ms in a 5-trial launch before), because the two timers keep their phase. A later launch can give anything up to 50 ms.
+
+Not in these numbers:
+- the camera's own exposure and transfer before a frame is published;
+- an obstacle seen by the detector. The detector takes 73 ms a frame (median, 87 ms at the 90th percentile, YOLOE at 480: `src/mana_perception/README.md`), instead of the time `depth_node` takes to read a frame. That path is not measured end to end;
+- a computer other than this laptop (we have no other target yet).
+
+### Where the chair stands still
+
+`tools/stopping_distance.py` drives the chair at top speed (1.2 m/s). It slows to 0.36 m/s once the hazard is within 2 m and stops it at the stop distance. Each request reaches the wheels after the reaction time above, and the chair then brakes at a constant deceleration. A real chair's deceleration is not measured yet. The simulated chair allows 3 m/s², so the table runs from 0.5 to 3.
+
+Metres left to the hazard at standstill, with a reaction of 0.2 s (the most measured, 184 ms, rounded up). In brackets is the speed when the hazard crossed the stop distance:
+
+| Case | 0.5 m/s² | 1.0 m/s² | 1.5 m/s² | 2.0 m/s² | 3.0 m/s² |
+|---|---|---|---|---|---|
+| drop: seen at 2 m, stop at 0.5 m | 0.29 (0.42 m/s) | 0.36 (0.36 m/s) | 0.38 (0.36 m/s) | 0.40 (0.36 m/s) | 0.41 (0.36 m/s) |
+| obstacle: seen at 2 m, stop at 0.8 m | 0.32 (0.69 m/s) | 0.66 (0.36 m/s) | 0.68 (0.36 m/s) | 0.70 (0.36 m/s) | 0.71 (0.36 m/s) |
+| late: an obstacle appears 1.2 m ahead | **−0.48** (1.13 m/s) | 0.24 (1.06 m/s) | 0.48 (0.98 m/s) | 0.60 (0.89 m/s) | 0.69 (0.69 m/s) |
+
+With 0.3 s, which allows for the detector or a slower computer, the late obstacle has 0.12 m left at 1.0 m/s², and the drop 0.20 m at 0.5 m/s².
+
+What this shows:
+- **A hazard seen 2 m ahead is stopped for at every deceleration in the table.** With 1.0 m/s² or more, the chair has slowed to 0.36 m/s before the stop distance, and it stands 0.33 m or more from a drop and 0.63 m or more from an obstacle, even with a 0.3 s reaction. At 0.5 m/s² it is still going faster when it crosses the stop distance and stands only 0.20 to 0.32 m away.
+- **An obstacle that appears close is the case that decides.** A chair at top speed reaches a person who steps out 1.2 m ahead if it brakes at 0.5 m/s². At 1.0 m/s² it stops only 0.12 to 0.24 m short of them. From 1.5 m/s² it keeps 0.36 m or more.
+- **For #86:** at 1.5 m/s² or more, the chair keeps 0.35 m or more from every hazard in the table, with either reaction time. Below that, either the top speed should come down, or the stop distance for obstacles should grow, and the tool shows what either change gives. The real chair's deceleration must be measured first. That number is the input this check is waiting for.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
