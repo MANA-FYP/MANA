@@ -84,6 +84,13 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": True}],
             ),
+            # the sensor faults sit between the bridge and the others (see docs/faults.md)
+            Node(
+                package="mana_sim",
+                executable="fault_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
             Node(
                 package="mana_sim",
                 executable="sensors_node",

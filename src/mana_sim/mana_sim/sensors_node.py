@@ -3,8 +3,8 @@
 - Transforms: map > odom (identity), odom > base_link (from the ground truth of the simulation) and
   base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry).
 - `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode).
-- `position` from the GPS fix, `link` (a healthy Wi-Fi link, until a fault says otherwise) and
-  `obstacle` from the nearest echo of the lidar in front of the chair.
+- `position` from the GPS fix and `obstacle` from the nearest echo of the lidar in front of the
+  chair. (`link` is made by fault_node, which can fade it.)
 """
 
 import math
@@ -16,7 +16,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu, JointState, LaserScan, NavSatFix
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
-from mana_msgs.msg import DriveRequest, LinkReport, MotionReport, ObstacleReport, PositionReport
+from mana_msgs.msg import DriveRequest, MotionReport, ObstacleReport, PositionReport
 from mana_sim import converters as conv
 from mana_sim.frames import BASE, MAP, ODOM, SENSORS, quaternion
 from mana_sim.host import WHEELS
@@ -34,7 +34,6 @@ class SensorsNode(Node):
         self.cone_rad = p("obstacle_cone_rad", 0.35).value
         self.obstacle_max_m = p("obstacle_max_m", 4.0).value
         self.obstacle_trust = p("obstacle_trust", 0.9).value
-        self.link_period_s = 1.0 / p("link_rate_hz", 2.0).value
 
         self.mode = WHEELS
         self.wheel_rad_s: list[float] = []
@@ -47,7 +46,6 @@ class SensorsNode(Node):
         self.odom = self.create_publisher(Odometry, "odom", 10)
         self.motion = self.create_publisher(MotionReport, "motion", 10)
         self.position = self.create_publisher(PositionReport, "position", 10)
-        self.link = self.create_publisher(LinkReport, "link", 10)
         self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
 
         self.create_subscription(Odometry, GROUND_TRUTH, self.on_ground_truth, 10)
@@ -56,7 +54,6 @@ class SensorsNode(Node):
         self.create_subscription(NavSatFix, "gps/fix", self.on_gps, 10)
         self.create_subscription(LaserScan, "scan", self.on_scan, 10)
         self.create_subscription(DriveRequest, "drive_request", self.on_request, 10)
-        self.create_timer(self.link_period_s, self.send_link)
 
     def send_static(self) -> None:
         now = self.get_clock().now().to_msg()
@@ -130,13 +127,6 @@ class SensorsNode(Node):
         r.trust, r.source = self.obstacle_trust, ObstacleReport.LIDAR
         r.distance_m, r.bearing_rad = found
         self.obstacle.publish(r)
-
-    def send_link(self) -> None:
-        r = LinkReport()
-        r.header.stamp = self.get_clock().now().to_msg()
-        r.trust, r.link, r.connected = 1.0, LinkReport.WIFI, True
-        r.rssi_dbm, r.missed_heartbeats = -50.0, 0
-        self.link.publish(r)
 
 
 def main() -> None:
