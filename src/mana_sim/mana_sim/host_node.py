@@ -12,7 +12,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float64
 
 from mana_msgs.msg import DriveRequest
-from mana_sim.host import Host, HostCommand
+from mana_sim.host import TRACKS, WATCHDOG_S, WHEELS, Host, HostCommand
 
 CHAIR = "/model/mana_chair"
 
@@ -20,9 +20,9 @@ CHAIR = "/model/mana_chair"
 class HostNode(Node):
     def __init__(self):
         super().__init__("mana_host")
-        self.watchdog_s = self.declare_parameter("watchdog_s", 0.5).value
+        self.watchdog_s = self.declare_parameter("watchdog_s", WATCHDOG_S).value
         self.host = Host()
-        self.request: DriveRequest | None = None
+        self.request: tuple[int, bool, float] | None = None
         self.received_at = 0.0
         self.create_subscription(DriveRequest, "drive_request", self.on_request, 10)
         self.wheels = self.create_publisher(Twist, f"{CHAIR}/wheels_cmd_vel", 10)
@@ -38,16 +38,17 @@ class HostNode(Node):
         return self.get_clock().now().nanoseconds / 1e9
 
     def on_request(self, m: DriveRequest) -> None:
-        self.request, self.received_at = m, self.now()
+        if int(m.mode) not in (WHEELS, TRACKS):
+            self.get_logger().warning(
+                f"ignored a drive request with mode {int(m.mode)}: the host has wheels (0) and tracks (1)",
+                throttle_duration_sec=5.0,
+            )
+        self.request = (int(m.mode), bool(m.stop), float(m.speed_limit))
+        self.received_at = self.now()
 
     def tick(self) -> None:
-        now = self.now()
-        if self.request is None or now - self.received_at > self.watchdog_s:
-            command = self.host.halt()
-        else:
-            r = self.request
-            command = self.host.update(int(r.mode), bool(r.stop), float(r.speed_limit), now)
-        self.send(command)
+        now = self.now()  # the simulation clock (use_sim_time): the slides move on it
+        self.send(self.host.follow(self.request, self.received_at, now, self.watchdog_s))
 
     def send(self, c: HostCommand) -> None:
         self.wheel_lift.publish(Float64(data=c.wheel_lift))

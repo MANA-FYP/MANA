@@ -13,12 +13,14 @@ A change of mode first stops the chair and moves the slides; the new set drives 
 A request that changes back before the slides have finished is followed at once.
 """
 
+import math
 from dataclasses import dataclass
 
 WHEELS, TRACKS = 0, 1  # the Mode codes of DriveRequest
 
 TOP_SPEED = 1.2  # m/s at speed limit 1.0, the walking speed the scripted world uses
-SWITCH_S = 2.5  # how long the slides need to change the undercarriage
+SWITCH_S = 2.5  # how long the slides need to change the undercarriage (simulation seconds)
+WATCHDOG_S = 0.5  # no request for this long: the chair stops
 
 # wheel slide: 0 = on the ground; up is high enough to clear stairs
 WHEELS_DOWN, WHEELS_UP = 0.0, 0.35
@@ -43,6 +45,8 @@ class Host:
         return (WHEELS_DOWN, TRACKS_UP) if mode == WHEELS else (WHEELS_UP, TRACKS_DOWN)
 
     def update(self, mode: int, stop: bool, speed_limit: float, now: float) -> HostCommand:
+        if mode not in (WHEELS, TRACKS):
+            return self.halt()  # a mode this host does not have: stand still, change nothing
         if mode != self.mode:
             self.mode = mode
             self._switching_until = now + SWITCH_S
@@ -50,13 +54,29 @@ class Host:
         if not switching:
             self._switching_until = None
         wheel_lift, track_lift = self.lifts(self.mode)
-        speed = 0.0 if stop or switching else max(0.0, min(speed_limit, 1.0)) * TOP_SPEED
+        limit = max(0.0, min(speed_limit, 1.0)) if math.isfinite(speed_limit) else 0.0  # NaN is no speed
+        speed = 0.0 if stop or switching else limit * TOP_SPEED
         return HostCommand(
             wheel_lift,
             track_lift,
             speed if self.mode == WHEELS else 0.0,
             speed if self.mode == TRACKS else 0.0,
         )
+
+    def follow(
+        self,
+        request: tuple[int, bool, float] | None,
+        received_at: float,
+        now: float,
+        watchdog_s: float = WATCHDOG_S,
+    ) -> HostCommand:
+        """The command for this moment. request is (mode, stop, speed_limit) of the last drive
+        request, or None; received_at is when it arrived. An old request is never replayed: after
+        watchdog_s without a new one the chair stands still."""
+        if request is None or now - received_at > watchdog_s:
+            return self.halt()
+        mode, stop, speed_limit = request
+        return self.update(int(mode), bool(stop), float(speed_limit), now)
 
     def halt(self) -> HostCommand:
         """Nothing is asking for anything: stand still on the current undercarriage."""

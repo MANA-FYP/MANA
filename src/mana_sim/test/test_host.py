@@ -9,6 +9,7 @@ from mana_sim.host import (
     TRACKS_UP,
     WHEELS,
     WHEELS_DOWN,
+    WATCHDOG_S,
     WHEELS_UP,
     Host,
 )
@@ -80,3 +81,33 @@ def test_halt_keeps_the_undercarriage_that_is_down():
     c = h.halt()
     assert (c.wheel_lift, c.track_lift) == (WHEELS_UP, TRACKS_DOWN)
     assert (c.wheels_mps, c.tracks_mps) == (0.0, 0.0)
+
+
+def test_an_old_request_is_not_replayed():
+    h = Host()
+    assert h.follow(None, 0.0, 1.0) == h.halt()
+    c = h.follow((WHEELS, False, 1.0), 0.0, 0.2)
+    assert c.wheels_mps == pytest.approx(TOP_SPEED)
+    assert h.follow((WHEELS, False, 1.0), 0.0, WATCHDOG_S + 0.1).wheels_mps == 0.0
+
+
+def test_a_stop_during_a_mode_change_keeps_the_chair_still():
+    h = Host()
+    h.follow((TRACKS, False, 1.0), 0.0, 0.0)
+    c = h.follow((TRACKS, True, 1.0), 1.0, 1.1)
+    assert (c.wheels_mps, c.tracks_mps) == (0.0, 0.0)
+
+
+def test_a_speed_that_is_not_a_number_is_no_speed():
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        c = Host().update(WHEELS, False, bad, 0.0)
+        assert c.wheels_mps == 0.0 or c.wheels_mps == pytest.approx(TOP_SPEED)
+    assert Host().update(WHEELS, False, float("nan"), 0.0).wheels_mps == 0.0
+
+
+def test_a_mode_the_host_does_not_have_stops_the_chair_and_changes_nothing():
+    h = Host()
+    c = h.update(7, False, 1.0, 0.0)
+    assert (c.wheels_mps, c.tracks_mps) == (0.0, 0.0)
+    assert (c.wheel_lift, c.track_lift) == (WHEELS_DOWN, TRACKS_UP)
+    assert h.update(WHEELS, False, 1.0, 0.1).wheels_mps == pytest.approx(TOP_SPEED)
