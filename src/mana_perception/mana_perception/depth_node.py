@@ -8,6 +8,8 @@ Topics (remap them to the camera's):
   depth/image        sensor_msgs/Image, 32FC1 in metres or 16UC1 in millimetres (REP 118); a
                      frame stamped 0 gets the time it arrived, or the core would see it as stale
   depth/camera_info  sensor_msgs/CameraInfo, for the focal lengths and the principal point
+  motion             mana_msgs/MotionReport, the chair's pitch, added to the camera's tilt: on a
+                     ramp or on the stairs the mounting tilt alone reads level ground as a step
   ground             mana_msgs/GroundReport, source DEPTH_CAMERA
 
 Parameters:
@@ -16,6 +18,9 @@ Parameters:
   max_range_m       farthest ground read, in metres (default 3.0)
   rate_hz           most reports per second; extra frames are skipped (default 10.0)
   trust             trust given to a reading (default 0.9); UNKNOWN is always sent with trust 0
+  motion_max_age_s  a motion report older than this (by its header stamp, as the core ages it) is
+                    not used, and the tilt is the mounting's alone (default 0.5, as max_age_s);
+                    an untrusted or NaN report clears the pitch
 """
 
 import rclpy
@@ -24,7 +29,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport
+from mana_msgs.msg import GroundReport, MotionReport
 from mana_perception import depth as dp
 
 
@@ -36,17 +41,35 @@ class DepthNode(Node):
         self.settings = dp.Settings(max_range_m=self.declare_parameter("max_range_m", 3.0).value)
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 10.0).value
         self.trust = self.declare_parameter("trust", 0.9).value
+        self.motion_max_age_s = self.declare_parameter("motion_max_age_s", 0.5).value
+        self.chair_pitch: tuple[float, Time] | None = None  # (pitch, when it arrived)
         self.cam: dp.Camera | None = None
         self.last: Time | None = None
         self.warned: set[str] = set()
         self.create_subscription(CameraInfo, "depth/camera_info", self.on_info, 10)
         self.create_subscription(Image, "depth/image", self.on_image, 10)
+        self.create_subscription(MotionReport, "motion", self.on_motion, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
 
     def on_info(self, m: CameraInfo) -> None:
         fx, fy, cx, cy = m.k[0], m.k[4], m.k[2], m.k[5]
         if fx > 0 and fy > 0:
             self.cam = dp.Camera(fx, fy, cx, cy, self.height_m, self.pitch_rad)
+
+    def on_motion(self, m: MotionReport) -> None:
+        if m.trust < 0.5 or m.pitch_rad != m.pitch_rad:  # untrusted, or NaN: no pitch to go by
+            self.chair_pitch = None
+            return
+        stamped = m.header.stamp.sec or m.header.stamp.nanosec  # aged as the core ages it
+        at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
+        self.chair_pitch = (float(m.pitch_rad), at)
+
+    def pitch_now(self, now: Time) -> float:
+        """The chair's pitch if a recent motion report gave it, else 0: the mounting tilt alone."""
+        if self.chair_pitch is None:
+            return 0.0
+        pitch, at = self.chair_pitch
+        return pitch if (now - at).nanoseconds / 1e9 <= self.motion_max_age_s else 0.0
 
     def warn_once(self, text: str) -> None:
         if text not in self.warned:
@@ -65,7 +88,7 @@ class DepthNode(Node):
             self.warn_once(f"depth encoding {m.encoding!r} is not supported; use 32FC1 or 16UC1")
             return
         self.last = now
-        r = dp.read_ground(image, self.cam, self.settings)
+        r = dp.read_ground(image, self.cam, self.settings, self.pitch_now(now))
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,
