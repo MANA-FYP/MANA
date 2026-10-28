@@ -533,3 +533,33 @@ def test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop():
     # opinion, so they stop at the edge instead of rolling on slowly
     d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
     assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+@pytest.mark.parametrize("distance", [0.4, 0.0])
+def test_after_a_yes_confirmed_stairs_down_are_gone_down_also_at_the_edge(distance):
+    # the edge stop for stairs down is for one sensor; a confirmed yes must still go down
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    d = fed(c, stairs_down(distance), NOW + 0.1)
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.TRACKS, False, LIM.slow)
+    assert d.reason == "Going down the stairs on tracks"
+
+
+def test_confirmed_stairs_down_first_seen_at_the_edge_stop_and_ask():
+    # not "Drop ahead": that would leave no question to say yes to
+    d = core(*stairs_down(0.4)).decision
+    assert (d.stop, d.reason, d.priority) == (True, ASK_DOWN, Priority.URGENT)
+
+
+def test_a_drop_at_the_edge_stops_even_after_a_yes_to_stairs_down():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    d = fed(c, (*stairs_down(1.0), ground(DEPTH, Ground.DROP, 0.4)), NOW + 0.1)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+def test_after_a_yes_stairs_down_seen_by_one_sensor_at_the_edge_still_stop():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)), NOW + 0.1)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
