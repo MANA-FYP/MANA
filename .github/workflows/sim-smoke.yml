@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sim-smoke-${{ github.ref }}
+  group: sim-smoke-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -63,7 +63,9 @@ jobs:
         run: |
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
-          if tools/sim_smoke.sh --no-core --timeout 30; then
-            echo "::error::the smoke test passed without the core"
+          code=0
+          tools/sim_smoke.sh --no-core --timeout 30 || code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "::error::expected the smoke test to fail with exit 1 without the core, got $code"
             exit 1
           fi
