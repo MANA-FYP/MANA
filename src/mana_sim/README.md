@@ -20,7 +20,10 @@ The launch file sets the model path, starts Gazebo, bridges the chair's topics t
 (`config/bridge.yaml`) and starts the host node, `sensors_node` (transforms, `odom`, and the `motion`,
 `position`, `link` and `obstacle` reports) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
-stub is off; `stub:=true` starts it as well.
+stub is off; `stub:=true` starts it as well. `depth_node` is told where the 3D camera is mounted
+(0.97 m up, tilted 0.6 rad, from `frames.depth_mount()`), because it reads the ground against that
+height. `detector:=true` also starts `detector_node` on the RGB camera (it needs
+`pip install ultralytics`; `weights:=yoloe-26n-mana.pt` picks the open-vocabulary model).
 
 Drive the chair by hand (the request must repeat: the chair stops 0.5 s after the last one):
 
