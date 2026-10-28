@@ -3,6 +3,7 @@
     ros2 launch mana_sim world.launch.py              # with the Gazebo window
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
     ros2 launch mana_sim world.launch.py stub:=true       # also the scripted perception stub
+    ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (config/bridge.yaml) and starts the host node, the sensors node and the depth node (the ground
@@ -11,6 +12,7 @@ ros2 run mana_core core_node --ros-args -p use_sim_time:=true
 """
 
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -21,17 +23,30 @@ from launch.actions import (
     TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from mana_sim.world_variants import without_rendering_sensors
 
 
 def generate_launch_description():
     share = get_package_share_directory("mana_sim")
-    world = os.path.join(share, "worlds", "mana_route.sdf")
+    full = os.path.join(share, "worlds", "mana_route.sdf")
+    # a world with no cameras and no lidar, for a machine that cannot render
+    bare = os.path.join(tempfile.gettempdir(), "mana_route_no_rendering.sdf")
+    with open(full) as f, open(bare, "w") as out:
+        out.write(without_rendering_sensors(f.read()))
+    world = PythonExpression(
+        [repr(full), " if '", LaunchConfiguration("sensors"), "' == 'true' else ", repr(bare)]
+    )
     models = os.path.join(share, "models")
     return LaunchDescription(
         [
             DeclareLaunchArgument("headless", default_value="false", description="no window"),
+            DeclareLaunchArgument(
+                "sensors",
+                default_value="true",
+                description="false: no cameras and no lidar (a machine with no GPU)",
+            ),
             DeclareLaunchArgument(
                 "stub", default_value="false", description="also start the scripted perception stub"
             ),
