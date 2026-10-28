@@ -111,8 +111,16 @@ def tilted(cam: Camera, chair_pitch_rad: float) -> Camera:
     return replace(cam, pitch_rad=cam.pitch_rad + chair_pitch_rad)
 
 
-def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3):
-    """Distance ahead and height above the ground of every valid pixel in the middle strip."""
+def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3, row_share: float = 0.25):
+    """Distance ahead and height above the ground of every valid pixel in the middle strip.
+
+    Each row's depth is first replaced by its median across the strip. An edge across the path
+    (a riser, a curb, a drop) runs along an image row, so the median keeps it, while the noise of
+    single pixels drops by about the square root of the strip's width. Without this, noise biases
+    the edges of what the camera sees: just in front of the nearest ground in view only pixels
+    whose noise made them shorter land, and those sit higher, which looks like a raised edge. A
+    row needs row_share of its strip to have a reading, or it is left out.
+    """
     depth = np.asarray(depth, dtype=np.float64)
     rows, cols = depth.shape
     half = max(1, int(round(cols * strip / 2.0)))
@@ -121,6 +129,12 @@ def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3):
     v = np.arange(rows, dtype=np.float64)[:, None]
     yn = (v - cam.cy) / cam.fy  # image rows go down
     ok = np.isfinite(z) & (z > 0)
+    enough = ok.sum(axis=1) >= max(1, row_share * z.shape[1])
+    ok &= enough[:, None]
+    row_median = np.zeros(rows)
+    for r in np.flatnonzero(enough):
+        row_median[r] = np.median(z[r, ok[r]])
+    z = np.broadcast_to(row_median[:, None], ok.shape)
     z, yn = z[ok], np.broadcast_to(yn, ok.shape)[ok]
     c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
     ahead = z * (c - yn * s)
