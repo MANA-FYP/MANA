@@ -2,11 +2,13 @@
 
 import pytest
 from mana_sim.host import (
+    REVERSE_MAX,
     SWITCH_S,
     TOP_SPEED,
     TRACKS,
     TRACKS_DOWN,
     TRACKS_UP,
+    TURN_MAX,
     WATCHDOG_S,
     WHEELS,
     WHEELS_DOWN,
@@ -111,3 +113,69 @@ def test_a_mode_the_host_does_not_have_stops_the_chair_and_changes_nothing():
     assert (c.wheels_mps, c.tracks_mps) == (0.0, 0.0)
     assert (c.wheel_lift, c.track_lift) == (WHEELS_DOWN, TRACKS_UP)
     assert h.update(WHEELS, False, 1.0, 0.1).wheels_mps == pytest.approx(TOP_SPEED)
+
+
+# ---- a driver steers (#76): the supervisor's keyboard or the autopilot, capped by MANA
+
+
+def test_a_driver_steers_and_sets_the_speed_on_wheels():
+    c = Host().update(WHEELS, False, 1.0, 0.0, driver=(0.5, 0.4))
+    assert (c.wheels_mps, c.wheels_turn) == (0.5, 0.4)
+    assert (c.tracks_mps, c.tracks_turn) == (0.0, 0.0)
+
+
+def test_a_driver_steers_the_tracks_when_they_are_down():
+    h = Host(TRACKS)
+    c = h.update(TRACKS, False, 1.0, 0.0, driver=(0.3, -0.5))
+    assert (c.tracks_mps, c.tracks_turn) == (0.3, -0.5)
+    assert (c.wheels_mps, c.wheels_turn) == (0.0, 0.0)
+
+
+def test_the_driver_is_never_faster_forward_than_the_speed_limit():
+    c = Host().update(WHEELS, False, 0.3, 0.0, driver=(5.0, 0.0))
+    assert c.wheels_mps == pytest.approx(0.3 * TOP_SPEED)
+
+
+def test_after_a_stop_the_driver_can_only_turn_or_back_off():
+    h = Host()
+    assert h.update(WHEELS, True, 1.0, 0.0, driver=(1.0, 0.0)).wheels_mps == 0.0  # no forward
+    c = h.update(WHEELS, True, 1.0, 0.1, driver=(0.0, 0.8))
+    assert (c.wheels_mps, c.wheels_turn) == (0.0, 0.8)  # turning on the spot
+    assert h.update(WHEELS, True, 1.0, 0.2, driver=(-1.0, 0.0)).wheels_mps == -REVERSE_MAX
+
+
+def test_turning_and_reversing_are_capped():
+    c = Host().update(WHEELS, False, 1.0, 0.0, driver=(-5.0, 9.0))
+    assert (c.wheels_mps, c.wheels_turn) == (-REVERSE_MAX, TURN_MAX)
+    assert Host().update(WHEELS, False, 1.0, 0.0, driver=(0.0, -9.0)).wheels_turn == -TURN_MAX
+
+
+def test_a_driver_value_that_is_not_a_number_is_no_motion():
+    c = Host().update(WHEELS, False, 1.0, 0.0, driver=(float("nan"), float("inf")))
+    assert (c.wheels_mps, c.wheels_turn) == (0.0, 0.0)
+
+
+def test_the_mode_is_always_mana_s_and_nothing_moves_while_the_slides_do():
+    h = Host()
+    c = h.update(TRACKS, False, 1.0, 0.0, driver=(0.5, 0.5))
+    assert (c.wheel_lift, c.track_lift) == (WHEELS_UP, TRACKS_DOWN)
+    assert (c.wheels_mps, c.tracks_mps, c.wheels_turn, c.tracks_turn) == (0.0, 0.0, 0.0, 0.0)
+    c = h.update(TRACKS, False, 1.0, SWITCH_S, driver=(0.5, 0.5))
+    assert (c.tracks_mps, c.tracks_turn) == (0.5, 0.5)
+
+
+def test_when_following_a_driver_the_chair_stands_still_once_the_driver_goes_quiet():
+    h, request = Host(), (WHEELS, False, 1.0)
+    c = h.follow(request, 1.0, 1.0, driver=(0.5, 0.2), driver_at=1.0, follow_driver=True)
+    assert (c.wheels_mps, c.wheels_turn) == (0.5, 0.2)
+    late = 1.0 + WATCHDOG_S + 0.1
+    c = h.follow(request, late, late, driver=(0.5, 0.2), driver_at=1.0, follow_driver=True)
+    assert (c.wheels_mps, c.wheels_turn) == (0.0, 0.0)  # keys let go: still, not "drive on"
+    c = h.follow(request, 2.0, 2.0, follow_driver=True)  # no driver yet: still
+    assert c.wheels_mps == 0.0
+
+
+def test_without_follow_driver_the_chair_drives_straight_as_before():
+    h = Host()
+    c = h.follow((WHEELS, False, 0.5), 0.0, 0.0, driver=(1.0, 1.0), driver_at=0.0)
+    assert (c.wheels_mps, c.wheels_turn) == (pytest.approx(0.5 * TOP_SPEED), 0.0)
