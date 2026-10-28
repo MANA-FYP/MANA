@@ -206,7 +206,7 @@ def direction(core: DecisionCore, now: float) -> Message | None:
                 )
             )
         elif r.ground == Ground.STAIRS_DOWN:
-            if getattr(core, "down_ok", False):
+            if core.down_ok:
                 continue
             found.append(
                 (

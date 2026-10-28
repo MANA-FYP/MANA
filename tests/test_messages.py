@@ -4,9 +4,11 @@ import math
 
 import pytest
 from mana_core.decision import (
+    Command,
     DecisionCore,
     Ground,
     GroundReport,
+    MotionReport,
     ObstacleReport,
     Priority,
     Source,
@@ -350,6 +352,35 @@ def test_no_direction_for_stairs_down_once_the_user_has_said_yes():
     core = core_with(ground=step(Ground.STAIRS_DOWN, 1.0))
     core.down_ok = True  # the decision already says that MANA is going down
     assert direction(core, 1.0) is None
+
+
+def test_after_a_yes_to_stairs_down_the_next_thing_heard_is_the_descent():
+    """The real core, the queue and the directions at 10 Hz, as the node runs them with a cane."""
+    core, q, out = DecisionCore(), MessageQueue(), []
+    last_reason, t = None, 0.0
+    while t < 9.0:
+        for source, d in ((Source.CAMERA, math.nan), (Source.DEPTH_CAMERA, 1.0)):
+            core.on_ground(GroundReport(t, 0.9, source, Ground.STAIRS_DOWN, d))
+        core.on_motion(MotionReport(t, 0.9))
+        if abs(t - 3.0) < 1e-6:
+            core.on_command(Command.YES, 0.9)  # the user says yes to the question
+        d = core.tick(t)
+        if d.reason != last_reason:
+            q.push(say(d.reason, d.priority, t, kind=DECISION), t)
+            last_reason = d.reason
+        if ahead := direction(core, t):
+            q.push(ahead, t)
+        else:
+            q.direction_gone()
+        if m := q.release(t):
+            out.append((round(t, 1), m.text))
+        t = round(t + 0.1, 3)
+    texts_ = [x for _, x in out]
+    descent = texts_.index("Going down the stairs on tracks")
+    assert texts_[0] == "Stairs down ahead. Say yes to go down on tracks"
+    yes_at = out[descent][0]
+    assert yes_at - 3.0 < 1.0  # straight after the yes, not 2.7 s late
+    assert not any(x.endswith("Stop.") for _, x in out if _ >= 3.0)  # no "Stop." after the yes
 
 
 def test_a_curb_and_a_ramp():
