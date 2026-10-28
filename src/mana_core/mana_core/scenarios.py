@@ -10,7 +10,7 @@ an obstacle.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mana_core.decision import Command, Ground, Limits, Mode, Source
+from mana_core.decision import STEP_STOP, Command, Ground, Limits, Mode, Source
 from mana_core.world import Fault, Obstacle, Route, Stretch
 
 SLOW = Limits().slow
@@ -196,6 +196,16 @@ def follows_user() -> Mark:
     return Mark("Follows the user in manual mode", test)
 
 
+def waits_before(at_m: float, command: Command, what: str) -> Mark:
+    def test(tr):
+        said = tr.said_at(command)
+        before = [s for s in tr.samples if said is None or s.t < said]
+        furthest = max((s.x_m for s in before), default=0.0)
+        return furthest < at_m, f"{at_m - furthest:.2f} m before the {what} until {command.name}"
+
+    return Mark(f"Waits before the {what} until the user says {command.name}", test)
+
+
 def reaches_end(length_m: float) -> Mark:
     def test(tr):
         return tr.end_m >= length_m, f"reached {tr.end_m:.2f} of {length_m:.0f} m"
@@ -313,6 +323,21 @@ SCENARIOS = {
             Route(12.0, obstacles=(Obstacle(8.0, "person"),), faults=(Fault("camera", trust=0.2),)),
             15.0,
             marks=(stops_before(8.0, "person"), tells("Obstacle ahead, stopping")),
+        ),
+        Scenario(
+            "dark_stairs",
+            "Stairs in the dark (failure case)",
+            "The camera cannot be trusted, so only the 3D camera sees the stairs. One sensor is "
+            "not enough to change mode, so MANA stops at the first step instead of rolling onto "
+            "it on wheels; the user then chooses tracks to climb.",
+            Route(11.0, (STAIRS,), faults=(Fault("camera", trust=0.2),)),
+            40.0,
+            says=(Say(15.0, Command.TRACKS),),
+            marks=(
+                tells(STEP_STOP),
+                waits_before(6.0, Command.TRACKS, "stairs"),
+                reaches_end(11.0),
+            ),
         ),
         Scenario(
             "imu_lost",

@@ -104,9 +104,21 @@ def test_the_picture_of_stairs_is_where_the_baseline_falls_short():
     assert not run(SCENARIOS["picture"]).mishaps and met(SCENARIOS["picture"], DecisionCore)[0] == 4
 
 
+def test_in_the_dark_the_baseline_climbs_on_one_sensor_without_stopping():
+    # one source is enough for the baseline to change to tracks: here that gets it up the stairs,
+    # at the picture of stairs the same rule asks for tracks on a wall
+    trace = run(SCENARIOS["dark_stairs"], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS["dark_stairs"], trace) if not ok]
+    assert failed == [
+        'Says "Step ahead, stopping"',
+        "Waits before the stairs until the user says TRACKS",
+    ]
+    assert not trace.mishaps
+
+
 def test_the_baseline_meets_every_other_scenario():
     for name, scenario in SCENARIOS.items():
-        if name != "picture":
+        if name not in ("picture", "dark_stairs"):
             base, marks, _ = met(scenario, BaselineController)
             assert base == marks, name
 

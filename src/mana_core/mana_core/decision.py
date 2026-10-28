@@ -84,6 +84,7 @@ class Priority(IntEnum):
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
+STEP_STOP = "Step ahead, stopping"
 
 
 @dataclass(frozen=True)
@@ -293,6 +294,21 @@ class DecisionCore:
             for r in self._grounds()
         )
 
+    def _lone_step_at_edge(self) -> bool:
+        """A step up or a curb measured within edge_m that no second sensor confirms, as when the
+        camera cannot be trusted in the dark. A change of mode needs two sensors, but a stop needs
+        none, so the chair stops instead of rolling onto it on wheels. A report without a
+        distance (the camera alone, a picture of stairs) only slows down. No stop on tracks, which
+        can climb it, or when the user has chosen tracks in manual mode to cross on purpose."""
+        if self.decision.mode == Mode.TRACKS or (
+            not self.automatic and self.user_mode == Mode.TRACKS
+        ):
+            return False
+        return self._confirmed_step() is None and any(
+            r.ground in (Ground.STAIRS_UP, Ground.CURB) and r.distance_m <= self.limits.edge_m
+            for r in self._grounds()
+        )
+
     def _confirmed_step(self) -> GroundReport | None:
         """The nearest report of a step that at least two different sensors both see close ahead.
 
@@ -394,6 +410,9 @@ class DecisionCore:
                     "obstacle",
                     lambda: self._nearest_obstacle() <= lim.obstacle_stop_m,
                     lambda: self._stop("Obstacle ahead, stopping"),
+                ),
+                branch(  # above manual too: a driving command does not roll onto it
+                    "lone step", self._lone_step_at_edge, lambda: self._stop(STEP_STOP)
                 ),
                 branch(  # above manual: a driving command at the question does not drive on
                     "stairs down",
