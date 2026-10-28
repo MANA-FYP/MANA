@@ -274,6 +274,10 @@ class DecisionCore:
             "lone step": self._lone_step_at_edge(lim.edge_m + past["lone step"]),
             "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
+        if any(at > now for at in self._seen_at.values()) or self.down_seen_at > now:
+            # the clock went back (a world reset, a bag played again): what was seen is gone
+            self._seen_at.clear()
+            self.down_seen_at, self.down_ok = -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
         if seen["stairs down"]:
             self.down_seen_at = now

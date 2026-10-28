@@ -171,6 +171,15 @@ def test_a_hold_counts_from_its_own_hazard_whichever_branch_stopped():
     assert d.reason == "Obstacle ahead, stopping"  # seen at 0.3 s, behind the drop's stop
 
 
+def test_after_the_clock_goes_back_a_stop_from_before_is_not_held():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4))
+    assert c.decision.stop
+    for source in (CAM, DEPTH):  # a world reset: the clock starts again near 0
+        c.on_ground(GroundReport(1.0, 0.9, source, Ground.FLAT, 3.0))
+    c.on_motion(MotionReport(1.0, 0.9))
+    assert not c.tick(1.0).stop
+
+
 def test_a_user_go_is_not_held():
     c = core()
     c.on_command(Command.STOP, 0.9)
