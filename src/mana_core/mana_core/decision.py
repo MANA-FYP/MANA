@@ -151,6 +151,7 @@ class Limits:
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
     position_max_age_s: float = 2.5
+    clock_back_s: float = 5.0  # a report this much older than the one held: the clock went back
 
 
 @dataclass(frozen=True)
@@ -208,22 +209,38 @@ class DecisionCore:
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
         self.tree = self._build()
 
-    # ---- inputs: the latest report per source wins
+    # ---- inputs: the latest report per source wins; one older than it, arriving late, does not
+
+    def _newer(self, old, report) -> bool:
+        """A report a little older than the one held came late and is dropped. It wins when the
+        clock went back (a world reset, a bag played again): when it is much older, or when the
+        one held is stamped ahead of the core's own clock."""
+        return (
+            old is None
+            or report.stamp >= old.stamp
+            or old.stamp - report.stamp > self.limits.clock_back_s
+            or old.stamp - self.now > self.limits.max_age_s
+        )
+
+    def _keep(self, reports: dict, key, report) -> None:
+        if self._newer(reports.get(key), report):
+            reports[key] = report
 
     def on_ground(self, report: GroundReport) -> None:
-        self.ground[report.source] = report
+        self._keep(self.ground, report.source, report)
 
     def on_obstacle(self, report: ObstacleReport) -> None:
-        self.obstacles[report.source] = report
+        self._keep(self.obstacles, report.source, report)
 
     def on_motion(self, report: MotionReport) -> None:
-        self.motion = report
+        if self._newer(self.motion, report):
+            self.motion = report
 
     def on_position(self, report: PositionReport) -> None:
-        self.positions[report.source] = report
+        self._keep(self.positions, report.source, report)
 
     def on_link(self, report: LinkReport) -> None:
-        self.links[report.link] = report
+        self._keep(self.links, report.link, report)
 
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
@@ -297,10 +314,12 @@ class DecisionCore:
     # ---- what the reports say
 
     def _ok(self, report, max_age_s: float | None = None) -> bool:
+        """Recent and trusted. A report stamped further ahead than max_age_s is not used either:
+        after the clock went back, one held from before would otherwise stay fresh."""
+        max_age_s = self.limits.max_age_s if max_age_s is None else max_age_s
         return (
             report is not None
-            and self.now - report.stamp
-            <= (self.limits.max_age_s if max_age_s is None else max_age_s)
+            and -self.limits.max_age_s <= self.now - report.stamp <= max_age_s
             and report.trust >= self.limits.min_trust
         )
 

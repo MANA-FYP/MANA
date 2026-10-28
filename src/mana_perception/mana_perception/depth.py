@@ -26,7 +26,7 @@ within about 2 degrees (2 degrees of error also looks like a slope of 3.5 %).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -81,6 +81,8 @@ class Settings:
     ramp_slope: float = 0.05  # a slope above this (about 3 degrees) is a ramp
     ramp_fit_m: float = 0.015  # how closely the ground must follow the ramp's line
     ramp_bins: int = 6  # a ramp must be seen over at least this many bins
+    ramp_join_m: float = 0.03  # a slope from the blind zone meets the chair's level within this
+    # (the mount's height is known to about 2 cm)
     ramp_rise_m: float = 0.02  # and climb or fall at least this much where it is seen
     stairs_m: float = 1.0  # look this far past the first step for more steps
 
@@ -104,12 +106,25 @@ class Profile:
     far_points: int = 0  # valid points beyond max_range_m: the image is not empty
 
 
+def tilted(cam: Camera, chair_pitch_rad: float) -> Camera:
+    """The camera as the chair's own pitch tilts it: on a ramp, or on tracks on the stairs, the
+    mounting tilt alone would make level ground ahead look like a slope or a step. REP 103: a
+    chair pitched nose down (positive) tilts the camera further down. On a slope the camera is
+    also height_m / cos(pitch) above the ground straight under it, not height_m."""
+    return replace(
+        cam,
+        pitch_rad=cam.pitch_rad + chair_pitch_rad,
+        height_m=cam.height_m / math.cos(chair_pitch_rad),
+    )
+
+
 def ground_points(depth: np.ndarray, cam: Camera, strip: float = 0.3, row_share: float = 0.25):
     """Distance ahead and height above the ground of every valid pixel in the middle strip.
 
     Each row's depth is first replaced by its median across the strip. An edge across the path
     (a riser, a curb, a drop) runs along an image row, so the median keeps it, while the noise of
-    single pixels drops by about the square root of the strip's width. Without this, noise biases
+    single pixels drops by about the square root of the strip's width (a median is a quarter
+    noisier than a mean: about 8 times over 96 pixels). Without this, noise biases
     the edges of what the camera sees: just in front of the nearest ground in view only pixels
     whose noise made them shorter land, and those sit higher, which looks like a raised edge. A
     row needs row_share of its strip to have a reading, or it is left out.
@@ -238,8 +253,45 @@ def _ramp(d, h, settings):
     return start, slope
 
 
-def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
-    """One ground reading from a profile: the nearest change in the ground ahead."""
+def _slope_from_blind_zone(d, h, changes, settings):
+    """Where a slope that starts in the blind zone starts, or None. h is measured from the plane
+    the chair stands on, carried on ahead.
+
+    At the foot of a ramp, or at its crest, the chair is still on one slope while the nearest
+    ground in view is already on the next, more than blind_m off the chair's plane. That is no edge
+    if the near ground seen is one straight slope, no steeper than a steep ramp, that meets the
+    chair's plane in the blind zone: at the camera's foot it is no more than ramp_join_m on the far
+    side of that plane, and at the nearest ground seen it is on the far side. A curb with a ramp up
+    behind it, or a step down with a ramp down behind it, is off the plane on the near side at the
+    camera's foot; with the ramp the other way behind it, it meets the plane only past the ground
+    seen. Either way it is still an edge."""
+    smooth = len(d) if not changes.size else changes[0] + 1  # the bins before the first step
+    if smooth < settings.ramp_bins:
+        return None
+    near = min(smooth, 2 * settings.ramp_bins)  # only the near ground: farther, the slope may end
+    x, y = d[:near], h[:near]
+    slope, at_zero = np.polyfit(x, y, 1)
+    if np.sqrt(np.mean((slope * x + at_zero - y) ** 2)) > settings.ramp_fit_m:
+        return None
+    if not settings.ramp_slope <= abs(slope) <= settings.steep / 4:
+        return None
+    if at_zero * np.sign(slope) > settings.ramp_join_m:  # above level climbing, below falling
+        return None
+    if (slope * x[0] + at_zero) * slope <= 0:  # it meets that level only past the ground seen
+        return None
+    return float(np.clip(-at_zero / slope, 0.0, d[0]))  # where the line meets the chair's level
+
+
+def classify(prof: Profile, settings: Settings = DEFAULTS, chair_pitch_rad: float = 0.0) -> Reading:
+    """One ground reading from a profile: the nearest change in the ground ahead.
+
+    chair_pitch_rad is the chair's own pitch, already in the profile's camera (tilted()). Heights
+    are then measured from a level plane, while the chair may stand on a slope that goes on ahead:
+    on the route's 7 degree ramp the nearest ground in view is about 7 cm off that plane. So the
+    blind-zone check compares the nearest ground with the plane the chair stands on, carried on
+    ahead, and allows for a slope that starts in the blind zone, at the foot or the crest of a
+    ramp, before the chair has tilted (_slope_from_blind_zone).
+    """
     have = ~np.isnan(prof.height_m)
     d, h = prof.distance_m[have], prof.height_m[have]
     if not d.size:
@@ -253,17 +305,23 @@ def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
     if changes.size:
         near[changes[0] + 1 :] = False
     level = float(np.median(h[near]))  # height of the nearest ground seen, against the chair's
-    if level > settings.riser_max_m:
+    # the plane the chair stands on, carried on ahead: higher ahead going up (nose up)
+    under = -d * math.tan(chair_pitch_rad)
+    slope_m = float(np.median(under[near]))
+    if level - slope_m > settings.riser_max_m:
         # taller than a riser: stairs if more risers climb behind it, else a wall or an object
         climbs = [dh for _, dh in _steps(d, h - level, settings) if dh > 0]
         return Reading(STAIRS_UP, 0.0) if climbs else Reading(UNKNOWN)
 
     # The camera cannot see the ground just in front of the chair. If the nearest ground it does
-    # see is clearly lower or higher than the ground the chair stands on, the edge is in that
+    # see is clearly lower or higher than the plane the chair stands on, the edge is in that
     # blind zone. Where in it is unknown, so it is reported at 0 m: the worst case.
     blind = []
-    if abs(level) > settings.blind_m:
-        blind = [(0.0, level)]
+    ramp_from = None
+    if abs(level - slope_m) > settings.blind_m:  # off the plane the chair stands on
+        ramp_from = _slope_from_blind_zone(d, h - under, changes, settings)
+        if ramp_from is None:
+            blind = [(0.0, level - slope_m)]
     elif d[0] > settings.near_max_m:
         return Reading(UNKNOWN)  # level ground only far away: the near ground is missing data
     h = h - level  # heights from the nearest ground seen
@@ -301,6 +359,8 @@ def classify(prof: Profile, settings: Settings = DEFAULTS) -> Reading:
             steps = [(edge, lower - float(h[i]))] + later
     if steps:
         return _read_steps(steps, settings)
+    if ramp_from is not None:
+        return Reading(RAMP, ramp_from)
     ramp = _ramp(d, h, settings)
     if ramp is not None:
         return Reading(RAMP, ramp[0])
@@ -340,6 +400,10 @@ def to_metres(encoding: str, rows: int, cols: int, step: int, data, big_endian=F
     return image
 
 
-def read_ground(depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS) -> Reading:
-    """The ground ahead in one depth image."""
-    return classify(profile(depth, cam, settings), settings)
+def read_ground(
+    depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS, chair_pitch_rad: float = 0.0
+) -> Reading:
+    """The ground ahead in one depth image, with the camera as mounted and the chair's own pitch
+    (REP 103: nose down is positive; 0 when unknown)."""
+    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
+    return classify(profile(depth, seen_by, settings), settings, chair_pitch_rad)

@@ -105,6 +105,7 @@ even when only this sensor sees it (#60).
 |---|---|---|
 | `depth/image` (in) | `sensor_msgs/Image` | depth, 32FC1 in metres or 16UC1 in millimetres (REP 118); a frame stamped 0 gets the time it arrived |
 | `depth/camera_info` (in) | `sensor_msgs/CameraInfo` | focal lengths and principal point |
+| `motion` (in) | `mana_msgs/MotionReport` | the chair's pitch, added to the camera's tilt (REP 103: nose down is positive) |
 | `ground` (out) | `mana_msgs/GroundReport` | one report per frame, source `DEPTH_CAMERA` |
 
 | Parameter | Default | Meaning |
@@ -114,6 +115,7 @@ even when only this sensor sees it (#60).
 | `max_range_m` | `3.0` | farthest ground read |
 | `rate_hz` | `10.0` | most reports per second |
 | `trust` | `0.9` | trust of a reading; `UNKNOWN` (no ground in view) is sent with trust 0 |
+| `motion_max_age_s` | `0.5` | a `motion` report older than this is not used, and the tilt is the mounting's alone |
 
 **Tested on rendered frames.** Until the Gazebo world exists (#13, #14), `mana_perception/synthetic.py`
 renders depth frames of known ground by casting a ray for every pixel, and both the tests and
@@ -137,9 +139,11 @@ centimetres past the blind zone, reported at 0 m: closer than they are, which is
 
 **Depth noise.** Each image row's depth is taken as its median across the path strip before it is
 turned into points: an edge across the path runs along a row, so the median keeps it, and the noise
-of single pixels falls by about the square root of the strip's width. Without it, noise of a few
-centimetres per pixel made flat ground read as a curb right in front, because just inside the
-blind zone only the pixels whose noise shortened them land, and those sit higher. With the
+of single pixels falls by about the square root of the strip's width, less a quarter for taking
+the median rather than the mean (about 8 times over the simulation camera's 96-pixel strip).
+Without it, noise of a few centimetres per pixel made flat ground read as a curb right in front,
+because just inside the blind zone only the pixels whose noise shortened them land, and those sit
+higher. With the
 simulation's 3D camera and its `depth_noise` fault (5 cm per pixel, `src/mana_sim`), flat ground
 stays flat, the ramp stays a ramp, and stairs, curbs and the drop are read at their place, to within
 5 cm; the tests check this.
@@ -161,8 +165,46 @@ Known limits:
 - The camera tilt must be set right: an error of 2 degrees looks like a 3.5 % slope, under the
   5 % ramp limit. The mounting height must be right to about 5 cm, or level ground just past the
   blind zone looks like a step there.
-- The tilt is a fixed parameter. On a ramp, or on tracks on the stairs, the chair's own pitch
-  changes it; adding the IMU pitch from `motion` to it is a follow-up.
+- **The chair's own pitch** is added to the camera's tilt from the latest trusted `motion` report
+  (at most 0.5 s old by its stamp, as the core ages reports), and the camera's height becomes
+  `camera_height_m / cos(pitch)` above the ground under it. With the simulation's 3D camera (320 x
+  240, 1.2 rad, 0.97 m, 0.6 rad): without it, a chair pitched 0.2 rad nose down (the front reaching
+  level ground at the foot of a ramp) or nose up reads the level ground ahead as a curb at 0 m, and
+  on tracks going down the stairs (0.48 rad) the steps below read as a curb 0.85 m away; with it
+  both read right (the level ground then reads RAMP at 0 m: against the chair's own plane it does
+  change slope there). Heights are then measured from a level plane, while the chair may stand on
+  a slope that goes on ahead: on the route's 7 degree ramp the nearest ground in view is about 7 cm
+  off that plane. So the blind-zone check measures the nearest ground from the plane the chair
+  stands on, carried on ahead, with the same 6 cm (`blind_m`) either side of it. On the ramp the
+  reading is then RAMP; a 0.1 m curb or a 0.3 m drop on it is still found at its place, and an edge
+  of 0.1 or 0.2 m up or down in the blind zone is still an edge at 0 m, going up and going down.
+  With no recent or trusted `motion` report the mounting tilt is used alone. Roll is not corrected
+  yet.
+- **At the foot or the crest of a ramp** the chair is still on one slope while the nearest ground
+  in view is already 6 to 9 cm up or down the next, so the pitch does not help there (single frames
+  of `CURB 0.00 m` on the Gazebo run of #100). It is no edge if the near ground seen (0.6 m of it)
+  is one straight slope, no steeper than 25 %, that meets the chair's plane in the blind zone,
+  within 3 cm (`ramp_join_m`, for the mounting height's error): the reading is then RAMP. A curb
+  with a ramp up behind it, or a step down with a ramp down behind it, meets that plane on the near
+  side, and with the ramp the other way it meets it only past the ground seen; both are still an
+  edge at 0 m. With the chair standing on both axles as it would, every 10 cm over the route's
+  ramp on wheels and on tracks reads FLAT or RAMP, except one frame at the foot going down on
+  wheels (17.7 m), where the camera is 3.3 cm lower over the level ground than `camera_height_m /
+  cos(pitch)` says, just past `ramp_join_m`. It reads CURB at 0 m, so the core stops: safe, but
+  worth a look in Gazebo.
+- **An edge just inside the blind zone with a ramp behind it can read as that ramp.** From the
+  ground in view alone, an 8 to 10 cm edge 0.3 to 0.45 m ahead with a 7 degree ramp the same way
+  behind it looks like the ramp starting about 0.2 m ahead, and it reads RAMP at 0 m. With the ramp
+  the other way behind it (a raised edge, then down), the ground in view has come back to within
+  6 cm of the chair's plane, and it read RAMP before this check too. Both are a ramp joined to the
+  ground by an edge, which a ramp built for wheelchairs should not have; the core slows down for
+  RAMP.
+- **A hazard on less than half of the path strip is not seen.** Each row's median keeps what
+  covers most of the row, so a drop beside the path, on only a third of the strip, reads flat. The
+  strip is about 0.5 m wide at 1 m; what is beside the path is the lidar's and the core's to watch.
+- **A drop whose edge runs well across the path** (45 degrees) can read as stairs down rather than a
+  drop, at the right distance. The core stops for stairs down from one sensor at the edge just as
+  for a drop; only its message differs.
 - **Stairs up that start in the blind zone** are told from a wall only by risers climbing behind
   the first one in view; a single tall rise right in front is left to the obstacle sensors.
 

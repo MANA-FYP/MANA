@@ -516,6 +516,8 @@ def test_reports_that_are_old_or_not_trusted_are_not_told():
     assert direction(core_with(ground=stale), 1.0) is None
     assert direction(core_with(ground=step(Ground.STAIRS_UP, 1.0, trust=0.3)), 1.0) is None
     assert direction(core_with(obstacles=[obstacle(1.0, trust=0.2)]), 1.0) is None
+    ahead = step(Ground.STAIRS_UP, 1.0, stamp=11.0)  # from before the clock went back
+    assert direction(core_with(ground=ahead), 1.0) is None
 
 
 # ---- in the scripted scenarios: what the user hears, in what order

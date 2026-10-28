@@ -56,7 +56,7 @@ def route_height(x: np.ndarray) -> np.ndarray:
             for dx in (-length / 2, length / 2)
         ]  # fmt: skip
         (x0, z0), (x1, z1) = sorted(ends)
-        inside = (x >= x0) & (x <= x1)
+        inside = (x >= x0 - 1e-6) & (x <= x1 + 1e-6)  # no float gap where two boxes meet
         top = z0 + (z1 - z0) * (x - x0) / (x1 - x0)
         out = np.where(inside, np.maximum(out, top), out)
     return out
@@ -112,6 +112,49 @@ def test_the_sim_camera_sees_flat_ground_on_the_flat_start(real):
 
 def test_the_ramp_is_a_ramp(real):
     assert read_at(8.0 - 0.35 - 1.2, real).ground == dp.RAMP
+
+
+# the chair still level, both axles off the slope, with the slope already under the camera
+@pytest.mark.parametrize("chair_x", [7.5, 7.6, 7.7], ids=lambda x: f"foot-{x}")
+def test_at_the_foot_of_the_ramp_the_ramp_is_not_a_curb(chair_x, real):
+    assert read_at(chair_x, real).ground == dp.RAMP
+
+
+@pytest.mark.parametrize("chair_x", [13.5, 13.6, 13.7], ids=lambda x: f"crest-{x}")
+def test_at_the_crest_of_the_ramp_the_way_down_is_not_a_curb(chair_x, real):
+    assert read_at(chair_x, real).ground == dp.RAMP
+
+
+AXLE_M = 0.3  # the axles (or the ends of the tracks' contact) ahead of and behind the chassis
+
+
+def read_on_route(chair_x: float, settled: float) -> tuple[float, dp.Reading]:
+    """(pitch, reading) with the chair standing on the route at chair_x as it really would: on both
+    axles, so pitched where they are at different heights, with the camera where the mount puts it
+    and depth_node told depth_mount() and that pitch."""
+    rear, front = route_height(np.array([chair_x - AXLE_M, chair_x + AXLE_M]))
+    pitch = -math.atan2(front - rear, 2 * AXLE_M)  # REP 103: nose up is negative
+    mx, _y, mz, *_ = SENSORS["depth_link"]
+    camera_x = chair_x + mx * math.cos(pitch) + mz * math.sin(pitch)
+    camera_z = (rear + front) / 2 + settled - mx * math.sin(pitch) + mz * math.cos(pitch)
+    floor = route_height(np.array([camera_x]))[0]
+    seen_from = replace(CAM, height_m=camera_z - floor, pitch_rad=CAM.pitch_rad + pitch)
+    image = syn.render(lambda a: route_height(camera_x + a) - floor, seen_from, CAM_ROWS, CAM_COLS)
+    return pitch, dp.read_ground(image, CAM, chair_pitch_rad=pitch)
+
+
+@pytest.mark.parametrize("settled", sorted(SETTLED_CHASSIS_M), ids=lambda s: f"on-{s}")
+def test_driving_over_the_ramp_no_frame_reads_a_hazard(settled):
+    # every 10 cm from the flat start, up, over the top and down to the level ground before the
+    # stairs, the chair pitched as it is: the foot and the crest, going up and going down, are
+    # where the slope under the chair and the slope in view differ. Not 17.7 m on wheels, where one
+    # frame reads CURB at 0 m: see the 3D camera's known limits in src/mana_perception/README.md.
+    found = []
+    for chair_x in np.arange(6.0, 17.65, 0.1):
+        pitch, r = read_on_route(chair_x, SETTLED_CHASSIS_M[settled])
+        if r.ground not in (dp.FLAT, dp.RAMP):
+            found.append((round(chair_x, 2), round(pitch, 3), r))
+    assert not found
 
 
 @pytest.mark.parametrize("ahead", [1.5, 1.0, 0.6])

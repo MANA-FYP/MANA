@@ -389,6 +389,76 @@ def test_manual_mode_before_any_mode_is_chosen_stays_on_wheels():
     assert (d.mode, d.reason) == (Mode.WHEELS, "Manual mode")
 
 
+# ---- reports that arrive late (#109)
+
+
+def test_an_older_report_arriving_late_does_not_replace_a_newer_one():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
+    assert c.decision.stop
+    c.on_ground(GroundReport(NOW - 0.4, 0.9, DEPTH, Ground.FLAT, 3.0))  # older, arrives later
+    assert c.tick(NOW).stop
+    c.on_obstacle(obstacle(0.5))
+    c.on_obstacle(ObstacleReport(NOW - 0.4, 0.9, LIDAR, 3.0))
+    assert c.obstacles[LIDAR].distance_m == 0.5
+    c.on_motion(MotionReport(NOW - 0.4, 0.9, pitch_rad=0.3))
+    assert c.motion.pitch_rad == 0.0
+    c.on_position(gps())
+    c.on_position(PositionReport(NOW - 0.4, 0.2, PositionSource.GPS, 50.0))
+    assert c.positions[PositionSource.GPS].trust == 0.9
+    c.on_link(wifi())
+    c.on_link(LinkReport(NOW - 0.4, 0.9, Link.WIFI, False, 5))
+    assert c.links[Link.WIFI].connected
+
+
+def test_after_the_clock_goes_back_new_reports_are_used_again():
+    # a Gazebo world reset or a bag played again: the stamps start again near 0
+    c = DecisionCore()
+    c.on_motion(MotionReport(500.0, 0.9))
+    for source in (CAM, DEPTH):
+        c.on_ground(GroundReport(500.0, 0.9, source, Ground.FLAT, 3.0))
+    c.tick(500.0)
+    c.on_motion(MotionReport(5.0, 0.9))
+    c.on_ground(GroundReport(5.0, 0.9, DEPTH, Ground.DROP, 0.3))
+    assert c.tick(5.0).stop
+    assert c.motion.stamp == 5.0
+
+
+def test_after_the_clock_goes_back_a_little_a_drop_still_stops_the_chair():
+    # a reset from 3.0 s to 0.1 s: less than clock_back_s, as in a bag looped every few seconds
+    c = DecisionCore()
+    for i in range(31):
+        t = i / 10
+        for source in (CAM, DEPTH):
+            c.on_ground(GroundReport(t, 0.9, source, Ground.FLAT, 3.0))
+        c.on_motion(MotionReport(t, 0.9))
+        c.tick(t)
+    after = []
+    for i in range(1, 41):  # a drop 0.3 m ahead, reported every 0.5 s
+        t = round(i / 10, 2)
+        if i % 5 == 1:
+            c.on_ground(GroundReport(t, 0.9, DEPTH, Ground.DROP, 0.3))
+            c.on_ground(GroundReport(t, 0.9, CAM, Ground.FLAT, 3.0))
+            c.on_motion(MotionReport(t, 0.9))
+        after.append((t, c.tick(t)))
+    assert all(d.speed_limit < 1.0 for _, d in after)  # never on the reports from before
+    assert all(d.stop for t, d in after if t >= 0.6)
+
+
+def test_a_report_stamped_well_ahead_of_the_clock_is_not_used():
+    c = DecisionCore()
+    for source in (CAM, DEPTH):
+        c.on_ground(GroundReport(NOW + 10.0, 0.9, source, Ground.FLAT, 3.0))
+    c.on_motion(level())
+    d = c.tick(NOW)  # the reports held come from a clock that has since gone back
+    assert d.reason == "Ground sensors not available, slowing down"
+
+
+def test_a_report_with_the_same_stamp_replaces_the_one_held_even_untrusted():
+    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.3))
+    c.on_ground(GroundReport(NOW, 0.2, DEPTH, Ground.FLAT, 3.0))  # the newest frame counts
+    assert c.ground[DEPTH].trust == 0.2
+
+
 # ---- position and alert link
 
 
