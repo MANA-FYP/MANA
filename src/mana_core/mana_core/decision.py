@@ -84,6 +84,7 @@ class Priority(IntEnum):
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
+STOPS = ("drop", "obstacle", "stairs down")  # the stop branches that hold (#97)
 
 
 @dataclass(frozen=True)
@@ -263,19 +264,19 @@ class DecisionCore:
         self.level_since = (
             (now if self.level_since is None else self.level_since) if level else None
         )
-        if self._stairs_down():
-            self.down_seen_at = now
-        elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
-            self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         # every tick, whichever branch fires, so that each hold counts from its own hazard; while
         # a stop holds, its hazard still counts up to release_m past the limit (hysteresis)
-        past = {name: lim.release_m if self._held(name) else 0.0 for name in ("drop", "obstacle")}
+        past = {name: lim.release_m if self._held(name) else 0.0 for name in STOPS}
         seen = {
             "drop": self._drop_at_edge(lim.edge_m + past["drop"]),
             "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + past["obstacle"],
-            "stairs down": self._stairs_down(),
+            "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
         self._seen_at.update({name: now for name, s in seen.items() if s})
+        if seen["stairs down"]:
+            self.down_seen_at = now
+        elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
+            self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         self.tree.tick_once()
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
@@ -309,7 +310,7 @@ class DecisionCore:
             for r in self._grounds()
         )
 
-    def _confirmed_step(self) -> GroundReport | None:
+    def _confirmed_step(self, step_m: float | None = None) -> GroundReport | None:
         """The nearest report of a step that at least two different sensors both see close ahead.
 
         Ground reports come from the camera and the 3D camera. The ground classifier and the
@@ -321,13 +322,14 @@ class DecisionCore:
         agreeing = [r for r in self._grounds() if r.ground in STEPS]
         if len({SENSOR_OF.get(r.source, r.source) for r in agreeing}) < 2:
             return None
-        known = [r for r in agreeing if r.distance_m <= self.limits.step_m]  # NaN is never <=
+        step_m = self.limits.step_m if step_m is None else step_m
+        known = [r for r in agreeing if r.distance_m <= step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)
 
-    def _stairs_down(self) -> bool:
+    def _stairs_down(self, step_m: float | None = None) -> bool:
         """A step two sensors agree on, where any of them sees stairs going down. One sensor
         saying stairs down and the other a curb still asks: it never goes down unasked."""
-        return self._confirmed_step() is not None and any(
+        return self._confirmed_step(step_m) is not None and any(
             r.ground == Ground.STAIRS_DOWN for r in self._grounds()
         )
 
@@ -388,7 +390,7 @@ class DecisionCore:
         self._set(self.mode, True, 0.0, reason, Priority.URGENT)
 
     def _tracks(self):
-        if self._stairs_down():
+        if self.down_ok and self._held("stairs down"):  # as the "going down" branch decides
             reason = "Going down the stairs on tracks"
         elif self._confirmed_step().ground == Ground.CURB:
             reason = "Curb ahead, changing to tracks"
@@ -428,7 +430,7 @@ class DecisionCore:
                 ),
                 branch(  # and after the yes, down on tracks whatever the mode
                     "going down",
-                    lambda: self._stairs_down() and self.down_ok,
+                    lambda: self._held("stairs down") and self.down_ok,
                     self._tracks,
                 ),
                 branch(

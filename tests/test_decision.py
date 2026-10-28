@@ -558,6 +558,15 @@ def test_the_question_holds_through_one_lost_report_and_a_yes_then_still_counts(
     assert fed(c, stairs_down(), NOW + 0.2).reason == "Going down the stairs on tracks"
 
 
+def test_the_question_holds_while_the_stairs_read_just_past_the_step_distance():
+    c = core(*stairs_down(LIM.step_m - 0.1))
+    assert c.decision.reason == ASK_DOWN
+    just_past = stairs_down(LIM.step_m + 0.05)  # within release_m of step_m
+    assert all(d.reason == ASK_DOWN for d in ticks(c, just_past, 0.1, 2.0))
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, just_past, NOW + 2.1).reason == "Going down the stairs on tracks"
+
+
 def test_stop_then_go_asks_again():
     c = core(*stairs_down())
     c.on_command(Command.YES, 0.9)
