@@ -116,23 +116,42 @@ def test_obstacle_stops_close_and_slows_further_out(distance, stop, speed):
 # ---- a stop holds through one reading (#97)
 
 
-def test_one_reading_past_the_edge_does_not_release_a_drop_stop():
+def ticks(c, reports, start_s, seconds, obstacles=()):
+    """Feed the same readings at 10 Hz from start_s; return the decisions."""
+    out = []
+    for i in range(round(seconds * 10)):
+        t = NOW + start_s + i / 10
+        for o in obstacles:
+            c.on_obstacle(ObstacleReport(t, 0.9, LIDAR, o))
+        out.append(fed(c, reports, t))
+    return out
+
+
+def test_a_drop_stop_is_not_released_by_readings_just_past_the_edge():
     c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.4))
     assert c.decision.stop
-    noisy = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.55))  # over edge_m
-    assert fed(c, noisy, NOW + 0.1).reason == "Drop ahead, stopping"
-    assert fed(c, noisy, NOW + 0.1 + LIM.hold_s).reason == "Drop ahead, slowing down"
+    just_past = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + 0.05))
+    assert all(d.stop for d in ticks(c, just_past, 0.1, 2.0))  # within release_m: still held
+    gone = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + LIM.release_m + 0.05))
+    after = ticks(c, gone, 2.1, 1.0)
+    assert after[0].stop  # held for hold_s
+    assert after[-1].reason == "Drop ahead, slowing down"
 
 
-def test_one_reading_past_the_stop_distance_does_not_release_an_obstacle_stop():
-    c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(0.7))
+def test_an_obstacle_stop_is_not_released_by_readings_just_past_the_stop_distance():
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    c = core(*flat, obstacle(0.7))
     assert c.decision.stop
-    for t in (0.1, 0.4):  # the person is further than obstacle_stop_m, but not for long yet
-        c.on_obstacle(ObstacleReport(NOW + t, 0.9, LIDAR, 0.85))
-        assert fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + t).stop
-    c.on_obstacle(ObstacleReport(NOW + 0.6, 0.9, LIDAR, 0.85))
-    d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)), NOW + 0.6)
-    assert (d.stop, d.reason) == (False, "Obstacle ahead, slowing down")
+    assert all(d.stop for d in ticks(c, flat, 0.1, 2.0, obstacles=[0.85]))
+    after = ticks(c, flat, 2.1, 1.0, obstacles=[0.95])
+    assert after[0].stop
+    assert (after[-1].stop, after[-1].reason) == (False, "Obstacle ahead, slowing down")
+
+
+def test_a_drop_further_than_the_edge_does_not_stop_before_any_stop():
+    # the band past the limit counts only while a stop holds, not for the first stop
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, LIM.edge_m + 0.05)).decision
+    assert (d.stop, d.reason) == (False, "Drop ahead, slowing down")
 
 
 def test_a_hold_counts_from_its_own_hazard_whichever_branch_stopped():

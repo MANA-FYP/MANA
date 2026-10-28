@@ -143,6 +143,7 @@ class Limits:
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
+    release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
@@ -266,9 +267,12 @@ class DecisionCore:
             self.down_seen_at = now
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
-        seen = {  # every tick, whichever branch fires, so that each hold counts from its hazard
-            "drop": self._drop_at_edge(),
-            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m,
+        # every tick, whichever branch fires, so that each hold counts from its own hazard; while
+        # a stop holds, its hazard still counts up to release_m past the limit (hysteresis)
+        past = {name: lim.release_m if self._held(name) else 0.0 for name in ("drop", "obstacle")}
+        seen = {
+            "drop": self._drop_at_edge(lim.edge_m + past["drop"]),
+            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + past["obstacle"],
             "stairs down": self._stairs_down(),
         }
         self._seen_at.update({name: now for name, s in seen.items() if s})
@@ -293,14 +297,14 @@ class DecisionCore:
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
-    def _drop_at_edge(self) -> bool:
+    def _drop_at_edge(self, edge_m: float | None = None) -> bool:
         """A drop at the edge, or stairs going down at the edge that only one sensor sees: a fall
         needs no second opinion. Stairs down that two sensors confirm are left to the "stairs
         down" and "going down" branches, which stop and ask, so a yes can still take the chair
         down them. A stop needs a measured distance."""
         confirmed = self._stairs_down()
         return any(
-            r.distance_m <= self.limits.edge_m
+            r.distance_m <= (self.limits.edge_m if edge_m is None else edge_m)
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
@@ -329,7 +333,8 @@ class DecisionCore:
 
     def _held(self, name: str) -> bool:
         """The hazard of a stop branch was seen within hold_s: one reading over a limit, or one
-        lost report, does not release the stop (#97)."""
+        lost report, does not release the stop, and while it holds a hazard up to release_m past
+        the limit still counts as seen (#97)."""
         return self.now - self._seen_at.get(name, -math.inf) < self.limits.hold_s
 
     def _position_lost(self) -> bool:
