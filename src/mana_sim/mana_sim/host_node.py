@@ -7,11 +7,11 @@ watchdog_s seconds the chair stops: a host must never keep driving on an old req
 
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
-from mana_msgs.msg import DriveRequest
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64
 
+from mana_msgs.msg import DriveRequest
 from mana_sim.host import TRACKS, WATCHDOG_S, WHEELS, Host, HostCommand
 
 CHAIR = "/model/mana_chair"
