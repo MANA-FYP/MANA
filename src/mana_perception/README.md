@@ -125,15 +125,24 @@ The right distance is within 15 cm, or, for an edge in the blind zone, no farthe
 |---|---|---|
 | Flat | 60 / 60 | no false steps |
 | Ramp up or down, 8 % | 120 / 120 | no false steps |
-| Curb, 0.10 to 0.19 m | 193 / 216 | 211 / 216 (most of the rest read as stairs up, also a step for the core) |
-| Stairs up | 210 / 216 | 210 / 216 |
-| Stairs down | 129 / 216 | 214 / 216 (most of the rest read as a drop) |
-| Drop, 0.30 to 0.35 m | 215 / 216 | 215 / 216 |
-| Slope of 30 % (17 degrees) | 52 / 60 | the rest read as a step far along the slope |
+| Curb, 0.10 to 0.19 m | 185 / 216 | 211 / 216 (most of the rest read as stairs up, also a step for the core) |
+| Stairs up | 209 / 216 | 210 / 216 |
+| Stairs down | 128 / 216 | 213 / 216 (most of the rest read as a drop) |
+| Drop, 0.30 to 0.35 m | 213 / 216 | 213 / 216 |
+| Slope of 30 % (17 degrees) | 37 / 60 | the rest read as a step far along the slope |
 
 **No step or drop is ever missed, or put more than 15 cm past where it really is.** All 108 edges
 in the blind zone are reported no farther than they are. The few misses above are edges a few
 centimetres past the blind zone, reported at 0 m: closer than they are, which is safe.
+
+**Depth noise.** Each image row's depth is taken as its median across the path strip before it is
+turned into points: an edge across the path runs along a row, so the median keeps it, and the noise
+of single pixels falls by about the square root of the strip's width. Without it, noise of a few
+centimetres per pixel made flat ground read as a curb right in front, because just inside the
+blind zone only the pixels whose noise shortened them land, and those sit higher. With the
+simulation's 3D camera and its `depth_noise` fault (5 cm per pixel, `src/mana_sim`), flat ground
+stays flat, the ramp stays a ramp, and stairs, curbs and the drop are read at their place, to within
+5 cm; the tests check this.
 
 Known limits:
 
