@@ -2,9 +2,11 @@
 
     ros2 launch mana_sim world.launch.py              # with the Gazebo window
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
+    ros2 launch mana_sim world.launch.py stub:=true       # also the scripted perception stub
 
-The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2 and starts
-the host node. The core node is started separately, on the same clock:
+The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
+(config/bridge.yaml) and starts the host node, the sensors node and the depth node (the ground
+reports from the 3D camera). The core node is started separately, on the same clock:
 ros2 run mana_core core_node --ros-args -p use_sim_time:=true
 """
 
@@ -22,19 +24,6 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-CHAIR = "/model/mana_chair"
-BRIDGE = [
-    # ROS 2 -> Gazebo: what the host node asks of the chair
-    f"{CHAIR}/wheels_cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-    f"{CHAIR}/tracks_cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-    f"{CHAIR}/joint/wheel_lift/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
-    f"{CHAIR}/joint/track_lift_left/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
-    f"{CHAIR}/joint/track_lift_right/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double",
-    # Gazebo -> ROS 2: where the chair is, and the simulation clock
-    f"{CHAIR}/ground_truth@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-    "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-]
-
 
 def generate_launch_description():
     share = get_package_share_directory("mana_sim")
@@ -43,6 +32,9 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("headless", default_value="false", description="no window"),
+            DeclareLaunchArgument(
+                "stub", default_value="false", description="also start the scripted perception stub"
+            ),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 models + os.pathsep + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
@@ -53,7 +45,7 @@ def generate_launch_description():
                 condition=UnlessCondition(LaunchConfiguration("headless")),
             ),
             ExecuteProcess(
-                cmd=["gz", "sim", "-r", "-s", world],
+                cmd=["gz", "sim", "-r", "-s", "--headless-rendering", world],
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("headless")),
             ),
@@ -82,7 +74,7 @@ def generate_launch_description():
             Node(
                 package="ros_gz_bridge",
                 executable="parameter_bridge",
-                arguments=BRIDGE,
+                parameters=[{"config_file": os.path.join(share, "config", "bridge.yaml")}],
                 output="screen",
             ),
             # on the simulation clock: the 2.5 s slide switch and the watchdog count its seconds
@@ -91,6 +83,26 @@ def generate_launch_description():
                 executable="host_node",
                 output="screen",
                 parameters=[{"use_sim_time": True}],
+            ),
+            Node(
+                package="mana_sim",
+                executable="sensors_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
+            # ground reports from the simulated 3D camera (depth/image, depth/camera_info)
+            Node(
+                package="mana_perception",
+                executable="depth_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
+            Node(
+                package="mana_perception",
+                executable="stub_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+                condition=IfCondition(LaunchConfiguration("stub")),
             ),
         ]
     )

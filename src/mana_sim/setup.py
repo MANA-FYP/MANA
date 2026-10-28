@@ -27,6 +27,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.py")),
         ("share/" + package_name + "/worlds", glob("worlds/*.sdf")),
+        ("share/" + package_name + "/config", glob("config/*.yaml")),
         *tree("models", "models"),
     ],
     install_requires=["setuptools"],
@@ -39,6 +40,7 @@ setup(
     entry_points={
         "console_scripts": [
             "host_node = mana_sim.host_node:main",
+            "sensors_node = mana_sim.sensors_node:main",
         ]
     },
 )
