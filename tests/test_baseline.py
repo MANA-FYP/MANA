@@ -104,9 +104,17 @@ def test_the_picture_of_stairs_is_where_the_baseline_falls_short():
     assert not run(SCENARIOS["picture"]).mishaps and met(SCENARIOS["picture"], DecisionCore)[0] == 4
 
 
+def test_the_baseline_never_asks_about_stairs_down():
+    # its if-else rules have no question, so a user cannot say no to the stairs
+    trace = run(SCENARIOS["stairs_down"], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS["stairs_down"], trace) if not ok]
+    assert failed == ['Says "Stairs down ahead. Say yes to go down on tracks"']
+    assert not trace.mishaps
+
+
 def test_the_baseline_meets_every_other_scenario():
     for name, scenario in SCENARIOS.items():
-        if name != "picture":
+        if name not in ("picture", "stairs_down"):
             base, marks, _ = met(scenario, BaselineController)
             assert base == marks, name
 
