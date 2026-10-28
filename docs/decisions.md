@@ -83,3 +83,17 @@ The design has two rules: a change of mode needs two independent sensors, and a 
 | Change to tracks | It crosses | One sensor would change the mode: the picture of stairs shows why that is not allowed |
 | **Stop, and let the user choose tracks** | It waits; the user crosses on purpose | The user has to act; in the dark that is the safe default |
 
+
+## D5. How long a stop holds (#97)
+
+**Chosen:** a stop for a drop, an obstacle, a lone step or the stairs-down question holds for `hold_s` (0.5 s) after its hazard was last seen. While it holds, a hazard up to `release_m` (0.1 m) past its limit still counts, so it is released only once the hazard is clearly further away (hysteresis). Choosing tracks to cross a step, a yes, and the user's own go are checked every tick and never held. After the clock goes back (a world reset, a bag played again) nothing seen before counts. A yes heard up to `answer_s` (2 s) after the stairs-down question was last asked still answers it, since one reading can end the question a moment before the user's yes is heard.
+
+Before this, each tick decided from the latest reports alone. In the noisy runs of #54, one distance reading just past `edge_m` or `obstacle_stop_m`, or one lost camera report at the stairs-down question, released the stop for a tick, and it happened again and again while the chair waited.
+
+| Option | After a stop within the limit, 200 noisy runs each | Problem |
+|---|---|---|
+| Latest reports only (before) | the chair moved on in 196 drop, 167 manual-mode drop and 197 dark-corridor runs, by up to 0.24 m | One reading releases a stop; a yes heard on such a tick is lost |
+| Hold for `hold_s` only | moved on in 4 drop, 0 manual-mode and 19 dark-corridor runs, by up to 0.07 m | Readings that sit just past the limit still release it once `hold_s` has passed |
+| **Hold, and `release_m` past the limit** | 0 of 200 in all three | A hazard that really is gone is waited for 0.5 s more |
+
+Why 0.5 s: it is as long as a report counts (`max_age_s`), so a stop never holds on a hazard older than any report the core would still use. Why 0.1 m: the noise assumed in #54 is 0.02 m plus 5 % of the distance, about 0.04 m at the drop's 0.5 m and 0.06 m at the obstacle's 0.8 m, so a reading past 0.1 m is rare while the hazard is still at the limit.

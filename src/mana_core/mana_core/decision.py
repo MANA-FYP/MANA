@@ -146,6 +146,7 @@ class Limits:
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
+    answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
@@ -201,6 +202,7 @@ class DecisionCore:
         self.asking_down = False  # stopped at the top of stairs down, waiting for a yes
         self.down_ok = False  # the user said yes to the stairs down in sight
         self.down_seen_at = -math.inf
+        self.asked_at = -math.inf  # when the stairs-down question was last the decision
         self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
@@ -246,8 +248,10 @@ class DecisionCore:
         elif command in (Command.WHEELS, Command.TRACKS):
             self.automatic = False
             self.user_mode = Mode.WHEELS if command == Command.WHEELS else Mode.TRACKS
-        elif command == Command.YES and self.asking_down:
-            self.down_ok = True
+        elif command == Command.YES and (
+            self.asking_down or self.now - self.asked_at <= self.limits.answer_s
+        ):
+            self.down_ok = True  # also just after the question, which one reading can end
         elif command in (Command.SPEED_UP, Command.SLOW_DOWN):
             self.automatic = False
             step = SPEED_STEP if command == Command.SPEED_UP else -SPEED_STEP
@@ -274,10 +278,10 @@ class DecisionCore:
             "lone step": self._lone_step_at_edge(lim.edge_m + past["lone step"]),
             "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
-        if any(at > now for at in self._seen_at.values()) or self.down_seen_at > now:
+        if any(at > now for at in (*self._seen_at.values(), self.down_seen_at, self.asked_at)):
             # the clock went back (a world reset, a bag played again): what was seen is gone
             self._seen_at.clear()
-            self.down_seen_at, self.down_ok = -math.inf, False
+            self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
         if seen["stairs down"]:
             self.down_seen_at = now
@@ -286,6 +290,8 @@ class DecisionCore:
         self.tree.tick_once()
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
+        if self.asking_down:
+            self.asked_at = now
         return self.decision
 
     # ---- what the reports say

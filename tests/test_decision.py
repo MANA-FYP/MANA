@@ -636,6 +636,26 @@ def test_the_question_holds_while_the_stairs_read_just_past_the_step_distance():
     assert fed(c, just_past, NOW + 2.1).reason == "Going down the stairs on tracks"
 
 
+def test_a_yes_just_after_the_question_still_answers_it():
+    # one reading can end the question a moment before the user's yes is heard
+    c = core(*stairs_down())
+    one_sensor = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
+    for t in (0.1, 0.6, 1.1):  # longer than hold_s, so the question has ended
+        fed(c, one_sensor, NOW + t)
+    assert c.decision.reason != ASK_DOWN
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 1.2).reason == "Going down the stairs on tracks"
+
+
+def test_a_yes_long_after_the_question_does_not_answer_it():
+    c = core(*stairs_down())
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    for t in (0.5, 1.0, 1.5, 2.0, 2.5):
+        fed(c, flat, NOW + t)
+    c.on_command(Command.YES, 0.9)  # more than answer_s after it was last asked
+    assert fed(c, stairs_down(), NOW + 2.6).reason == ASK_DOWN
+
+
 def test_stop_then_go_asks_again():
     c = core(*stairs_down())
     c.on_command(Command.YES, 0.9)

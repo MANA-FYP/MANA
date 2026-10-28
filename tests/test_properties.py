@@ -18,6 +18,7 @@ import math
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from mana_core.decision import (
+    ASK_DOWN,
     Command,
     DecisionCore,
     Ground,
@@ -86,11 +87,12 @@ def test_the_safety_rules_hold_at_every_tick(stream):
     c = DecisionCore()
     stopped = False  # a STOP the user has not taken back with a trusted GO
     yes_holds = False  # a trusted yes to stairs down that no NO or STOP took back
+    asked_at = -math.inf  # when the core last asked about stairs down
     for i, step in enumerate(stream):
         now = T0 + i * DT
         feed(c, step, now)
         for cmd, trust in step[3]:
-            asking = c.asking_down
+            asking = c.now - asked_at <= LIM.answer_s  # asked now, or just before
             c.on_command(cmd, trust)
             if cmd == Command.STOP:
                 stopped, yes_holds = True, False
@@ -101,6 +103,8 @@ def test_the_safety_rules_hold_at_every_tick(stream):
             elif cmd == Command.YES and trust >= LIM.min_trust and asking:
                 yes_holds = True
         d = c.tick(now)
+        if d.reason == ASK_DOWN:
+            asked_at = now
         grounds = [r for r in c.ground.values() if fresh(r, now)]
         near = [r for r in c.obstacles.values() if fresh(r, now)]
 

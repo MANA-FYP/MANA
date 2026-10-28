@@ -244,6 +244,9 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
 3. A step up or a curb measured within 0.5 m by one sensor only, as when the camera cannot be trusted in the dark: stop. A change of mode needs two sensors, but a stop needs none. In manual mode the user can choose tracks to cross it.
 4. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
+
+   Stops 2 to 4 hold for 0.5 s after the hazard was last seen, and while they hold a hazard up to 0.1 m past its limit still counts, so one noisy reading does not release them. Choosing tracks to cross a step, a yes, and the user's own go are not held, and a yes up to 2 s after the question was last asked still answers it.
+
 5. Manual mode: follow the user's mode and speed
 6. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
 7. On tracks and not yet level for 2 s: stay on tracks
