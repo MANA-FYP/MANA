@@ -2,7 +2,8 @@
 
 The Gazebo test route, the wheel-and-track test host and its sensors. The chair follows the core's
 `DriveRequest` and publishes a camera, a 3D camera, a lidar, an IMU, a GPS and wheel encoders on ROS 2
-([docs/topics.md](docs/topics.md)). Faults, the ten scenarios and the CI smoke test come next.
+([docs/topics.md](docs/topics.md)), and `set_fault` switches sensor faults during a run
+([docs/faults.md](docs/faults.md)). The ten scenarios and the CI smoke test come next.
 
 ## Run it
 
@@ -18,7 +19,7 @@ ros2 launch mana_sim world.launch.py headless:=true   # no window
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (`config/bridge.yaml`) and starts the host node, `sensors_node` (transforms, `odom`, and the `motion`,
-`position`, `link` and `obstacle` reports) and `depth_node` (the `ground` reports from the 3D camera). It
+`position` and `obstacle` reports), `fault_node` (the faults, and the `link` report) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
 stub is off; `stub:=true` starts it as well.
 
@@ -93,5 +94,5 @@ Speed is `speed_limit` times 1.2 m/s, the same top speed as the scripted world.
 
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
 stop) and `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in the
-model) without Gazebo. With the simulation running, `tools/check_topic_rates.sh` checks that every sensor
+model) and `test/test_faults.py` (the faults and their scenarios) without Gazebo. With the simulation running, `tools/check_topic_rates.sh` checks that every sensor
 publishes at the rate in [docs/topics.md](docs/topics.md).
