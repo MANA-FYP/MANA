@@ -7,11 +7,11 @@ watchdog_s seconds the chair stops: a host must never keep driving on an old req
 
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
+from mana_msgs.msg import DriveRequest
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64
 
-from mana_msgs.msg import DriveRequest
 from mana_sim.host import TRACKS, WATCHDOG_S, WHEELS, Host, HostCommand
 
 CHAIR = "/model/mana_chair"
@@ -40,7 +40,8 @@ class HostNode(Node):
     def on_request(self, m: DriveRequest) -> None:
         if int(m.mode) not in (WHEELS, TRACKS):
             self.get_logger().warning(
-                f"ignored a drive request with mode {int(m.mode)}: the host has wheels (0) and tracks (1)",
+                f"ignored a drive request with mode {int(m.mode)}: "
+                "the host has wheels (0) and tracks (1)",
                 throttle_duration_sec=5.0,
             )
         self.request = (int(m.mode), bool(m.stop), float(m.speed_limit))

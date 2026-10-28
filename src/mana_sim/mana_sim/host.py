@@ -54,7 +54,8 @@ class Host:
         if not switching:
             self._switching_until = None
         wheel_lift, track_lift = self.lifts(self.mode)
-        limit = max(0.0, min(speed_limit, 1.0)) if math.isfinite(speed_limit) else 0.0  # NaN is no speed
+        # a speed that is not a number (NaN) is no speed
+        limit = max(0.0, min(speed_limit, 1.0)) if math.isfinite(speed_limit) else 0.0
         speed = 0.0 if stop or switching else limit * TOP_SPEED
         return HostCommand(
             wheel_lift,

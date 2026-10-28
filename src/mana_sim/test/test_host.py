@@ -7,9 +7,9 @@ from mana_sim.host import (
     TRACKS,
     TRACKS_DOWN,
     TRACKS_UP,
+    WATCHDOG_S,
     WHEELS,
     WHEELS_DOWN,
-    WATCHDOG_S,
     WHEELS_UP,
     Host,
 )

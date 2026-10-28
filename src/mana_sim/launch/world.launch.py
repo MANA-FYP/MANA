@@ -85,7 +85,7 @@ def generate_launch_description():
                 arguments=BRIDGE,
                 output="screen",
             ),
-            # on the simulation clock: the 2.5 s slide switch and the watchdog count simulation seconds
+            # on the simulation clock: the 2.5 s slide switch and the watchdog count its seconds
             Node(
                 package="mana_sim",
                 executable="host_node",
