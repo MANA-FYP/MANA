@@ -71,3 +71,15 @@ MANA stops the chair for a user's STOP, for a drop or stairs down at the edge, f
 
 Why reversing is slow: the chair has no sensor that looks backwards, so a slow reverse leaves the driver time to see what is behind. Turning on the spot near a drop is the open risk; the open test world (#79) and the scored drives (#81) will show whether it needs a rule of its own, such as no turning within `edge_m`.
 
+## D4. A step that only one sensor sees (#103)
+
+**Chosen:** a step up or a curb measured within `edge_m` by one trusted sensor, with no second sensor to confirm it, stops the chair ("Step ahead, stopping"). The stop holds in manual mode too, unless the user has chosen tracks, which is how they cross it on purpose. It does not stop a chair already on tracks. A report without a distance, such as the camera alone seeing a picture of stairs, still only slows down.
+
+The design has two rules: a change of mode needs two independent sensors, and a stop needs none. Before this, a step seen by one sensor only slowed the chair down. In the dark, where the camera cannot be trusted, the 3D camera alone saw the stairs and the curb, and MANA drove onto both on wheels (found while writing the coverage table, #82).
+
+| Option | One-sensor step at the edge | Problem |
+|---|---|---|
+| Slow down only (before) | The chair rolls onto it on wheels | A mishap whenever the second sensor is lost |
+| Change to tracks | It crosses | One sensor would change the mode: the picture of stairs shows why that is not allowed |
+| **Stop, and let the user choose tracks** | It waits; the user crosses on purpose | The user has to act; in the dark that is the safe default |
+

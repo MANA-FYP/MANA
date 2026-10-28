@@ -119,12 +119,27 @@ def test_the_baseline_never_asks_about_stairs_down():
     trace = run(SCENARIOS["stairs_down"], controller=BaselineController)
     failed = [m.text for m, ok, _ in check(SCENARIOS["stairs_down"], trace) if not ok]
     assert failed == ['Says "Stairs down ahead. Say yes to go down on tracks"']
+
+
+@pytest.mark.parametrize(
+    ("name", "misses"),
+    [
+        ("dark_stairs", ["Waits before the stairs until the user says TRACKS"]),
+        ("dark_curb", []),  # on tracks from the start, it is still slow short of the curb at 12 s
+    ],
+)
+def test_in_the_dark_the_baseline_crosses_on_one_sensor_without_stopping(name, misses):
+    # one source is enough for the baseline to change to tracks: here that gets it across,
+    # at the picture of stairs the same rule asks for tracks on a wall
+    trace = run(SCENARIOS[name], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS[name], trace) if not ok]
+    assert failed == ['Says "Step ahead, stopping"', *misses]
     assert not trace.mishaps
 
 
 def test_the_baseline_meets_every_other_scenario():
     for name, scenario in SCENARIOS.items():
-        if name not in ("picture", "wifi_drop", "stairs_down"):
+        if name not in ("picture", "wifi_drop", "stairs_down", "dark_stairs", "dark_curb"):
             base, marks, _ = met(scenario, BaselineController)
             assert base == marks, name
 
