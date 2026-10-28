@@ -52,7 +52,7 @@ start "$LOGS/position" ros2 topic echo --once /position mana_msgs/msg/PositionRe
 start "$LOGS/link" ros2 topic echo --once /link mana_msgs/msg/LinkReport
 start "$LOGS/launch.log" ros2 launch mana_sim world.launch.py headless:=true sensors:=false
 if [ "$CORE" = 1 ]; then
-  start "$LOGS/core.log" ros2 run mana_core core_node --ros-args -p use_sim_time:=true
+  start "$LOGS/core.log" ros2 run mana_core core_node --ros-args --params-file "$(ros2 pkg prefix mana_sim)/share/mana_sim/config/core.yaml"
 fi
 
 deadline=$((SECONDS + TIMEOUT))
