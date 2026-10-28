@@ -1,7 +1,8 @@
 """Variants of the world file made when the launch file starts: pure text, no ROS.
 
-A machine with no GPU (the CI runner) cannot render the cameras and the lidar. Without the Sensors
-system of Gazebo they never start, and the rest of the simulation (physics, IMU, GPS, the host) runs.
+A machine with no GPU (the CI runner) cannot render the cameras and the lidar. Without the
+Sensors system of Gazebo they never start, and the rest of the simulation (physics, IMU, GPS, the
+host) runs.
 """
 
 import re
