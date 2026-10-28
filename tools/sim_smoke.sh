@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test of the simulation: Gazebo starts headless, the core is started, and the core answers.
-# Passes when a DriveRequest and a UserMessage are published within the time limit.
+# Passes when a DriveRequest and a UserMessage (the core), a PositionReport and a LinkReport (the
+# simulation's position and link nodes) are published within the time limit.
 #
 #   tools/sim_smoke.sh               # start the world and the core, wait for both topics
 #   tools/sim_smoke.sh --no-core     # without the core: must fail (CI checks that it does)
@@ -47,6 +48,8 @@ start() {  # start a command in its own process group, output to a file
 # or echo gives up at once when the topic does not exist yet.
 start "$LOGS/drive_request" ros2 topic echo --once /drive_request mana_msgs/msg/DriveRequest
 start "$LOGS/user_message" ros2 topic echo --once /user_message mana_msgs/msg/UserMessage
+start "$LOGS/position" ros2 topic echo --once /position mana_msgs/msg/PositionReport
+start "$LOGS/link" ros2 topic echo --once /link mana_msgs/msg/LinkReport
 start "$LOGS/launch.log" ros2 launch mana_sim world.launch.py headless:=true sensors:=false
 if [ "$CORE" = 1 ]; then
   start "$LOGS/core.log" ros2 run mana_core core_node --ros-args -p use_sim_time:=true
@@ -54,13 +57,13 @@ fi
 
 deadline=$((SECONDS + TIMEOUT))
 heard() { grep -q "^---" "$LOGS/$1"; }  # a message ends with ---; a silent topic only warns
-until heard drive_request && heard user_message; do
+until heard drive_request && heard user_message && heard position && heard link; do
   if [ $SECONDS -ge $deadline ]; then break; fi
   sleep 1
 done
 
 status=0
-for topic in drive_request user_message; do
+for topic in drive_request user_message position link; do
   if heard "$topic"; then
     echo "PASS $topic was published"
   else

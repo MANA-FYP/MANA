@@ -99,7 +99,8 @@ what a test drive is meant to show. `m` and `a` stay available as the user's own
 ## Smoke test
 
 `tools/sim_smoke.sh` starts the world headless with no cameras and no lidar (`sensors:=false`, for a machine
-with no GPU), starts the core, and passes when a `DriveRequest` and a `UserMessage` are published within 90 s.
+with no GPU), starts the core, and passes when a `DriveRequest` and a `UserMessage` (from the core), and a `PositionReport` and a `LinkReport` (from
+the position and link nodes) are published within 90 s.
 `--no-core` runs it without the core and must fail. In CI the workflow `.github/workflows/sim-smoke.yml` runs
 both, when the simulation, the core or the script change and every night. Locally, after
 `colcon build` and `source install/setup.bash`:
