@@ -9,6 +9,7 @@
 
   <depend>rclpy</depend>
   <depend>mana_msgs</depend>
+  <exec_depend>mana_core</exec_depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>nav_msgs</depend>

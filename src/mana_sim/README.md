@@ -49,6 +49,37 @@ m/s, `angular.z` turn in rad/s, positive to the left) from whoever drives: the s
 
 Without `driver:=true` the chair drives straight at the speed limit, as the scripted scenarios need.
 
+### The supervisor's keyboard: taking over from the autopilot
+
+`driver:=true` also starts `driver_select`, which passes on the command of whoever drives: the
+autopilot (`cmd_vel/autopilot`, #78) or the supervisor (`cmd_vel/supervisor`). It publishes who
+drives on `driver` (`std_msgs/String`). Taking the controls is a latch: once the supervisor drives,
+the autopilot is ignored until the supervisor hands back. A driver that goes quiet for 0.5 s gives
+no motion; the chair never falls back to the other driver by itself.
+
+Run the keyboard in a terminal of its own:
+
+```bash
+ros2 run mana_sim keyboard --ros-args -p use_sim_time:=true
+```
+
+| Key | What it does |
+|---|---|
+| arrows | up and down change the speed by 0.1 m/s, left and right the turn by 0.2 rad/s; the first one takes the controls |
+| `x` | stand still, keeping the controls |
+| `h` | hand the controls back to the autopilot |
+| space | STOP to the core (and the supervisor's own motion to 0) |
+| `g` | GO |
+| `y` / `n` | YES / NO, to answer MANA's question about stairs down |
+| `m` / `a` | MANUAL / AUTOMATIC |
+| `w` / `t` | WHEELS / TRACKS |
+| `+` / `-` | speed up / slow down |
+| `q` | quit |
+
+Taking the controls does **not** put the core in manual mode. In manual mode the core leaves the
+mode and the speed to the user, and skips its own change to tracks and its slow-downs, which is
+what a test drive is meant to show. `m` and `a` stay available as the user's own commands.
+
 ```bash
 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.5}, angular: {z: 0.4}}"                       # forward 0.5 m/s, turning left
@@ -116,4 +147,5 @@ is the driver's speed, capped there.
 ## Tests
 
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
-stop, and a driver's steering capped by the drive request) without Gazebo.
+stop, and a driver's steering capped by the drive request) and `test/test_driver.py` (who drives, and
+the keys) without Gazebo, and `test/test_driver_select_node.py` in ROS 2.

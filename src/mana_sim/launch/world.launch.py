@@ -93,6 +93,15 @@ def generate_launch_description():
                 output="screen",
             ),
             # on the simulation clock: the 2.5 s slide switch and the watchdog count its seconds
+            # with a driver: who drives (supervisor or autopilot) is chosen here, then capped by
+            # MANA in the host. The supervisor's keyboard runs in its own terminal.
+            Node(
+                package="mana_sim",
+                executable="driver_select",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+                condition=IfCondition(LaunchConfiguration("driver")),
+            ),
             Node(
                 package="mana_sim",
                 executable="host_node",

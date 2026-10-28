@@ -39,6 +39,8 @@ setup(
     entry_points={
         "console_scripts": [
             "host_node = mana_sim.host_node:main",
+            "driver_select = mana_sim.driver_select_node:main",
+            "keyboard = mana_sim.keyboard_node:main",
         ]
     },
 )
