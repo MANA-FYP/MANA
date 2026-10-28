@@ -2,7 +2,7 @@
 
 For every hazard a user can meet: which sensor sees it, which rule of the decision core acts on it, and which test shows it. **Covered** means a rule, a scripted scenario and unit tests; **partly** means some of these; **not covered** means no rule acts on it yet. "Gazebo" is the simulation test, which waits for the simulated sensors (#92) and the scenario runner (#16).
 
-Rows that an open pull request covers say so: they become **covered** when it merges. The rule names are the branches of the behaviour tree in `mana_core/decision.py`, highest priority first: user stop, drop, obstacle, stairs down, going down, manual, step, slip, hold tracks, no ground, slow, no alert link, no position.
+Rows that an open pull request covers say so: they become **covered** when it merges. The rule names are the branches of the behaviour tree in `mana_core/decision.py`, highest priority first: user stop, drop, obstacle, lone step, stairs down, going down, manual, step, slip, hold tracks, no ground, slow, no alert link, no position.
 
 ## Ground and obstacles
 
@@ -11,10 +11,10 @@ Rows that an open pull request covers say so: they become **covered** when it me
 | Level ground | camera, 3D camera | wheels at full speed | `level` | `test_level_ground_drives_on_wheels_at_full_speed` | #16 | covered |
 | Ramp | 3D camera (slope over about 3°), camera | slow, on wheels | `ramp` | `test_ramp_slows_down_on_wheels` | #16 | covered |
 | Stairs up | camera and 3D camera, both | step: tracks at least 1.5 m before | `stairs` | `test_stairs_seen_by_both_cameras_change_to_tracks`, `test_one_camera_is_not_enough_to_change_mode` | #16 | covered |
-| Stairs up, only one sensor (in the dark) | 3D camera | none on `main`: MANA slows and **drives onto them on wheels** | `dark_stairs` (#104) | #104 | #16 | **not covered on `main`**; covered by #104 (#103) |
+| Stairs up, only one sensor (in the dark) | 3D camera | lone step: stop at `edge_m`; the user can choose tracks to cross | `dark_stairs` | `test_a_step_one_sensor_measures_at_the_edge_stops_the_chair` | #16 | covered (#103) |
 | Curb | 3D camera (up to 0.2 m), camera | step: tracks | `curb` | `test_curb_seen_by_both_cameras_changes_to_tracks` | #16 | covered |
-| Curb, only one sensor | 3D camera | as for stairs above | `dark_curb` (#104) | #104 | #16 | **not covered on `main`**; covered by #104 |
-| Stairs down | camera and 3D camera | stairs down: stop and ask; going down after a yes | `stairs_down` (#99) | the stairs-down tests in `tests/test_decision.py` | #52 | partly: on `main`, after a yes the chair **stops at the edge and never goes down**; fixed by #99 |
+| Curb, only one sensor | 3D camera | as for stairs above | `dark_curb` | `test_a_step_one_sensor_measures_at_the_edge_stops_the_chair` | #16 | covered |
+| Stairs down | camera and 3D camera | stairs down: stop and ask; going down after a yes | `stairs_down` | the stairs-down tests in `tests/test_decision.py` | #52 | covered |
 | Stairs down, only one sensor | 3D camera (StairNet has no stairs down) | drop: stop at `edge_m` | none | `test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop` | #52 | partly: no scenario |
 | Drop, platform edge | 3D camera (0.3 m of missing ground) | drop: stop at `edge_m`, one sensor is enough | `drop`, `manual_drop` | `test_drop_stops_at_the_edge_and_slows_before_it` | #16 | covered; one noisy reading can release the stop for a tick (#97); distance from the sensor, not the front (#96) |
 | Pothole, small drop | 3D camera, if at least 0.3 m of ground is missing along the path | drop | none | `tests/test_depth_ground.py` (the depth reader) | none | partly: less missing ground than `hole_m` (0.3 m) is not a drop to the depth reader |
@@ -34,7 +34,7 @@ Rows that an open pull request covers say so: they become **covered** when it me
 
 | Case | Sensors | Rule | Scripted scenario | Unit tests | Gazebo | Status |
 |---|---|---|---|---|---|---|
-| Darkness | camera trust × the light factor (#73) | untrusted reports are ignored | `dark` | `test_dark_corridor_untrusted_camera_is_ignored_but_depth_still_stops` | #15 | covered for obstacles; steps in the dark: #104 |
+| Darkness | camera trust × the light factor (#73) | untrusted reports are ignored | `dark` | `test_dark_corridor_untrusted_camera_is_ignored_but_depth_still_stops` | #15 | covered, also for steps in the dark |
 | IMU lost on the stairs | IMU | hold tracks until the tilt is known | `imu_lost` | `test_stays_on_tracks_when_the_imu_is_lost` | #15 | covered |
 | A stale or doubtful report | any | reports older than 0.5 s or under trust 0.5 are ignored | lost and doubtful reports in the noisy runs (#102) | `test_stale_reports_are_ignored_and_the_core_slows_down`, `test_untrusted_obstacle_is_ignored` | none | covered |
 | GPS lost indoors | GPS, lidar localisation (#43) | no position: slow only when neither GPS nor the lidar map has one | `entry` (#102) | `test_a_lost_position_slows_down`, `test_any_one_fresh_position_source_is_enough`; `mana_position` 23 tests | #42 | covered by unit tests; scenario with #102 |
@@ -59,15 +59,13 @@ The functional requirements the repository and the issues name, and where each i
 | FR-22 | one message at a time, most urgent first | `tests/test_messages.py`, #48 |
 | FR-23 | the caregiver's status view | `tests/test_caregiver.py`, #50 |
 | FR-24 | the Gazebo world with the test host | `mana_sim` tests, #13 |
-| FR-25 | stairs down: stop and ask | `tests/test_decision.py` stairs-down tests, #52 (the descent after a yes: #99) |
+| FR-25 | stairs down: stop and ask | `tests/test_decision.py` stairs-down tests and the `stairs_down` scenario, #52 |
 | FR-26 | the if-else baseline | `tests/test_baseline.py`, #53 |
 
 FR-4 is named in #48 only, without its text; the report's own list should be checked for any requirement not named here.
 
 ## Gaps, and where each is tracked
 
-- One-sensor steps up and curbs in the dark: **#103**, fixed by #104.
-- The descent after a yes to stairs down: fixed by #99 (#52).
 - A stop released by one noisy reading: **#97**.
 - Stop distances from the sensor, not the front of the device: **#96**.
 - No issue yet, to decide with the team: moving people (prediction), narrow doorways (width), obstacles at head height and low obstacles (height), uneven ground. For the report, each is either a new issue or a stated limit.
