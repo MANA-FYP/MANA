@@ -1,8 +1,29 @@
 name: Simulation smoke test
 
+# Not part of ci.yml: it needs Gazebo, so it runs only when the simulation, the core or the script
+# change, and every night. It is a separate check; add it to the branch rule when it has proved stable.
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "src/mana_sim/**"
+      - "src/mana_core/**"
+      - "src/mana_msgs/**"
+      - "src/mana_perception/**"
+      - "tools/sim_smoke.sh"
+      - ".github/workflows/sim-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/mana_sim/**"
+      - "src/mana_core/**"
+      - "src/mana_msgs/**"
+      - "src/mana_perception/**"
+      - "tools/sim_smoke.sh"
+      - ".github/workflows/sim-smoke.yml"
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
