@@ -28,22 +28,23 @@ below, unchanged while no fault is on ([faults.md](faults.md)). Read the names b
 
 Every node that reads these must run on simulation time (`-p use_sim_time:=true`).
 
-## What `sensors_node` and `fault_node` make of them
+## What the simulation's nodes make of them
 
 | Topic | Type | Rate | Frame | How |
 |---|---|---|---|---|
 | `odom` | `nav_msgs/Odometry` | 20 Hz | `odom` > `base_link` | the ground truth, with the frame ids of REP 105 |
 | `motion` | `mana_msgs/MotionReport` | 100 Hz | `base_link` | pitch and roll from the IMU orientation; `wheel_slip` when the wheels turn at a different speed than the chair moves (only judged in wheels mode) |
-| `position` | `mana_msgs/PositionReport` | 5 Hz | `map` | the GPS fix as metres east and north of the origin of the world; error 1.5 m (the simulated GPS gives no covariance) |
+| `position` | `mana_msgs/PositionReport` | 10 Hz | `gps_origin` | made by `position_node` (`mana_position`) from `gps/fix`: metres east and north of the first fix, with its GPS to lidar map switching; the error is 1.5 m (the simulated GPS gives no covariance), or the covariance a GPS noise fault sets |
 | `obstacle` | `mana_msgs/ObstacleReport` | 10 Hz, only when something is there | `lidar_link` | the nearest lidar echo within 0.35 rad of straight ahead and 4 m, source LIDAR |
-| `link` | `mana_msgs/LinkReport` | 2 Hz | none | made by `fault_node`: a healthy Wi-Fi link, or the fade while a fault is on |
+| `link` | `mana_msgs/LinkReport` | 20 Hz (both radios, 10 Hz each) | none | made by `link_node` (`mana_connectivity`) from the heartbeats; a Wi-Fi fade loses the Wi-Fi heartbeats |
+| `link/wifi/heartbeat`, `link/bluetooth/heartbeat` | `std_msgs/Header` | 1 Hz | none | made by `fault_node`; the Wi-Fi ones stop during a Wi-Fi fade |
 | `fault_state` | `std_msgs/String` | when it changes | none | the faults that are on (`fault_node`), "none" if there are none |
 
-`sensors_node` also broadcasts the transforms: `map` > `odom` (identity), `odom` > `base_link` (from the ground truth) and
+`sensors_node` broadcasts the transforms: `map` > `odom` (identity), `odom` > `base_link` (from the ground truth) and
 `base_link` > each sensor frame (`mana_sim/frames.py`, the same poses as the model; a test compares them).
 
-`position` comes straight from the GPS because `mana_position` is not in the simulation launch yet. When it
-joins, `sensors_node` should stop publishing `position`, or there would be two publishers.
+`position` and `link` are made by MANA's own nodes (`position_node` and `link_node`), so their switching is
+what the simulation tests. `sensors_node` does not publish either.
 
 ## Ground reports
 

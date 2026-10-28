@@ -20,7 +20,8 @@ ros2 launch mana_sim world.launch.py driver:=true     # a driver steers (see bel
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (`config/bridge.yaml`) and starts the host node, `sensors_node` (transforms, `odom`, and the `motion`,
-`position` and `obstacle` reports), `fault_node` (the faults, and the `link` report) and `depth_node` (the `ground` reports from the 3D camera). It
+`obstacle` report), `fault_node` (the faults, and the heartbeats of the two radios), MANA's own
+`position_node` and `link_node` (the `position` and `link` reports) and `depth_node` (the `ground` reports from the 3D camera). It
 also unpauses the simulation, because the window sometimes starts paused. The scripted perception
 stub is off; `stub:=true` starts it as well. `sensors:=false` leaves out the cameras and the lidar
 (for a machine with no GPU). `depth_node` is told where the 3D camera is mounted (`frames.depth_mount()`,

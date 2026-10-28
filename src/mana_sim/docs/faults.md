@@ -27,7 +27,7 @@ refused, and the answer says why. Run the nodes on simulation time (`-p use_sim_
 | camera, depth, lidar, imu, gps | `noise` | adds Gaussian noise: 20 grey levels, 5 cm, 5 cm, 0.05 rad/s and m/s^2, 3 m. A GPS gets the matching covariance, so the `position` error grows | 1 (times the sizes on the left) |
 | camera, depth, lidar, imu, gps | `dropout` | the sensor sends nothing (a GPS `dropout` is the GPS loss) | none |
 | camera | `dark` | the image keeps a share of its light | 0.05 |
-| wifi | `fade` | the `link` report falls from -50 dBm and trust 1 to -95 dBm and not connected, with missed heartbeats in the last 30 percent | 10 (seconds) |
+| wifi | `fade` | more and more of the Wi-Fi heartbeats are lost, until none gets through after this many seconds; `link_node` then reports missed heartbeats and the link gone, and MANA changes to Bluetooth | 10 (seconds) |
 | wheels | `slip` | the wheel encoders (`joint_states`) read this many times faster than the chair moves, so `motion` says `wheel_slip` on wheels | 2 |
 
 ## Scenarios
@@ -58,5 +58,5 @@ The scenarios say what to expect in words. Scoring them with pass marks comes wi
 
 - The faults are made on the messages, not in the physics. Wheel slip is the encoders reading fast: the chair
   does not really slide. Darkness darkens the image; the light in the world stays on.
-- `fault_node` also makes the `link` report (a healthy Wi-Fi link when no fault is on).
+- `fault_node` also sends the heartbeats of the two radios (once a second); `link_node` of `mana_connectivity` turns them into the `link` reports. The Bluetooth heartbeats never stop.
 - Images are copied through Python: at the sizes of the simulation this is fine, a larger camera would need a faster path.
