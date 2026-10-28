@@ -10,7 +10,7 @@ an obstacle.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mana_core.decision import STEP_STOP, Command, Ground, Limits, Mode, Source
+from mana_core.decision import ASK_DOWN, STEP_STOP, Command, Ground, Limits, Mode, Source
 from mana_core.world import Fault, Obstacle, Route, Stretch
 
 SLOW = Limits().slow
@@ -276,6 +276,21 @@ SCENARIOS = {
             7.0,
             says=(Say(2.0, Command.STOP), Say(5.0, Command.GO)),
             marks=(stop_within(), stopped_until_go(), moves_after_go(), tells("Stopped by you")),
+        ),
+        Scenario(
+            "stairs_down",
+            "Stairs down",
+            "Both cameras see stairs going down. MANA stops at the top and asks; once the user "
+            "says yes it goes down on tracks, and back to wheels at the bottom.",
+            Route(12.0, (Stretch(6.0, 8.0, Ground.STAIRS_DOWN, pitch_rad=-0.55, height_m=0.17),)),
+            60.0,
+            says=(Say(12.0, Command.YES),),
+            marks=(
+                tells(ASK_DOWN),
+                waits_before(6.0, Command.YES, "stairs"),
+                wheels_after(8.0),
+                reaches_end(12.0),
+            ),
         ),
         Scenario(
             "drop",
