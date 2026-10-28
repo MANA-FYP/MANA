@@ -15,7 +15,7 @@ import argparse
 
 NAMES = [
     # people and mobility
-    "person", "wheelchair", "walking stick", "bicycle", "motorcycle", "car", "dog",
+    "person", "wheelchair", "walking stick", "bicycle", "motorcycle", "car", "bus", "truck", "dog",
     # furniture and the building
     "chair", "couch", "table", "desk", "bench", "door", "glass door", "stairs", "pole", "pillar",
     "shelf", "cabinet", "box", "trash can", "fire extinguisher", "potted plant", "tv", "lamp",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from mana_core.decision import (
+    ASK_DOWN,
     Command,
     DecisionCore,
     Ground,
@@ -400,3 +401,135 @@ def constants(msg, field):
 )
 def test_codes_match_the_message_types(msg, field, enum):
     assert constants(msg, field) == {e.name: e.value for e in enum}
+
+
+# ---- stairs down: stop at the top, go down only after a yes
+
+
+def stairs_down(distance=1.0):
+    return ground(CAM, Ground.STAIRS_DOWN), ground(DEPTH, Ground.STAIRS_DOWN, distance)
+
+
+def fed(c, reports, at, motion=None):
+    for r in reports:
+        c.on_ground(GroundReport(at, r.trust, r.source, r.ground, r.distance_m))
+    c.on_motion(MotionReport(at, 0.9, pitch_rad=motion or 0.0))
+    return c.tick(at)
+
+
+def test_stairs_down_seen_by_two_sensors_stop_and_ask():
+    d = core(*stairs_down()).decision
+    assert (d.stop, d.reason, d.priority) == (True, ASK_DOWN, Priority.URGENT)
+
+
+def test_stairs_down_seen_by_one_sensor_only_slow_down():
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 1.0)).decision
+    assert (d.stop, d.reason) == (False, "Possible step ahead, slowing down")
+
+
+def test_yes_goes_down_on_tracks_and_no_stays_at_the_top():
+    c = core(*stairs_down())
+    c.on_command(Command.NO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+    c.on_command(Command.YES, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.2)
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.TRACKS, False, LIM.slow)
+    assert d.reason == "Going down the stairs on tracks"
+
+
+def test_an_early_or_unsure_yes_does_not_approve_the_stairs():
+    c = core()
+    c.on_command(Command.YES, 0.9)  # nothing was asked yet
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+    c.on_command(Command.YES, 0.2)  # heard, but not trusted
+    assert fed(c, stairs_down(), NOW + 0.2).stop
+
+
+def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert fed(c, stairs_down(), NOW + 0.1, motion=-0.4).mode == Mode.TRACKS  # going down
+    fed(c, flat, NOW + 1.0)  # at the bottom, level
+    assert fed(c, flat, NOW + 1.0 + LIM.level_hold_s).reason == "Level ground"
+    assert fed(c, stairs_down(), NOW + 4.0).reason == ASK_DOWN
+
+
+def test_stairs_up_still_change_to_tracks_without_asking():
+    assert core(*stairs()).decision.reason == "Stairs ahead, changing to tracks"
+
+
+def test_mixed_step_labels_with_stairs_down_still_ask():
+    # the camera names the ground but measures no distance
+    d = core(ground(CAM, Ground.STAIRS_DOWN), ground(DEPTH, Ground.CURB, 1.0)).decision
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+def test_a_no_after_the_yes_takes_it_back():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    c.on_command(Command.NO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.2).reason == ASK_DOWN
+
+
+def test_a_yes_lapses_once_the_stairs_are_out_of_sight_even_without_level_ground():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    for i in range(1, 20):  # no motion reports, so level ground is never confirmed
+        t = NOW + i / 10
+        for r in flat:
+            c.on_ground(GroundReport(t, r.trust, r.source, r.ground, r.distance_m))
+        c.tick(t)
+    assert fed(c, stairs_down(), NOW + 2.0).reason == ASK_DOWN
+
+
+def test_stop_then_go_asks_again():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    c.on_command(Command.STOP, 0.9)
+    c.on_command(Command.GO, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+
+
+@pytest.mark.parametrize(
+    "command", [Command.SPEED_UP, Command.SLOW_DOWN, Command.WHEELS, Command.MANUAL]
+)
+def test_a_driving_command_at_the_question_does_not_drive_on(command):
+    c = core(*stairs_down())
+    c.on_command(command, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.1)
+    assert (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [([Command.MANUAL], []), ([], [Command.SPEED_UP]), ([], [Command.WHEELS])],
+    ids=["manual then yes", "yes then speed up", "yes then wheels"],
+)
+def test_after_a_yes_the_stairs_are_gone_down_on_tracks_whatever_the_mode(before, after):
+    c = core()
+    for command in before:
+        c.on_command(command, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+    c.on_command(Command.YES, 0.9)
+    for command in after:
+        c.on_command(command, 0.9)
+    d = fed(c, stairs_down(), NOW + 0.2)
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.TRACKS, False, LIM.slow)
+    assert d.reason == "Going down the stairs on tracks"
+
+
+def test_an_unsure_no_still_takes_the_yes_back():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    c.on_command(Command.NO, 0.2)
+    assert fed(c, stairs_down(), NOW + 0.1).reason == ASK_DOWN
+
+
+def test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop():
+    # StairNet has no stairs down, so often only the 3D camera sees them: a fall needs no second
+    # opinion, so they stop at the edge instead of rolling on slowly
+    d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")

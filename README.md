@@ -242,15 +242,52 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
-3. Manual mode: follow the user's mode and speed
-4. Stairs or a curb seen by both cameras, or wheel slip: tracks, slow
-5. On tracks and not yet level for 2 s: stay on tracks
-6. No trusted ground report: slow down
-7. An obstacle, drop, ramp or possible step ahead: slow down
-8. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
-9. Otherwise: wheels, full speed
+3. Stairs down seen by two sensors: stop and ask; after the user says yes, go down on tracks, slowly, whatever the mode (a no or a stop at any trust, or a new staircase, asks again)
+4. Manual mode: follow the user's mode and speed
+5. Stairs up or a curb seen by both cameras, or wheel slip: tracks, slow
+6. On tracks and not yet level for 2 s: stay on tracks
+7. No trusted ground report: slow down
+8. An obstacle, drop, ramp or possible step ahead: slow down
+9. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
+10. Otherwise: wheels, full speed
 
 The distances and times are defaults, set as ROS parameters, to be tuned in simulation. `tests/test_decision.py` tests every rule, with edge and failure cases; `src/mana_core/test/test_core_node.py` tests the node through ROS topics.
+
+### Position source (`mana_position`)
+
+```bash
+ros2 run mana_position position_node
+```
+
+The node listens on `gps/fix` (NavSatFix), `lidar/odometry` or `lidar/pose` (the lidar localisation; slam_toolbox publishes the second) and `odometry/filtered` (the fused odometry from robot_localization). Ten times a second it chooses one source and publishes a `PositionReport` for it on `position`:
+
+- GPS is left once its error has been worse than 15 m, or there has been no fix, for 1.5 s, counted from the last good fix even when the GPS simply falls silent, so walking into a building switches within the 2 s target and one bad reading does not switch at all;
+- GPS is chosen again only after its error has been better than 8 m for 5 s, so one outage gives one switch away and one back;
+- away from GPS the lidar map is used while the lidar localisation reports, and odometry, which drifts, only while it does not.
+
+GPS positions are metres east and north of the first fix, in their own frame (`gps_origin`), until robot_localization aligns them with the map (#43). The levels and times are ROS parameters. `src/mana_position/test` tests the rule and sends a lost GPS fix through ROS.
+
+The whole position stack starts with one launch file: robot_localization's two EKFs (wheels and IMU in `odom`, plus GPS in `map`), navsat_transform, and the position node. The topic names are launch arguments:
+
+```bash
+ros2 launch mana_position localisation.launch.py wheel_odometry:=/chair/odom imu:=/chair/imu gps:=/chair/gps
+```
+
+The lidar map source is slam_toolbox's localisation mode on a saved map of the building. Its pose goes to `lidar/pose`. Why slam_toolbox and not FAST-LIO2 or KISS-ICP is in [`docs/decisions.md`](docs/decisions.md).
+
+### Alert link (`mana_connectivity`)
+
+```bash
+ros2 run mana_connectivity link_node
+```
+
+Each radio proves itself with heartbeats answered by the other end, on `link/wifi/heartbeat` and `link/bluetooth/heartbeat`. Ten times a second the node publishes a `LinkReport` for each radio on `link` and chooses the radio for alerts:
+
+- alerts go over Wi-Fi; once Wi-Fi has missed two heartbeats in a row (a beat counts as missed half a period after it was due) they go over Bluetooth, if it is up, and with neither there is no link (the core then slows down);
+- while Bluetooth carries the alerts, Wi-Fi must answer steadily for 5 s before they return to it, so a fading signal gives one switch away and one back; at start, or with Bluetooth down too, Wi-Fi takes them as soon as it answers;
+- urgent messages from the core become alerts on `alert/wifi` or `alert/bluetooth`. Each stays in an outbox until its id comes back on `alert/ack`: it is sent again every second, and at once over the new radio after a switch, so no alert is lost. Ids carry a token for this boot, so a late answer from an earlier run cannot clear a new alert. Something at the other end, such as the caregiver view (#50), must answer; past 100 unanswered alerts the oldest is dropped and logged.
+
+`src/mana_connectivity/test` tests the rule and the outbox, and fades Wi-Fi through ROS while an alert is waiting.
 
 ### Scenarios, pass marks and the live demo
 
@@ -276,6 +313,14 @@ Check every scenario in fast time (CI runs the same as `tests/test_scenarios.py`
 ```bash
 ros2 run mana_core evaluate              # or one or more by name: ros2 run mana_core evaluate stairs dark
 ```
+
+Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The baseline uses the same thresholds and messages and the same stops and slow-downs, but every report counts however old or doubtful it is, one source is enough to change to tracks, a tilt steeper than any accessible ramp means tracks, and it returns to wheels as soon as the tilt is small:
+
+```bash
+ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
+```
+
+In the scripted world MANA meets 39 of 39 pass marks and the baseline 38: one camera is enough for it to ask for tracks at the picture of stairs. The scripted sensors report correct ground even when their trust is low, so these scenarios do not yet show what MANA's trust and age checks add; the full evaluation (#54) adds scenarios with doubtful and stale reports.
 
 Watch one live, with the real core node on ROS 2 topics. The scenario node plays the route in real time, drives the chair as the core asks, prints each decision and each message for the user, and ends with the pass marks:
 

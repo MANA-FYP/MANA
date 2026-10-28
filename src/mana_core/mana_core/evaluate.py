@@ -2,12 +2,16 @@
 pass mark. tests/test_scenarios.py runs it in CI; from a shell:
 
     python3 -m mana_core.evaluate [scenario ...]     # or: ros2 run mana_core evaluate
+    python3 -m mana_core.evaluate --baseline [scenario ...]   # the if-else baseline instead
+    python3 -m mana_core.evaluate --compare [scenario ...]    # both, side by side
 
-It prints one line per pass mark and exits with 1 if any of them fails.
+It prints one line per pass mark and exits with 1 if any of them fails. --compare prints the pass
+marks each controller met and exits with 1 only if MANA misses one.
 """
 
 import sys
 
+from mana_core.baseline import BaselineController
 from mana_core.decision import DecisionCore, GroundReport, Limits, ObstacleReport, Priority
 from mana_core.messages import Message as Heard
 from mana_core.messages import MessageQueue, direction
@@ -26,11 +30,13 @@ def feed(core: DecisionCore, report) -> None:
         core.on_motion(report)
 
 
-def run(scenario: Scenario, limits: Limits | None = None, cane: bool = False) -> Trace:
+def run(
+    scenario: Scenario, limits: Limits | None = None, controller=DecisionCore, cane: bool = False
+) -> Trace:
     """Play a scenario. trace.messages has every change of reason, as the node makes them;
     trace.heard has what the user would hear, one at a time, urgent first. With cane=True the
     host also says what is ahead (step directions), as a smart cane would."""
-    core, world, trace = DecisionCore(limits), World(scenario.route), Trace()
+    core, world, trace = controller(limits), World(scenario.route), Trace()
     queue = MessageQueue()
     says = sorted(scenario.says, key=lambda s: s.at_s)
     t = 0.0
@@ -70,13 +76,42 @@ def report(scenario: Scenario, trace: Trace) -> int:
     return failed
 
 
+def met(scenario: Scenario, controller) -> tuple[int, int, str]:
+    """Pass marks met, pass marks in all, and the first mishap ("" when none)."""
+    trace = run(scenario, controller=controller)
+    results = check(scenario, trace)
+    return sum(ok for _, ok, _ in results), len(results), trace.mishaps[0] if trace.mishaps else ""
+
+
+def compare(names: list[str]) -> int:
+    """MANA and the baseline on the same scenarios; returns how many marks MANA missed."""
+    print(f"{'Scenario':<38} {'MANA':>6} {'Baseline':>9}  Baseline mishap")
+    totals = [0, 0, 0]
+    for n in names:
+        (mana, marks, _), (base, _, mishap) = (
+            met(SCENARIOS[n], c) for c in (DecisionCore, BaselineController)
+        )
+        totals = [totals[0] + mana, totals[1] + base, totals[2] + marks]
+        print(f"{SCENARIOS[n].title:<38} {mana:>3}/{marks:<2} {base:>6}/{marks:<2}  {mishap}")
+    print(f"{'All':<38} {totals[0]:>3}/{totals[2]:<2} {totals[1]:>6}/{totals[2]:<2}")
+    return totals[2] - totals[0]
+
+
 def main(argv: list[str] | None = None) -> int:
-    names = (sys.argv[1:] if argv is None else argv) or list(SCENARIOS)
+    args = sys.argv[1:] if argv is None else argv
+    options = [a for a in args if a.startswith("--")]
+    if bad := [o for o in options if o not in ("--baseline", "--compare")]:
+        print(f"unknown option {', '.join(bad)}; use --baseline or --compare")
+        return 2
+    names = [a for a in args if not a.startswith("--")] or list(SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
         print(f"unknown scenario {', '.join(unknown)}; choose from: {', '.join(SCENARIOS)}")
         return 2
-    failed = sum(report(SCENARIOS[n], run(SCENARIOS[n])) for n in names)
+    if "--compare" in args:
+        return 1 if compare(names) else 0
+    controller = BaselineController if "--baseline" in args else DecisionCore
+    failed = sum(report(SCENARIOS[n], run(SCENARIOS[n], controller=controller)) for n in names)
     print("\nAll pass marks met." if not failed else f"\n{failed} pass mark(s) failed.")
     return 1 if failed else 0
 
