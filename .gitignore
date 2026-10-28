@@ -28,3 +28,6 @@ Thumbs.db
 # Local certificates and keys for the phone demo
 *.pem
 *.key
+
+# traces of the scenarios played in Gazebo (mana_core.evaluate --world gazebo)
+gazebo_traces/

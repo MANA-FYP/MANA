@@ -4,6 +4,7 @@
     ros2 launch mana_sim world.launch.py headless:=true   # no window (server only), for CI
     ros2 launch mana_sim world.launch.py stub:=true       # also the scripted perception stub
     ros2 launch mana_sim world.launch.py detector:=true   # also the object detector on the camera
+    ros2 launch mana_sim world.launch.py world:=/path/to/world.sdf   # another world, for a scenario
     ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
 
@@ -53,7 +54,9 @@ def bare_world(world: str) -> str:
 def gazebo(context):
     """Gazebo, with the window or headless. sensors:=false starts it on the world with no cameras
     and no lidar (a machine with no GPU), which is made only then."""
-    world = os.path.join(get_package_share_directory("mana_sim"), "worlds", "mana_route.sdf")
+    world = LaunchConfiguration("world").perform(context) or os.path.join(
+        get_package_share_directory("mana_sim"), "worlds", "mana_route.sdf"
+    )
     if LaunchConfiguration("sensors").perform(context) == "false":
         world = bare_world(world)
     headless = LaunchConfiguration("headless").perform(context) == "true"
@@ -78,6 +81,9 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "detector", default_value="false", description="also start the object detector"
+            ),
+            DeclareLaunchArgument(
+                "world", default_value="", description="a world file to use instead of the route"
             ),
             DeclareLaunchArgument(
                 "weights", default_value="yolo26n.pt", description="the object detector's weights"

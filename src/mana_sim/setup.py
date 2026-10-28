@@ -43,6 +43,7 @@ setup(
             "sensors_node = mana_sim.sensors_node:main",
             "fault_node = mana_sim.fault_node:main",
             "fault_script = mana_sim.fault_script:main",
+            "scenario_runner = mana_sim.scenario_runner:main",
             "driver_select = mana_sim.driver_select_node:main",
             "keyboard = mana_sim.keyboard_node:main",
         ]
