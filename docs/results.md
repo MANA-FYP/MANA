@@ -24,7 +24,9 @@ The stairs, the drops and the obstacles stay where the pass marks expect them. T
 - **Building entry**: up a ramp on GPS, then inside, where GPS is lost but the lidar map still has the position.
 - **Wi-Fi drop**: Wi-Fi fades and Bluetooth carries the alerts; then both are gone for 2 m.
 
-Darkness and the spoken stop are the existing dark-corridor and spoken-stop scenarios.
+Darkness and the spoken stop are the existing dark-corridor and spoken-stop scenarios. Two edge cases show what MANA's trust and age checks add, which the other scenarios do not, since their sensors always report the right ground:
+- **Glare**: the 3D camera alone sees a drop on level ground, at a trust of 0.3.
+- **A person steps aside**: MANA stops for a person, who then steps aside, so their last report gets old.
 
 "All marks met" counts the runs that met every pass mark of the scenario, with the 95% (Wilson) interval. A mishap is going over a drop, onto steps on wheels, or into an obstacle.
 
@@ -45,10 +47,12 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 | IMU lost on the stairs (failure case) | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Building entry (full system) | 182/200 (86.2% to 94.2%) | 120/200 (53.1% to 66.5%) | 0/200 | 0/200 | 98.2% (sd 5.7%) | 90.2% (sd 13.1%) |
 | Wi-Fi drop (full system) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.8% (sd 4.3%) | 64.8% (sd 5.5%) |
+| Glare: a doubtful drop (edge case) | 174/200 (81.6% to 91.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 96.8% (sd 8.4%) | 47.0% (sd 8.1%) |
+| A person steps aside (edge case) | 187/200 (89.2% to 96.2%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.4% (sd 6.2%) | 50.0% (sd 0.0%) |
 
 ### What the table shows
 
-- **Neither controller had a mishap in any of the 6,000 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
+- **Neither controller had a mishap in any of the 6,800 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
 - **A stop holds through a noisy reading (#97).** "Stops before" fails if the chair moves at all after its first stop for the hazard. Before #97, one noisy distance over `edge_m` or `obstacle_stop_m` released the stop for a tick, and it happened again and again while the chair waited. MANA met the stop mark in 2 of 200 drop runs, 32 of 200 manual-mode drop runs and 1 of 200 dark-corridor runs, and came within 0.20 m of an edge the rule keeps 0.5 m away. Now a stop holds for 0.5 s after its hazard was last seen, and while it holds, a hazard up to 0.1 m past its limit still counts (`docs/decisions.md`, D5). Once the chair has stopped within the limit, it no longer moves on in any of the 200 runs of each scenario. Where MANA still misses the mark (6 drop runs, 25 dark-corridor runs), a noisy reading stopped it early: 0.57 to 0.68 m from the edge, 0.85 to 0.98 m from the person. Once the hold ran out, the chair moved on to the real limit and stopped there. The baseline still releases its stops in nearly every run.
 - **Stairs down: every mark in 200 of 200 runs.** Before #97 a yes was lost in 13 runs. It was heard on a tick where one lost camera report, or a reading just past `step_m`, had ended the question. The question now holds the same way, and a yes heard up to 2 s after it was last asked still answers it.
 - **Where the baseline falls short:**
@@ -56,8 +60,9 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
   - **The ramp** (118 of 200): a single false camera report of stairs makes it ask for tracks on the ramp. **Building entry** (120 of 200) fails for the same reason, on its entrance ramp, so it is the same weakness, not a second one. With false reports turned off, the baseline meets every mark on both in 200 of 200 runs.
   - **The Wi-Fi drop** (0 of 200): the alert link is not part of its rules, so it drives on at full speed while no alert could be sent.
   - **Stairs down** (0 of 200): its if-else rules have no question, so it never asks before going down.
+  - **Glare and a person who steps aside** (0 of 200 each): every report counts for it, however doubtful or old. It stops for the drop at trust 0.3 and for the person's last report, and waits there until the time runs out. MANA drives on in both.
   - **Stairs and a curb in the dark** (0 of 200 each): one sensor is enough for it to change to tracks, so it crosses on the 3D camera alone without stopping. It has no mishap there, but it is the same one-sensor rule that asks for tracks on a wall at the picture of stairs. MANA stops and waits for the user to choose tracks, in 200 of 200 runs of each.
-- **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182) and the Wi-Fi drop (186), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all three in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
+- **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182), the Wi-Fi drop (186), glare (174) and the person who steps aside (187), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all five in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
 
 To make the table without false reports:
 
