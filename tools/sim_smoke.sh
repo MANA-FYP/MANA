@@ -64,7 +64,8 @@ deadline=$((SECONDS + TIMEOUT))
 heard() { grep -q "^---" "$LOGS/$1"; }  # a message ends with ---; a silent topic only warns
 # The core sends a user message when what it says changes. In this world that is once, at its
 # first tick, which a listener can miss while the two are still finding each other. With --faults
-# the probe makes the core say new things, so user_message is checked after the faults.
+# sim_faults.py checks the core's messages instead: it makes the core say new things, and it can
+# tell them from its own alerts, which it also sends on user_message.
 TOPICS="drive_request position link"
 [ "$FAULTS" = 1 ] || TOPICS="drive_request user_message position link"
 all_heard() { for topic in "$@"; do heard "$topic" || return 1; done; }
@@ -87,7 +88,6 @@ report() {
 report $TOPICS
 if [ $status -eq 0 ] && [ "$FAULTS" = 1 ]; then
   python3 "$(dirname "$0")/sim_faults.py" || status=1
-  report user_message
 fi
 if [ $status -ne 0 ]; then
   echo "--- launch log (tail)"; tail -n 25 "$LOGS/launch.log"

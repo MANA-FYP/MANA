@@ -38,6 +38,7 @@ WAIT_S = 60.0  # wall seconds to wait for each step: the simulation may run slow
 GPS_LOST_S = 1.5 + 2.5 + 1.0  # the position node's max_age_s, the core's position_max_age_s, ticks
 FADE_S = 10.0
 ALERT_EVERY_S = 0.5
+ALERT_TEXT = "fault check alert"  # the probe's own urgent messages, told apart from the core's
 
 
 class Probe(Node):
@@ -61,6 +62,8 @@ class Probe(Node):
         self.received = []  # (sim time, link, text) of every alert that reached the phone
         self.sent_on = []  # (sim time, link, text) of every alert the node sent, reached or not
         self.say = self.create_publisher(UserMessage, "user_message", 10)
+        self.core_said = []  # (sim time, text) of the core's user messages, not the probe's alerts
+        self.create_subscription(UserMessage, "user_message", self.on_message, 10)
         self.ack = self.create_publisher(String, "alert/ack", 10)
         for link, name in ((LinkReport.WIFI, "wifi"), (LinkReport.BLUETOOTH, "bluetooth")):
             self.create_subscription(
@@ -78,8 +81,12 @@ class Probe(Node):
     def delivered(self) -> set[str]:
         return {text for _, _, text in self.received}
 
+    def on_message(self, m):
+        if not m.text.startswith(ALERT_TEXT):
+            self.core_said.append((self.now(), m.text))
+
     def send_alert(self):
-        text = f"fault check alert {len(self.alerts_sent) + 1}"
+        text = f"{ALERT_TEXT} {len(self.alerts_sent) + 1}"
         self.alerts_sent.append(text)
         self.say.publish(UserMessage(priority=UserMessage.URGENT, text=text, speak=True))
 
@@ -155,6 +162,11 @@ def main() -> int:
             f"GPS lost: '{NO_POSITION}' after "
             + (f"{slowed - t:.1f} s" if slowed else "never")
             + f" (at most {GPS_LOST_S:.1f} s)",
+        )
+        p.spin_until(lambda: any(at > t and x == NO_POSITION for at, x in p.core_said), 5.0)
+        check(
+            any(at > t and x == NO_POSITION for at, x in p.core_said),
+            f"GPS lost: the core tells the user '{NO_POSITION}' (user_message)",
         )
 
         t = p.now()
