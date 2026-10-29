@@ -28,6 +28,7 @@ setup(
         ("share/" + package_name + "/launch", glob("launch/*.py")),
         ("share/" + package_name + "/worlds", glob("worlds/*.sdf")),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
+        ("share/" + package_name + "/web", glob("web/*.html")),
         *tree("models", "models"),
     ],
     install_requires=["setuptools"],
@@ -45,6 +46,7 @@ setup(
             "fault_script = mana_sim.fault_script:main",
             "driver_select = mana_sim.driver_select_node:main",
             "keyboard = mana_sim.keyboard_node:main",
+            "panel_node = mana_sim.panel_node:main",
         ]
     },
 )

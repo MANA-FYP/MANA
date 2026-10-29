@@ -6,6 +6,7 @@
     ros2 launch mana_sim world.launch.py detector:=true   # also the object detector on the camera
     ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
+    ros2 launch mana_sim world.launch.py panel:=true      # the supervisor's panel, localhost:8090
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (config/bridge.yaml) and starts the host node, the sensors node, MANA's position and link nodes
@@ -87,6 +88,11 @@ def generate_launch_description():
                 "driver",
                 default_value="false",
                 description="follow cmd_vel (forward and turn) from a driver, capped by MANA",
+            ),
+            DeclareLaunchArgument(
+                "panel",
+                default_value="false",
+                description="the supervisor's panel on http://localhost:8090",
             ),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
@@ -188,6 +194,14 @@ def generate_launch_description():
                         "camera_pitch_rad": depth_pitch_rad,
                     }
                 ],
+            ),
+            # the supervisor's panel: MANA's decision live, and the fault and command switches
+            Node(
+                package="mana_sim",
+                executable="panel_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+                condition=IfCondition(LaunchConfiguration("panel")),
             ),
             # obstacles from the simulated RGB camera (camera/image, camera/camera_info)
             Node(

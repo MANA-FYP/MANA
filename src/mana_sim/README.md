@@ -16,6 +16,7 @@ source install/setup.bash
 ros2 launch mana_sim world.launch.py                  # with the Gazebo window
 ros2 launch mana_sim world.launch.py headless:=true   # no window
 ros2 launch mana_sim world.launch.py driver:=true     # a driver steers (see below)
+ros2 launch mana_sim world.launch.py panel:=true      # the supervisor's panel (see below)
 ```
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
@@ -95,6 +96,28 @@ ros2 run mana_sim keyboard --ros-args -p use_sim_time:=true
 Taking the controls does **not** put the core in manual mode. In manual mode the core leaves the
 mode and the speed to the user, and skips its own change to tracks and its slow-downs, which is
 what a test drive is meant to show. `m` and `a` stay available as the user's own commands.
+
+### The supervisor's panel
+
+With `panel:=true`, `panel_node` serves a page on http://localhost:8090, on this computer only (it
+listens on 127.0.0.1). It shows, as it happens:
+
+- who is driving;
+- the core's decision: mode, speed limit, a stop and its reason;
+- the message said to the user;
+- the position source;
+- whether Wi-Fi and Bluetooth can carry an alert now;
+- the ground and obstacle reports, split into those MANA trusts now and those it does not use. A
+  report is not used when it is older than the core's `max_age_s` or trusted less than its
+  `min_trust`, and the panel says which.
+
+Its buttons switch every fault of `fault_node` (each sensor's dropout and noise, darkness, the Wi-Fi
+fade and wheel slip) through `set_fault`. A button shows a fault as on when `fault_state` says it
+is. The user's STOP, GO, YES and NO go out as a button press on `user_command`. `panel.py` has the
+logic and no ROS; `panel_node.py` adds the topics and the web server (Python's own `http.server`).
+
+The caregiver's view in `demo/` (#65) is not reused. It reads the phone demo's state, not ROS
+topics, and it has no switches by design.
 
 ## Smoke test
 
