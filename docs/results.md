@@ -145,6 +145,7 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 | GPS lost (`gps dropout`) | The position node stops reporting: there is no lidar map in this world yet (#43). The core says "Position unknown, slowing down" once the last report is older than 2.5 s | after 4.0 to 4.1 s: the fix ages out after 1.5 s, then the report after 2.5 s |
 | GPS back | The selector takes GPS back after 5 s of good fixes (`back_s`), and the core says "Level ground" again | after 5.3 to 5.4 s |
 | Wi-Fi fade over 10 s (`wifi fade`) | The link node gives Wi-Fi up, Bluetooth still carries the alerts, and the core never slows down for the link | Wi-Fi given up after 6.4 to 9.5 s. The core said "Level ground" throughout, in every run |
+| Alerts during the fade | The probe is the helper's phone. It sends an urgent message every 0.5 s of the fade (20 in all), answers the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began, the worst case. Every alert still arrives, and the alert link changes at most once | in 4 runs, all 20 alerts arrived and the link changed once. In the last 2 runs, 17 and 20 of them had gone out on Wi-Fi first and were sent again on Bluetooth |
 | The bridge is killed | The launch file starts it again (#85), and the clock comes back | after 2.9 to 3.9 s of wall time |
 
 Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.

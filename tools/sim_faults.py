@@ -7,7 +7,10 @@ One after the other, on the simulation's own fault switch (`set_fault`):
    core slows down with "Position unknown".
 2. GPS back: the core stops saying so.
 3. Wi-Fi fade: the Wi-Fi heartbeats get lost until none arrives. The link node gives Wi-Fi up,
-   Bluetooth still carries the alerts, so the core keeps saying "Level ground".
+   Bluetooth still carries the alerts, so the core keeps saying "Level ground". The probe is
+   the helper's phone: it sends an urgent message every ALERT_EVERY_S during the fade, answers
+   the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began.
+   Every alert must still reach the phone, and the alert link must change at most once.
 4. The bridge to Gazebo is killed: the launch file starts it again, and the clock comes back.
 The world has no cameras (no GPU in CI), and with no ground report the core slows down for that
 before it looks at the position or the link. So this probe sends flat ground from both cameras,
@@ -24,8 +27,9 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rosgraph_msgs.msg import Clock
+from std_msgs.msg import String
 
-from mana_msgs.msg import DriveRequest, GroundReport, LinkReport, PositionReport
+from mana_msgs.msg import DriveRequest, GroundReport, LinkReport, PositionReport, UserMessage
 from mana_msgs.srv import SetFault
 
 LEVEL = "Level ground"
@@ -33,6 +37,7 @@ NO_POSITION = "Position unknown, slowing down"
 WAIT_S = 60.0  # wall seconds to wait for each step: the simulation may run slower than real time
 GPS_LOST_S = 1.5 + 2.5 + 1.0  # the position node's max_age_s, the core's position_max_age_s, ticks
 FADE_S = 10.0
+ALERT_EVERY_S = 0.5
 
 
 class Probe(Node):
@@ -51,6 +56,32 @@ class Probe(Node):
         self.fault = self.create_client(SetFault, "set_fault")
         self.ground = self.create_publisher(GroundReport, "ground", 10)
         self.create_timer(0.1, self.flat_ground)
+        self.fade_from = None  # sim time the Wi-Fi fade began: from then on Wi-Fi delivers nothing
+        self.alerts_sent = []  # texts of the urgent messages sent during the fade
+        self.received = []  # (sim time, link, text) of every alert that reached the phone
+        self.sent_on = []  # (sim time, link, text) of every alert the node sent, reached or not
+        self.say = self.create_publisher(UserMessage, "user_message", 10)
+        self.ack = self.create_publisher(String, "alert/ack", 10)
+        for link, name in ((LinkReport.WIFI, "wifi"), (LinkReport.BLUETOOTH, "bluetooth")):
+            self.create_subscription(
+                String, f"alert/{name}", lambda m, link=link: self.on_alert(link, m.data), 10
+            )
+
+    def on_alert(self, link, data):
+        alert_id, _, text = data.partition("|")
+        self.sent_on.append((self.now(), link, text))
+        if link == LinkReport.WIFI and self.fade_from is not None:
+            return  # lost on the fading Wi-Fi: not answered, so the link node sends it again
+        self.received.append((self.now(), link, text))
+        self.ack.publish(String(data=alert_id))
+
+    def delivered(self) -> set[str]:
+        return {text for _, _, text in self.received}
+
+    def send_alert(self):
+        text = f"fault check alert {len(self.alerts_sent) + 1}"
+        self.alerts_sent.append(text)
+        self.say.publish(UserMessage(priority=UserMessage.URGENT, text=text, speak=True))
 
     def flat_ground(self):
         stamp = self.get_clock().now().to_msg()
@@ -138,7 +169,13 @@ def main() -> int:
 
         t = p.now()
         p.set_fault("wifi", "fade", True, FADE_S)
-        p.spin_until(lambda: p.now() > t + FADE_S + 5.0, WAIT_S * 2)
+        p.fade_from = t
+        end = time.monotonic() + WAIT_S * 2
+        while p.now() < t + FADE_S + 5.0 and time.monotonic() < end:
+            if p.now() < t + FADE_S and p.now() >= t + len(p.alerts_sent) * ALERT_EVERY_S:
+                p.send_alert()
+            rclpy.spin_once(p, timeout_sec=0.05)
+        p.spin_until(lambda: set(p.alerts_sent) <= p.delivered())  # resends may still be on the way
         lost = next(
             (s for s, link, ok in p.links if s > t and link == LinkReport.WIFI and not ok), None
         )
@@ -152,7 +189,21 @@ def main() -> int:
             bluetooth and p.first(t, lambda r: r != LEVEL) is None,
             f"Wi-Fi fade: Bluetooth stays usable and the core keeps saying '{LEVEL}'",
         )
+        missing = [a for a in p.alerts_sent if a not in p.delivered()]
+        wifi_sends = [x for at, link, x in p.sent_on if at > t and link == LinkReport.WIFI]
+        on_wifi = set(wifi_sends) & set(p.alerts_sent)
+        check(
+            p.alerts_sent and not missing,
+            f"Wi-Fi fade: all {len(p.alerts_sent)} alerts reached the phone"
+            f" ({len(on_wifi)} of them went out on the fading Wi-Fi first, {len(wifi_sends)} sends,"
+            " all lost, and were sent again)"
+            + (f"; missing: {', '.join(missing)}" if missing else ""),
+        )
+        during = [link for at, link, _ in p.sent_on if at > t]  # in the order the node sent them
+        switches = sum(a != b for a, b in zip(during, during[1:], strict=False))
+        check(switches <= 1, f"Wi-Fi fade: the alert link changed {switches} time(s), at most once")
         p.set_fault("wifi", "fade", False)
+        p.fade_from = None
 
         before = subprocess.run(["pgrep", "-f", "parameter_bridge"], capture_output=True, text=True)
         subprocess.run(["pkill", "-KILL", "-f", "ros_gz_bridge/parameter_bridge"], check=False)
