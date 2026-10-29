@@ -130,7 +130,7 @@ def main() -> int:
     results = []
 
     def check(ok, text):
-        results.append(ok)
+        results.append(bool(ok))  # some checks pass a set or a list
         print(f"{'PASS' if ok else 'FAIL'} {text}", flush=True)
 
     try:
