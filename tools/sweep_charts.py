@@ -11,11 +11,6 @@ import re
 import sys
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
 NOTE = {"slow": "its marks compare\nagainst 0.3 itself:\nhigher values fail\nby definition"}
 ROW = re.compile(r"^\| (\*\*)?([0-9.]+)(\*\*)?( \(now\))? \| (\d+) of (\d+) \| (\d+) \|")
@@ -37,6 +32,11 @@ def tables(text: str) -> dict[str, list[tuple[float, bool, int, int]]]:
 
 
 def main() -> int:
+    import matplotlib  # only here: reading the tables needs nothing but the standard library
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     data = tables((ROOT / "docs" / "decisions.md").read_text(encoding="utf-8"))
     fig, axes = plt.subplots(2, 4, figsize=(14, 6.5), sharey=True)
     for ax, (name, rows) in zip(axes.flat, data.items(), strict=False):
