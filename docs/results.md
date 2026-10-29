@@ -128,13 +128,27 @@ What MANA should do when one of its own nodes dies or hangs, then what it did. T
 | A perception node dies or a camera topic stalls | Its reports age out after `max_age_s` (0.5 s). With no ground sensor left, MANA slows down: "Ground sensors not available, slowing down", speed 0.3 | `test_when_the_ground_reports_stop_...` | slowed after 0.50 s in 4 runs |
 | The position node dies | Its reports age out after `position_max_age_s` (2.5 s): "Position unknown, slowing down" | `test_when_the_position_or_link_node_dies_...` | slowed after 2.54 and 2.59 s, and once after 1.43 s |
 | The link node dies | Its reports age out after `link_max_age_s` (2.5 s): "No alert link, slowing down" | same | slowed after 2.50 to 2.58 s, and once after 1.35 s |
-| The bridge to Gazebo dies | The host cannot stop the chair: the drive plugins keep the last command they got. So the launch file starts the bridge again (`respawn`, after 0.5 s) | by hand, in Gazebo without cameras | **without respawn** the chair drove on at 0.36 m/s for at least 10 s of simulation time. **With respawn** a new bridge was up within 3 s, and a stop said after the kill stopped the chair |
+| The bridge to Gazebo dies | The host cannot stop the chair: the drive plugins keep the last command they got. So the launch file starts the bridge again (`respawn`, after 0.5 s) | by hand, in Gazebo without cameras; the respawn also in `tools/sim_faults.py` (sim-smoke in CI) | **without respawn** the chair drove on at 0.36 m/s for at least 10 s of simulation time. **With respawn** a new bridge was up within 3 s, and a stop said after the kill stopped the chair. In `sim_faults.py` the clock came back 2.9 to 3.9 s after the kill |
 | The user's commands stop coming, in manual mode | Commands are single events, not a stream. MANA keeps manual mode, and its stops still apply. A driver that goes quiet is stood still by the host (D7) | `test_when_following_a_driver_the_chair_stands_still_...` (host) | as expected |
 | All ground sensors lost in manual mode | MANA cannot see a drop, so it slows down as in automatic mode, on the user's undercarriage (D7) | `test_in_manual_mode_with_no_ground_sensor_...` | before #85 it kept the user's speed |
 | The clock jumps back (a world reset) | The core drops what it saw before (#109, #111). The host stands still on a request received "in the future" | `test_after_the_clock_goes_back_...` (core), `test_a_clock_gone_back_...` (host) | before #85 the host kept driving on the last request until the clock caught up |
 | The clock stops | On simulation time, every node's timer stops with it. If Gazebo is paused, the chair stands still. If the bridge died, see that row | not tested on its own | |
 
 Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system clock, which is stepped while the tests run. The probe's clock is monotonic. The nodes stamp their reports with the system clock, and the core ages the reports by it. In a later run, two position reports came 5.2 s apart by the probe's clock, but their stamps were 8.1 s apart. In another, a link report came 0.09 s before the kill, stamped 3 s before it. A step forward makes every report look older at once, so the core slows down early: the safe side. A step back is the clock going back (#109). A real device's clock can be stepped the same way, by NTP. On a real device, the motor controller needs its own command timeout, just as the drive plugin should have had one here.
+
+## Faults switched in Gazebo (#42, #44)
+
+`tools/sim_smoke.sh --faults` starts the world headless with no cameras and no lidar, as in CI, and starts the core. Then `tools/sim_faults.py` switches the simulation's faults (`set_fault`) one after the other, and checks what MANA does. The world has no cameras, so the probe sends flat ground from both cameras: otherwise the core slows down for the missing ground first and never gets to the position or the link. The chair follows only a driver (`driver:=true`), and none drives, so it stands still while the core decides. The times are in simulation seconds, from 5 runs in WSL. The same check runs in the sim-smoke job in CI.
+
+| Fault | Expected | Measured |
+|---|---|---|
+| GPS lost (`gps dropout`) | The position node stops reporting: there is no lidar map in this world yet (#43). The core says "Position unknown, slowing down" once the last report is older than 2.5 s | after 4.0 to 4.1 s: the fix ages out after 1.5 s, then the report after 2.5 s |
+| GPS back | The selector takes GPS back after 5 s of good fixes (`back_s`), and the core says "Level ground" again | after 5.3 to 5.4 s |
+| Wi-Fi fade over 10 s (`wifi fade`) | The link node gives Wi-Fi up, Bluetooth still carries the alerts, and the core never slows down for the link | Wi-Fi given up after 6.4 to 9.5 s. The core said "Level ground" throughout, in every run |
+| Alerts during the fade | The probe is the helper's phone. It sends an urgent message every 0.5 s of the fade (20 in all), answers the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began, the worst case. Every alert still arrives, and the alert link changes at most once | in 4 runs, all 20 alerts arrived and the link changed once. In the last 2 runs, 17 and 20 of them had gone out on Wi-Fi first and were sent again on Bluetooth |
+| The bridge is killed | The launch file starts it again (#85), and the clock comes back | after 2.9 to 3.9 s of wall time |
+
+Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
 
 ## Mutation testing (#83)
 
