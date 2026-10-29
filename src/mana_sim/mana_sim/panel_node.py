@@ -143,7 +143,27 @@ def handler_for(node: PanelNode):
             self.end_headers()
             self.wfile.write(data)
 
+        def from_this_panel(self, post: bool) -> bool:
+            """Refuse what does not come from this panel's own page. Host must be this server
+            (against DNS rebinding), and an Origin, when a browser sends one, must be too. A
+            press must be JSON: a page on another site can then only send it after a preflight,
+            which this server does not answer, so another site cannot press the buttons."""
+            mine = {f"localhost:{node.port}", f"127.0.0.1:{node.port}"}
+            origin = self.headers.get("Origin")
+            if self.headers.get("Host") not in mine or (
+                origin is not None and origin not in {f"http://{h}" for h in mine}
+            ):
+                self.reply(403, {"error": "only this panel's own page may use it"})
+                return False
+            kind = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            if post and kind != "application/json":
+                self.reply(415, {"error": "a press is sent as application/json"})
+                return False
+            return True
+
         def do_GET(self):
+            if not self.from_this_panel(post=False):
+                return
             if self.path == "/":
                 self.reply(200, node.page, "text/html")
             elif self.path == "/api/state":
@@ -152,13 +172,17 @@ def handler_for(node: PanelNode):
                 self.reply(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self.from_this_panel(post=True):
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_BODY:
                     raise ValueError("a body of 1 to 1024 bytes is expected")
                 body = json.loads(self.rfile.read(length))
                 if self.path == "/api/fault":
-                    done = node.switch_fault(str(body["label"]), bool(body["active"]))
+                    if not isinstance(body["active"], bool):
+                        raise ValueError("active must be true or false")
+                    done = node.switch_fault(str(body["label"]), body["active"])
                 elif self.path == "/api/command":
                     done = node.command(str(body["name"]))
                 else:

@@ -35,10 +35,11 @@ def panel():
     rclpy.shutdown()
 
 
-def http(node, path, body=None):
+def http(node, path, body=None, **headers):
     url = f"http://127.0.0.1:{node.port}{path}"
     data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json", **headers}
+    req = urllib.request.Request(url, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, r.read().decode()
@@ -76,6 +77,24 @@ def test_what_is_not_a_switch_is_refused(panel):
     assert http(node, "/api/command", ["STOP"])[0] == 400  # not an object
     assert http(node, "/api/elsewhere", {"name": "STOP"})[0] == 404
     assert http(node, "/elsewhere")[0] == 404
+
+
+def test_another_site_cannot_press_the_buttons(panel):
+    # a page elsewhere can send text/plain with no preflight: refused, so it needs JSON, and then
+    # the browser asks first (OPTIONS), which this server does not answer
+    node, _, _ = panel
+    press = {"name": "GO"}
+    assert http(node, "/api/command", press, **{"Content-Type": "text/plain"})[0] == 415
+    assert http(node, "/api/command", press, Origin="http://example.com")[0] == 403
+    assert http(node, "/api/state", Host="mana.example.com")[0] == 403  # DNS rebinding
+    assert http(node, "/api/command", press, Origin=f"http://localhost:{node.port}")[0] == 200
+    assert http(node, "/api/fault", {"label": "Lose GPS", "active": "false"})[0] == 400
+    preflight = urllib.request.Request(
+        f"http://127.0.0.1:{node.port}/api/command", method="OPTIONS"
+    )
+    with pytest.raises(urllib.error.HTTPError) as no:
+        urllib.request.urlopen(preflight, timeout=5)
+    assert no.value.code == 501  # not answered, so the browser does not send the press
 
 
 def test_a_fault_with_no_simulation_running_says_so(panel):
