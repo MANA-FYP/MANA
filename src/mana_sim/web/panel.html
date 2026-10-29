@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MANA supervisor panel</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #ffffff; --ink: #1d232b; --muted: #5d6773; --line: #d9dee5;
+          --go: #1f7a3f; --slow: #a86400; --stop: #b3261e; --accent: #2f6fb0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+  .big { font-size: 22px; font-weight: 600; }
+  .stop { color: var(--stop); } .slow { color: var(--slow); } .go { color: var(--go); }
+  .muted { color: var(--muted); }
+  ul { list-style: none; margin: 0; padding: 0; } li { padding: 2px 0; }
+  button { font: inherit; padding: 6px 10px; margin: 0 6px 6px 0; border: 1px solid var(--line);
+           border-radius: 6px; background: #fff; cursor: pointer; }
+  button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.cmd { font-weight: 600; } button.cmd.STOP { background: var(--stop); color: #fff; border-color: var(--stop); }
+  #note { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<h1>MANA supervisor panel <span class="muted" id="clock"></span></h1>
+<div class="grid">
+  <section><h2>Decision</h2>
+    <div class="big" id="state">waiting for MANA</div>
+    <div id="reason" class="muted"></div>
+    <div id="driver" class="muted"></div></section>
+  <section><h2>Said to the user</h2><div id="said" class="muted">nothing yet</div></section>
+  <section><h2>Position and alert link</h2><ul id="where"></ul></section>
+  <section><h2>Reports MANA trusts now</h2><ul id="trusted"></ul></section>
+  <section><h2>Reports MANA does not use</h2><ul id="doubtful"></ul></section>
+  <section><h2>Faults <span class="muted" id="faults"></span></h2><div id="fault-buttons"></div></section>
+  <section><h2>The user says</h2><div id="command-buttons"></div><div id="note" class="muted"></div></section>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+function list(el, rows) {
+  el.replaceChildren(...(rows.length ? rows : ["none"]).map((t) => {
+    const li = document.createElement("li"); li.textContent = t; return li; }));
+}
+async function post(path, body) {
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json(); $("note").textContent = j.done || j.error;
+  } catch (e) { $("note").textContent = "the panel node is not answering"; }
+}
+function buttons(switches) {
+  // the fault buttons show what fault_node says is on, not what was last pressed here
+  if ($("fault-buttons").childElementCount) {
+    switches.faults.forEach((f, i) => $("fault-buttons").children[i].classList.toggle("on", f.on));
+    return;
+  }
+  for (const f of switches.faults) {
+    const b = document.createElement("button"); b.textContent = f.label; b.classList.toggle("on", f.on);
+    b.onclick = () => post("/api/fault", { label: f.label, active: !b.classList.contains("on") });
+    $("fault-buttons").append(b);
+  }
+  for (const name of switches.commands) {
+    const b = document.createElement("button"); b.textContent = name; b.className = "cmd " + name;
+    b.onclick = () => post("/api/command", { name }); $("command-buttons").append(b);
+  }
+}
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    buttons(s.switches);
+    $("clock").textContent = `· ${s.now.toFixed(1)} s`;
+    const d = s.decision;
+    if (d) {
+      const kind = d.stop ? "stop" : d.speed_limit < 1 ? "slow" : "go";
+      $("state").className = "big " + kind;
+      $("state").textContent = d.stop ? `Stopped, on ${d.mode}` : `${Math.round(d.speed_limit * 100)}% of top speed, on ${d.mode}`;
+      $("reason").textContent = d.reason;
+    }
+    $("driver").textContent = "Driving: " + s.driver;
+    if (s.said) $("said").textContent = (s.said.urgent ? "URGENT: " : "") + s.said.text;
+    const where = [s.position ? `Position: ${s.position.source}${s.position.lost ? " (lost)" : ""}, ±${s.position.error_m} m` : "Position: no reports"];
+    for (const [name, l] of Object.entries(s.links)) where.push(`${name}: ${l.usable ? "can carry alerts" : "cannot carry alerts"} (${l.missed} missed)`);
+    list($("where"), where);
+    list($("trusted"), s.trusted.map((r) => `${r.text} (trust ${r.trust})`));
+    list($("doubtful"), s.doubtful.map((r) => `${r.text}: ${r.why}`));
+    $("faults").textContent = "· on: " + s.faults;
+  } catch (e) { $("state").textContent = "the panel node is not answering"; }
+}
+refresh(); setInterval(refresh, 250);
+</script>
+</body>
+</html>
