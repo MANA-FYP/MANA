@@ -130,3 +130,91 @@ A hazard the front has already reached reads 0 m, the worst case. An unknown dis
 | Keep the user's speed with no ground sensor | A drop can no longer be seen, so no stop can come in time at full speed |
 | **Slow down, keep the user's undercarriage** | The user drives slower until a ground sensor is back |
 | Stop until a ground sensor is back | A dead camera would leave the user stuck where they are. Automatic mode slows down for this, it does not stop |
+
+## D8. The decision thresholds, from a sweep (#86)
+
+**Chosen:** the thresholds stay as they are: `edge_m` 0.5 m, `obstacle_stop_m` 0.8 m, `obstacle_slow_m` 2.0 m, `step_m` 2.0 m, `max_age_s` 0.5 s, `min_trust` 0.5 and `slow` 0.3. Each was swept with `tools/sweep_thresholds.py`, which moves one threshold at a time and keeps every other at its default. Each value plays all 15 scripted scenarios 100 times, on #54's noisy runs, with the same seeds for every value (seed 1). The sweep gives a lower bound for most of them, and each value sits above that bound with a margin. The stop distances also have to fit the chair's real stopping distance, which the scripted world does not have: it brakes at once.
+
+```bash
+python3 tools/sweep_thresholds.py --runs 100            # all seven
+python3 tools/sweep_thresholds.py --runs 100 step_m     # one of them
+```
+
+Why each value:
+
+- **`edge_m` 0.5 m.** At 0.3 m and below there are mishaps even with instant braking: 1 at 0.3 m and 0.25 m, 4 at 0.2 m. From 0.35 m there are none. 0.5 m keeps 0.15 m above that. On a device, the travel after a stop is added on top (D6). Larger values pass a few fewer runs: 1,435 at 1.0 m, against 1,445.
+- **`obstacle_stop_m` 0.8 m.** In the scripted world a smaller value always passes more (1,451 at 0.5 m, 1,420 at 1.3 m), because the chair stands still the moment it stops. So this value is set by the stopping distance instead. An obstacle that appears 1.2 m ahead of a chair at top speed is stopped for, with 0.36 m or more to spare, only from 1.5 m/s² of braking (#84). 0.8 m, with D6's allowance, is kept until the real chair's braking is measured.
+- **`obstacle_slow_m` 2.0 m.** Nothing from 1.2 to 3.0 m changes the results by more than 8 runs in 1,500, so the slow-down starts where #84's stopping model assumes it does.
+- **`step_m` 2.0 m.** Below 1.75 m the chair changes to tracks too late for the marks: 1,386 runs at 1.5 m and 1,128 at 1.0 m pass. From 1.75 m all values pass the same 1,445. 2.0 m keeps 0.25 m above that and 0.5 m above where it drops, and a larger value only adds 0.1 s to the mean time per 0.5 m.
+- **`max_age_s` 0.5 s.** 0.2 s passes fewer runs (1,429), and from 0.25 s nothing changes. The scripted hazards do not move, so an older report costs nothing here. On a moving device, a report 0.5 s old is 0.6 m behind at top speed. A report's age is part of the reaction that D6's allowance covers (0.5 s in the simulation). So 0.5 s is not raised.
+- **`min_trust` 0.5.** No value from 0.3 to 0.7 changes the results by more than one run. The noise moves trust by only 0.05 around 0.9, and the dark scenarios send the camera's trust at 0.2, below every value swept. So the sweep cannot place it. The trust the models send has to be calibrated first (#87).
+- **`slow` 0.3.** The sweep cannot judge it: the "Slower on the ..." marks compare against the default 0.3 itself, so any higher value fails by definition (1,067 to 1,070 runs). 0.2 makes the chair slower (24.4 s mean time against 20.7 s), and fewer runs pass (1,247). #84's stopping model takes 0.36 m/s (0.3 of 1.2 m/s) as the speed near a hazard.
+
+In every table, the default row passes 1,445 of 1,500 runs: the defaults fail a mark in 55 noisy runs. #54's table in `docs/results.md` shows which scenarios fail under noise. "level: s slowed" is the mean time not at full speed in `level`, where nothing is in the way. It is 0.02 s for every value, so no threshold makes the chair slow down for nothing.
+
+| `edge_m` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 0.2 | 1446 of 1500 | 4 | 0.02 | 20.6 s |
+| 0.25 | 1448 of 1500 | 1 | 0.02 | 20.6 s |
+| 0.3 | 1450 of 1500 | 1 | 0.02 | 20.6 s |
+| 0.35 | 1448 of 1500 | 0 | 0.02 | 20.7 s |
+| **0.5** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.7 | 1443 of 1500 | 0 | 0.02 | 20.7 s |
+| 1.0 | 1435 of 1500 | 0 | 0.02 | 20.8 s |
+
+| `obstacle_stop_m` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 0.5 | 1451 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.65 | 1449 of 1500 | 0 | 0.02 | 20.7 s |
+| **0.8** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 1.0 | 1436 of 1500 | 0 | 0.02 | 20.7 s |
+| 1.3 | 1420 of 1500 | 0 | 0.02 | 20.7 s |
+
+| `obstacle_slow_m` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 1.2 | 1440 of 1500 | 0 | 0.02 | 20.7 s |
+| 1.6 | 1438 of 1500 | 0 | 0.02 | 20.7 s |
+| **2.0** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 2.5 | 1442 of 1500 | 0 | 0.02 | 20.7 s |
+| 3.0 | 1446 of 1500 | 0 | 0.02 | 20.7 s |
+
+| `step_m` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 1.0 | 1128 of 1500 | 0 | 0.02 | 20.4 s |
+| 1.5 | 1386 of 1500 | 0 | 0.02 | 20.6 s |
+| 1.75 | 1445 of 1500 | 0 | 0.02 | 20.6 s |
+| **2.0** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 2.5 | 1445 of 1500 | 0 | 0.02 | 20.8 s |
+| 3.0 | 1445 of 1500 | 0 | 0.02 | 20.9 s |
+
+| `max_age_s` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 0.2 | 1429 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.25 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.3 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| **0.5** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.8 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 1.2 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+
+| `min_trust` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 0.3 | 1444 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.4 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| **0.5** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.6 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.7 | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+
+| `slow` | runs that met every mark | mishaps | level: s slowed | mean time |
+|---|---|---|---|---|
+| 0.2 | 1247 of 1500 | 0 | 0.02 | 24.4 s |
+| **0.3** (now) | 1445 of 1500 | 0 | 0.02 | 20.7 s |
+| 0.4 | 1070 of 1500 | 0 | 0.02 | 17.6 s |
+| 0.5 | 1067 of 1500 | 0 | 0.02 | 15.7 s |
+| 0.6 | 1067 of 1500 | 0 | 0.02 | 14.4 s |
+
+![The runs that met every mark, for each threshold's values](diagrams/threshold-sweep.png)
+
+The chart is drawn from these tables by `python3 tools/sweep_charts.py` (needs matplotlib).
+
+Still to do: check the chosen values again in Gazebo once #16 runs, and measure the real chair's braking, which `obstacle_stop_m` and the D6 allowance wait for.
+
