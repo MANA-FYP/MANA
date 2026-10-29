@@ -11,7 +11,9 @@ One after the other, on the simulation's own fault switch (`set_fault`):
    the helper's phone: it sends an urgent message every ALERT_EVERY_S during the fade, answers
    the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began.
    Every alert must still reach the phone, and the alert link must change at most once.
-4. The bridge to Gazebo is killed: the launch file starts it again, and the clock comes back.
+4. The clock stops (Gazebo paused, #85): its time stands still, and the core decides nothing.
+   When it runs again, the clock goes on from where it stopped, and the core decides again.
+5. The bridge to Gazebo is killed: the launch file starts it again, and the clock comes back.
 The world has no cameras (no GPU in CI), and with no ground report the core slows down for that
 before it looks at the position or the link. So this probe sends flat ground from both cameras,
 and sim_smoke.sh starts the world with driver:=true: the chair moves only when a driver asks,
@@ -38,7 +40,30 @@ WAIT_S = 60.0  # wall seconds to wait for each step: the simulation may run slow
 GPS_LOST_S = 1.5 + 2.5 + 1.0  # the position node's max_age_s, the core's position_max_age_s, ticks
 FADE_S = 10.0
 ALERT_EVERY_S = 0.5
+PAUSE_S = 5.0
 ALERT_TEXT = "fault check alert"  # the probe's own urgent messages, told apart from the core's
+
+
+def world_control(req: str) -> None:
+    """Pause or run the world, as the launch file does."""
+    subprocess.run(
+        [
+            "gz",
+            "service",
+            "-s",
+            "/world/mana_route/control",
+            "--reqtype",
+            "gz.msgs.WorldControl",
+            "--reptype",
+            "gz.msgs.Boolean",
+            "--timeout",
+            "3000",
+            "--req",
+            req,
+        ],
+        check=True,
+        capture_output=True,
+    )
 
 
 class Probe(Node):
@@ -216,6 +241,20 @@ def main() -> int:
         check(switches <= 1, f"Wi-Fi fade: the alert link changed {switches} time(s), at most once")
         p.set_fault("wifi", "fade", False)
         p.fade_from = None
+
+        world_control("pause: true")
+        p.spin_until(lambda: False, 1.0)  # the pause takes a moment; Gazebo still sends the clock
+        paused_at, decided = p.now(), len(p.reasons)
+        p.spin_until(lambda: False, PAUSE_S)  # wall seconds
+        moved = p.now() - paused_at  # simulation time that went by while paused
+        check(
+            moved == 0.0 and len(p.reasons) == decided,
+            f"clock stopped for {PAUSE_S:.0f} s of wall time: {moved:.2f} s of simulation time and"
+            f" {len(p.reasons) - decided} new decisions",
+        )
+        world_control("pause: false")
+        resumed = p.spin_until(lambda: len(p.reasons) > decided + 10 and p.reasons[-1][1] == LEVEL)
+        check(resumed, f"clock running again: the core decides again and says '{LEVEL}'")
 
         before = subprocess.run(["pgrep", "-f", "parameter_bridge"], capture_output=True, text=True)
         subprocess.run(["pkill", "-KILL", "-f", "ros_gz_bridge/parameter_bridge"], check=False)

@@ -64,7 +64,7 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           tools/sim_smoke.sh
-      - name: Faults in Gazebo (GPS loss, Wi-Fi fade, the bridge killed) and what MANA does
+      - name: Faults in Gazebo (GPS loss, Wi-Fi fade, a pause, the bridge killed) and what MANA does
         shell: bash
         run: |
           source /opt/ros/jazzy/setup.bash
