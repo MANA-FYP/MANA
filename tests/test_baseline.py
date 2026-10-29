@@ -137,9 +137,27 @@ def test_in_the_dark_the_baseline_crosses_on_one_sensor_without_stopping(name, m
     assert not trace.mishaps
 
 
+@pytest.mark.parametrize(
+    "name, why",
+    [
+        ("glare", "it stops for the 3D camera's drop at trust 0.3"),
+        ("person_leaves", "it keeps the last obstacle report after the person stepped aside"),
+    ],
+)
+def test_the_baseline_waits_for_ever_on_a_doubtful_or_an_old_report(name, why):
+    # MANA does not use a report it cannot trust or one that is too old (#54)
+    trace = run(SCENARIOS[name], controller=BaselineController)
+    failed = [m.text for m, ok, _ in check(SCENARIOS[name], trace) if not ok]
+    assert failed[-1] == "Reaches the end of the route", why
+    assert len(failed) == 2 and failed[0].startswith("Full speed on the") and not trace.mishaps
+    assert trace.samples[-1].stop  # standing still when the time runs out
+    assert all(ok for _, ok, _ in check(SCENARIOS[name], run(SCENARIOS[name])))  # and MANA
+
+
 def test_the_baseline_meets_every_other_scenario():
+    others = ("picture", "wifi_drop", "stairs_down", "dark_stairs", "dark_curb", "glare")
     for name, scenario in SCENARIOS.items():
-        if name not in ("picture", "wifi_drop", "stairs_down", "dark_stairs", "dark_curb"):
+        if name not in (*others, "person_leaves"):
             base, marks, _ = met(scenario, BaselineController)
             assert base == marks, name
 
