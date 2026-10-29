@@ -133,7 +133,7 @@ A hazard the front has already reached reads 0 m, the worst case. An unknown dis
 
 ## D8. The decision thresholds, from a sweep (#86)
 
-**Chosen:** the thresholds stay as they are: `edge_m` 0.5 m, `obstacle_stop_m` 0.8 m, `obstacle_slow_m` 2.0 m, `step_m` 2.0 m, `max_age_s` 0.5 s, `min_trust` 0.5 and `slow` 0.3. Each was swept with `tools/sweep_thresholds.py`, which moves one threshold at a time and keeps every other at its default. Each value plays all 15 scripted scenarios 100 times, on #54's noisy runs, with the same seeds for every value (seed 1). The sweep gives a lower bound for most of them, and each value sits above that bound with a margin. The stop distances also have to fit the chair's real stopping distance, which the scripted world does not have: it brakes at once.
+**Chosen:** the thresholds stay as they are: `edge_m` 0.5 m, `obstacle_stop_m` 0.8 m, `obstacle_slow_m` 2.0 m, `step_m` 2.0 m, `max_age_s` 0.5 s, `min_trust` 0.5 and `slow` 0.3. Each was swept with `tools/sweep_thresholds.py`, which moves one threshold at a time and keeps every other at its default. Each value plays all 15 scripted scenarios of the time 100 times, on #54's noisy runs, with the same seeds for every value (seed 1). `glare` and `person_leaves` were added after the sweep, so a run now plays 17 and gives other totals. The sweep gives a lower bound for most of them, and each value sits above that bound with a margin. The stop distances also have to fit the chair's real stopping distance, which the scripted world does not have: it brakes at once.
 
 ```bash
 python3 tools/sweep_thresholds.py --runs 100            # all seven

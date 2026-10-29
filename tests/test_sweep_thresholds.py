@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from mana_core.decision import Limits
+from mana_core.scenarios import SCENARIOS
 from sweep_charts import tables  # noqa: E402
 from sweep_thresholds import VALUES, main, markdown, one, sweep  # noqa: E402
 
@@ -32,7 +33,7 @@ def test_every_swept_list_has_the_default_value():
 def test_the_table_has_a_row_per_value_and_marks_the_default():
     rows = sweep("step_m", 1, 1, InProcess())
     assert [r["value"] for r in rows] == VALUES["step_m"]
-    assert all(r["runs"] == 15 for r in rows)  # one run of each scenario
+    assert all(r["runs"] == len(SCENARIOS) for r in rows)  # one run of each scenario
     table = markdown("step_m", rows)
     assert "| **2.0** (now) |" in table and len(table.splitlines()) == 2 + len(rows)
 
