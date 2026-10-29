@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from mana_core.decision import Limits
+from sweep_charts import tables  # noqa: E402
 from sweep_thresholds import VALUES, main, markdown, one, sweep  # noqa: E402
 
 
@@ -39,3 +40,13 @@ def test_the_table_has_a_row_per_value_and_marks_the_default():
 def test_an_unknown_threshold_is_refused(capsys):
     assert main(["--runs", "1", "edge"]) == 2
     assert "unknown: edge" in capsys.readouterr().out
+
+
+def test_the_chart_reads_d8s_tables_with_the_value_kept():
+    d8 = (Path(__file__).resolve().parents[1] / "docs" / "decisions.md").read_text(encoding="utf-8")
+    data = tables(d8)
+    assert set(data) == set(VALUES)
+    for param, rows in data.items():
+        assert [v for v, *_ in rows] == VALUES[param]
+        assert [v for v, kept, *_ in rows if kept] == [getattr(Limits(), param)]
+    assert dict((v, m) for v, _, _, m in data["edge_m"])[0.2] == 4  # mishaps, from the table

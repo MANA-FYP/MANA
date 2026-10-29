@@ -212,5 +212,9 @@ In every table, the default row passes 1,445 of 1,500 runs: the defaults fail a 
 | 0.5 | 1067 of 1500 | 0 | 0.02 | 15.7 s |
 | 0.6 | 1067 of 1500 | 0 | 0.02 | 14.4 s |
 
+![The runs that met every mark, for each threshold's values](diagrams/threshold-sweep.png)
+
+The chart is drawn from these tables by `python3 tools/sweep_charts.py` (needs matplotlib).
+
 Still to do: check the chosen values again in Gazebo once #16 runs, and measure the real chair's braking, which `obstacle_stop_m` and the D6 allowance wait for.
 
