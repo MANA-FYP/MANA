@@ -243,7 +243,14 @@ def main() -> int:
         p.fade_from = None
 
         world_control("pause: true")
-        p.spin_until(lambda: False, 1.0)  # the pause takes a moment; Gazebo still sends the clock
+        # the pause takes a moment, and Gazebo still sends the clock: wait until its time stands
+        # still (two readings 0.2 s of wall time apart), within PAUSE_S
+        end, last = time.monotonic() + PAUSE_S, p.now()
+        while time.monotonic() < end:
+            p.spin_until(lambda: False, 0.2)
+            if p.now() == last:
+                break
+            last = p.now()
         paused_at, decided = p.now(), len(p.reasons)
         p.spin_until(lambda: False, PAUSE_S)  # wall seconds
         moved = p.now() - paused_at  # simulation time that went by while paused
