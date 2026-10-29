@@ -13,6 +13,7 @@ on:
       - "src/mana_position/**"
       - "src/mana_connectivity/**"
       - "tools/sim_smoke.sh"
+      - "tools/sim_faults.py"
       - ".github/workflows/sim-smoke.yml"
   push:
     branches: [main]
@@ -24,6 +25,7 @@ on:
       - "src/mana_position/**"
       - "src/mana_connectivity/**"
       - "tools/sim_smoke.sh"
+      - "tools/sim_faults.py"
       - ".github/workflows/sim-smoke.yml"
   schedule:
     - cron: "0 3 * * *"
@@ -62,6 +64,12 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           tools/sim_smoke.sh
+      - name: Faults in Gazebo (GPS loss, Wi-Fi fade, the bridge killed) and what MANA does
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          tools/sim_smoke.sh --faults
       - name: The smoke test fails when the core is not started
         shell: bash
         run: |

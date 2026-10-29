@@ -6,18 +6,21 @@
 #   tools/sim_smoke.sh               # start the world and the core, wait for both topics
 #   tools/sim_smoke.sh --no-core     # without the core: must fail (CI checks that it does)
 #   tools/sim_smoke.sh --timeout 120 # seconds to wait (default 90)
+#   tools/sim_smoke.sh --faults      # then switch faults and check what MANA does (tools/sim_faults.py)
 #
 # Needs the workspace built and sourced (source install/setup.bash). Runs with no GPU: the world has
 # no cameras and no lidar (sensors:=false). Exit 0 on success, 1 when a topic did not appear.
 set -uo pipefail
 
 CORE=1
+FAULTS=0
 TIMEOUT=90
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-core) CORE=0 ;;
+    --faults) FAULTS=1 ;;
     --timeout) TIMEOUT="$2"; shift ;;
-    *) echo "usage: $0 [--no-core] [--timeout SECONDS]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--no-core] [--faults] [--timeout SECONDS]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -50,27 +53,42 @@ start "$LOGS/drive_request" ros2 topic echo --once /drive_request mana_msgs/msg/
 start "$LOGS/user_message" ros2 topic echo --once /user_message mana_msgs/msg/UserMessage
 start "$LOGS/position" ros2 topic echo --once /position mana_msgs/msg/PositionReport
 start "$LOGS/link" ros2 topic echo --once /link mana_msgs/msg/LinkReport
-start "$LOGS/launch.log" ros2 launch mana_sim world.launch.py headless:=true sensors:=false
+# with --faults the chair stands still (it follows only a driver, and none drives), see sim_faults.py
+start "$LOGS/launch.log" ros2 launch mana_sim world.launch.py headless:=true sensors:=false \
+  driver:=$([ "$FAULTS" = 1 ] && echo true || echo false)
 if [ "$CORE" = 1 ]; then
   start "$LOGS/core.log" ros2 run mana_core core_node --ros-args --params-file "$(ros2 pkg prefix mana_sim)/share/mana_sim/config/core.yaml"
 fi
 
 deadline=$((SECONDS + TIMEOUT))
 heard() { grep -q "^---" "$LOGS/$1"; }  # a message ends with ---; a silent topic only warns
-until heard drive_request && heard user_message && heard position && heard link; do
+# The core sends a user message when what it says changes. In this world that is once, at its
+# first tick, which a listener can miss while the two are still finding each other. With --faults
+# the probe makes the core say new things, so user_message is checked after the faults.
+TOPICS="drive_request position link"
+[ "$FAULTS" = 1 ] || TOPICS="drive_request user_message position link"
+all_heard() { for topic in "$@"; do heard "$topic" || return 1; done; }
+until all_heard $TOPICS; do
   if [ $SECONDS -ge $deadline ]; then break; fi
   sleep 1
 done
 
 status=0
-for topic in drive_request user_message position link; do
-  if heard "$topic"; then
-    echo "PASS $topic was published"
-  else
-    echo "FAIL $topic was not published within ${TIMEOUT} s"
-    status=1
-  fi
-done
+report() {
+  for topic in "$@"; do
+    if heard "$topic"; then
+      echo "PASS $topic was published"
+    else
+      echo "FAIL $topic was not published within ${TIMEOUT} s"
+      status=1
+    fi
+  done
+}
+report $TOPICS
+if [ $status -eq 0 ] && [ "$FAULTS" = 1 ]; then
+  python3 "$(dirname "$0")/sim_faults.py" || status=1
+  report user_message
+fi
 if [ $status -ne 0 ]; then
   echo "--- launch log (tail)"; tail -n 25 "$LOGS/launch.log"
   [ "$CORE" = 1 ] && { echo "--- core log (tail)"; tail -n 10 "$LOGS/core.log"; }
