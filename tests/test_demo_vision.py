@@ -68,11 +68,11 @@ def test_focal_length_from_the_field_of_view():
     assert f == pytest.approx(240.0 / math.tan(math.radians(30.0)))
 
 
-def test_stairs_labels_map_to_stairs_and_the_rest_to_flat():
+def test_only_level_ground_is_flat_and_the_top_of_the_stairs_is_still_stairs():
     assert stair_ground("stairs") == "stairs"
     assert stair_ground("to_stairs") == "stairs"
+    assert stair_ground("to_level") == "stairs"  # IS-LG: the last steps are still ahead
     assert stair_ground("level") == "flat"
-    assert stair_ground("to_level") == "flat"
 
 
 def test_the_detector_is_none_when_ultralytics_is_not_installed(monkeypatch):
