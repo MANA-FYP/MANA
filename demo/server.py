@@ -86,6 +86,7 @@ def build_app(
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
+    app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
     app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
     app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
@@ -303,7 +304,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     started = mw.clock()
     image = app["depth_model"].estimate(jpeg)
     pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
-    seen = dz.read(image, app["mount"], pitch)
+    seen = app["depth_reader"].read(image, pitch, mw.nav.track.steps)
     now = mw.clock()
     mw.latency["depth_ms"] = round((now - started) * 1000, 1)
     r = seen.reading

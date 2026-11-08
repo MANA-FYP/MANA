@@ -8,9 +8,11 @@
 The model is Depth Anything V2, metric, small (Apache-2.0), on the laptop's CPU. Its metres can be
 off by 10 to 20 percent on a phone's picture, and the ground reader needs better than that: it
 compares the ground with the camera's height to find an edge. So the depth is scaled first. The
-phone's motion sensors give the camera's tilt, the person holds it at a known height, and the floor
-at the bottom of the image must then lie that far below the camera: one number fixes the scale.
-With that, the synthetic tests read the same ground with the model's scale 20 percent off.
+phone's motion sensors give the camera's tilt, the person holds it at a known height, and level
+floor at the bottom of the image must then lie that far below the camera: one number fixes the
+scale. It is learned from frames of level floor and then held (Reader), so an edge close to the
+person still shows. With that, the synthetic tests read the same ground with the model's scale
+20 percent off.
 
 It is the same camera as the detector, so for the decision core it is the camera (Source.CAMERA),
 not a second sensor: a step it sees slows or stops, but changing mode still needs another sensor.
@@ -90,18 +92,81 @@ class Seen:
     cam: dp.Camera | None = None  # as it was held for this image
 
 
-def read(depth: np.ndarray, mount: Mount, pitch_rad: float | None) -> Seen:
-    """Scale one depth image to the floor and read the ground and what stands in the path."""
-    if pitch_rad is None:
-        return Seen(depth, None, None, why="no tilt from the motion sensor")
-    cam = mount.camera(depth.shape[1], depth.shape[0], pitch_rad)
-    scale = floor_scale(depth, cam)
-    if scale is None:
-        why = "tilt the camera down to the floor" if pitch_rad < MIN_PITCH else "no floor in view"
-        return Seen(depth, None, None, why=why)
-    scaled = depth * scale
-    reading = dp.read_ground(scaled, cam)
-    return Seen(scaled, scale, reading, nearest_ahead(scaled, cam), cam=cam)
+class Reader:
+    """Reads the ground in each depth image with a **held** scale, learned from frames of level
+    floor, not with each frame's own.
+
+    Scaling each frame so its bottom rows lie at the floor would hide an edge in the camera's blind
+    zone: standing at a kerb or the top of stairs, the lower floor at the bottom of the picture
+    would be scaled up to the person's level and read as flat (Waqas, #138). The model's scale is
+    a property of the model on the scene and changes slowly, so it is held:
+
+    - it is learned from `learn` frames in a row that read level floor with nothing close ahead,
+      and then follows such frames slowly; until then there is no reading;
+    - each frame is read with the held scale, so the ground reader's own check of the blind zone
+      works: nearest ground off the person's level is an edge at 0 m;
+    - and when a frame's own floor scale differs from the held one by more than `differ`, the
+      bottom of the picture is not where level floor would be: farther is a drop at 0 m, nearer
+      (a step up, or feet) is unknown ground, which slows.
+
+    The model's scale can change between scenes (a corridor, then outdoors). If the frames keep
+    differing after `relearn_steps` steps, the person has walked past where an edge would be, so
+    the held scale is learned again.
+    """
+
+    def __init__(self, mount: Mount, learn=3, follow=0.1, differ=0.15, relearn_steps=4):
+        self.mount, self.learn, self.follow, self.differ = mount, learn, follow, differ
+        self.relearn_steps = relearn_steps
+        self.held: float | None = None
+        self._learning: list[float] = []
+        self._differs_since: int | None = None  # the step count when the frames began to differ
+
+    def read(self, depth: np.ndarray, pitch_rad: float | None, steps: int = 0) -> Seen:
+        if pitch_rad is None:
+            return Seen(depth, None, None, why="no tilt from the motion sensor")
+        cam = self.mount.camera(depth.shape[1], depth.shape[0], pitch_rad)
+        own = floor_scale(depth, cam)
+        if self.held is None:
+            return self._learn(depth, cam, own)
+        scaled = depth * self.held
+        reading, ahead = dp.read_ground(scaled, cam), nearest_ahead(scaled, cam)
+        differs = own is not None and abs(own / self.held - 1.0) > self.differ
+        if not differs:
+            self._differs_since = None
+            if own is not None and level(reading, ahead):
+                self.held += (own - self.held) * self.follow
+        else:
+            if self._differs_since is None:
+                self._differs_since = steps
+            elif steps - self._differs_since >= self.relearn_steps:
+                self.held, self._learning, self._differs_since = None, [], None
+                return self._learn(depth, cam, own)
+            if reading.ground == dp.FLAT:  # the reader saw nothing, but the floor is off
+                reading = (
+                    dp.Reading(dp.DROP, 0.0)  # the bottom of the picture is farther: lower
+                    if own < self.held
+                    else dp.Reading(dp.UNKNOWN)  # nearer: a step up, or feet in the picture
+                )
+        return Seen(scaled, self.held, reading, ahead, cam=cam)
+
+    def _learn(self, depth, cam, own) -> Seen:
+        if own is None:
+            low = cam.pitch_rad < MIN_PITCH
+            why = "tilt the camera down to the floor" if low else "no floor in view"
+            return Seen(depth, None, None, why=why)
+        scaled = depth * own
+        if level(dp.read_ground(scaled, cam), nearest_ahead(scaled, cam)):
+            self._learning.append(own)
+        else:
+            self._learning = []  # in a row: one frame of an edge starts over
+        if len(self._learning) >= self.learn:
+            self.held = float(np.median(self._learning))
+        return Seen(depth, None, None, cam=cam, why="learning the scale: point at level floor")
+
+
+def level(reading: dp.Reading, ahead_m: float | None, clear_m: float = 1.5) -> bool:
+    """Level floor with nothing standing close ahead: a frame the scale can be learned from."""
+    return reading.ground == dp.FLAT and (ahead_m is None or ahead_m > clear_m)
 
 
 def nearest_ahead(

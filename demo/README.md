@@ -150,10 +150,24 @@ It gives the camera two things it could not measure before (#131):
 The model's own metres can be 10 to 20 percent off, and the ground reader needs better: it compares
 the ground with the camera's height. So the depth is scaled first: the phone's motion sensors give
 the camera's tilt, the person holds it at a known height (`--camera-height`, default 1.2 m), and
-the floor at the bottom of the picture must lie that far below the camera. Hold the phone tilted
-at least 15 degrees down, so the floor ahead is in the picture; otherwise the dashboard says
-"tilt the camera down to the floor" and no ground report is made. Distances come from the depth
-only once it is scaled; otherwise the box-height estimate is kept.
+level floor at the bottom of the picture must lie that far below the camera.
+
+- **Start on level floor.** The scale is learned from the first three frames that show level
+  floor with nothing close ahead ("learning the scale: point at level floor"), and then held. Hold
+  the phone tilted at least 15 degrees down, so the floor ahead is in the picture; otherwise the
+  dashboard says "tilt the camera down to the floor" and no ground report is made.
+- **Why it is held, not measured on every frame:** an edge closer than the bottom of the picture
+  (standing at a kerb or the top of stairs) would be scaled up to the person's level and read as
+  flat. With the held scale the reader still sees it: the floor in view is off the person's
+  level, so there is an edge at 0 m. When a frame's own floor scale differs from the held one by
+  more than 15 percent, the bottom of the picture is not where level floor would be: farther is
+  a drop at 0 m (stop), nearer is unknown ground (slow).
+- The model's scale changes between scenes (a corridor, then outdoors). When the frames keep
+  differing for four steps, the person has walked past where an edge would be, and the scale is
+  learned again.
+
+Distances come from the depth only once a scale is held; otherwise the box-height estimate is
+kept.
 
 It is the same camera as the detector, so for the decision core it is the camera, not a second
 sensor: a drop or a step it sees close ahead stops, one farther off slows, and changing to tracks

@@ -65,7 +65,7 @@ def test_the_floor_sets_the_scale(scale):
 def test_no_scale_when_the_camera_looks_too_level_to_see_the_floor():
     cam = MOUNT.camera(COLS, ROWS, math.radians(5))
     assert dz.floor_scale(scene(syn.flat, pitch=math.radians(5)), cam) is None
-    seen = dz.read(scene(syn.flat, pitch=math.radians(5)), MOUNT, math.radians(5))
+    seen = dz.Reader(MOUNT).read(scene(syn.flat, pitch=math.radians(5)), math.radians(5))
     assert seen.reading is None and seen.why == "tilt the camera down to the floor"
 
 
@@ -74,6 +74,70 @@ def test_no_scale_when_the_bottom_of_the_picture_is_not_a_floor():
     rng = np.random.default_rng(1)
     clutter = rng.uniform(0.5, 4.0, (ROWS, COLS))  # a cluttered table, not a plane
     assert dz.floor_scale(clutter, cam) is None
+
+
+# ---- the scale is learned from level floor, then held
+
+
+def reader_on(pitch=PITCH, **error):
+    """A reader that has learned its scale from three frames of level floor with this error."""
+    r = dz.Reader(MOUNT)
+    for seed in range(3):
+        r.read(scene(syn.flat, pitch=pitch, seed=10 + seed, **error), pitch)
+    assert r.held is not None
+    return r
+
+
+def test_no_reading_until_the_scale_is_learned_from_level_floor():
+    r = dz.Reader(MOUNT)
+    for _ in range(2):
+        seen = r.read(scene(syn.flat, scale=1.2), PITCH)
+        assert seen.reading is None and seen.why == "learning the scale: point at level floor"
+    assert r.read(scene(syn.flat, scale=1.2), PITCH).reading is None  # the third one learns it
+    assert r.held == pytest.approx(1 / 1.2, abs=0.01)
+    assert r.read(scene(syn.flat, scale=1.2), PITCH).reading.ground == FLAT
+
+
+def test_frames_with_an_edge_do_not_teach_the_scale():
+    r = dz.Reader(MOUNT)
+    for _ in range(5):
+        r.read(scene(syn.step(2.0, -1.0)), PITCH)
+    assert r.held is None
+
+
+# Waqas's rows on #138: an edge closer than the bottom of the picture. Scaling each frame to its
+# own bottom rows read every one of them as level floor.
+BLIND = [(30, -0.17, 0.37), (30, -1.0, 0.37), (30, -0.5, 0.55), (45, -1.0, 0.15)]
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.2])
+@pytest.mark.parametrize("pitch_deg, height, at", BLIND)
+def test_an_edge_in_the_blind_zone_is_not_level_floor(pitch_deg, height, at, scale):
+    pitch = math.radians(pitch_deg)
+    r = reader_on(pitch, scale=scale)
+    seen = r.read(scene(syn.step(at, height), pitch=pitch, scale=scale), pitch)
+    assert seen.reading.ground in (CURB, DROP) and seen.reading.distance_m == 0.0
+
+
+def test_with_the_held_scale_a_little_off_an_edge_down_is_still_a_drop_at_0_m():
+    # the held scale 10 % off and the reader's own check not firing: the frame's own floor
+    # scale, much smaller than the held one, still says the floor is lower
+    r = reader_on()
+    r.held *= 1.1
+    seen = r.read(scene(syn.step(0.37, -1.0)), PITCH)
+    assert (seen.reading.ground, seen.reading.distance_m) == (DROP, 0.0)
+
+
+def test_a_new_scene_is_learned_again_after_walking_on():
+    r = reader_on(scale=1.0)
+    outdoors = scene(syn.flat, scale=1.4)  # the model reads this scene 40 % farther
+    assert r.read(outdoors, PITCH, steps=0).reading.ground == DROP  # stop: it could be an edge
+    assert r.read(outdoors, PITCH, steps=2).reading.ground == DROP  # still in the blind zone
+    r.read(outdoors, PITCH, steps=4)  # four steps on, no edge was there: learn again
+    for steps in (5, 6):
+        r.read(outdoors, PITCH, steps=steps)
+    assert r.held == pytest.approx(1 / 1.4, abs=0.02)
+    assert r.read(outdoors, PITCH, steps=7).reading.ground == FLAT
 
 
 # ---- the ground, with the model's scale off
@@ -102,7 +166,7 @@ ERRORS = [
 )
 def test_the_ground_is_read_through_the_models_errors(ground, kind, at, pitch_deg, error):
     pitch = math.radians(pitch_deg)
-    seen = dz.read(scene(ground, pitch=pitch, **error), MOUNT, pitch)
+    seen = reader_on(pitch, **error).read(scene(ground, pitch=pitch, **error), pitch)
     assert seen.reading.ground == kind
     if at is None:
         assert math.isnan(seen.reading.distance_m)
@@ -116,7 +180,7 @@ def test_without_the_floor_scale_a_tenth_off_breaks_the_reading():
 
     cam = MOUNT.camera(COLS, ROWS, PITCH)
     assert read_ground(scene(syn.flat, scale=1.1), cam).ground != FLAT
-    assert dz.read(scene(syn.flat, scale=1.1), MOUNT, PITCH).reading.ground == FLAT
+    assert reader_on(scale=1.1).read(scene(syn.flat, scale=1.1), PITCH).reading.ground == FLAT
 
 
 # ---- what stands in the path
@@ -124,13 +188,13 @@ def test_without_the_floor_scale_a_tenth_off_breaks_the_reading():
 
 @pytest.mark.parametrize("at", [1.0, 2.0, 3.0])
 def test_a_wall_ahead_is_measured(at):
-    seen = dz.read(scene(wall(at), scale=1.15, noise=0.02), MOUNT, PITCH)
+    seen = reader_on(scale=1.15, noise=0.02).read(scene(wall(at), scale=1.15, noise=0.02), PITCH)
     assert seen.ahead_m == pytest.approx(at, abs=0.15)
 
 
 def test_nothing_stands_in_the_path_of_a_floor_or_a_curb():
-    assert dz.read(scene(syn.flat, noise=0.02), MOUNT, PITCH).ahead_m is None
-    assert dz.read(scene(syn.step(1.8, 0.12)), MOUNT, PITCH).ahead_m is None
+    assert reader_on(noise=0.02).read(scene(syn.flat, noise=0.02), PITCH).ahead_m is None
+    assert reader_on().read(scene(syn.step(1.8, 0.12)), PITCH).ahead_m is None
 
 
 def test_the_distance_of_a_box_is_the_depth_in_its_middle():
@@ -149,7 +213,7 @@ def test_the_distance_of_a_box_is_the_depth_in_its_middle():
 
 
 def test_the_distance_of_a_box_is_along_the_floor_not_along_the_tilted_camera():
-    seen = dz.read(scene(wall(2.5), scale=1.2), MOUNT, PITCH)
+    seen = reader_on(scale=1.2).read(scene(wall(2.5), scale=1.2), PITCH)
     from demo.vision import Detection
 
     on_the_wall = Detection("door", 0.9, 200, 20, 280, 160)  # above the middle of a 480 x 360 frame
@@ -164,13 +228,16 @@ def test_the_depth_picture_is_a_jpeg():
 
 
 class RenderedDepth:
-    """Stands in for the depth model: always the same picture, 20 percent too far."""
+    """Stands in for the depth model: level floor for the first frames, then this ground, all
+    20 percent too far."""
 
-    def __init__(self, ground):
-        self.image = scene(ground, scale=1.2, noise=0.01)
+    def __init__(self, ground, flat_first=3):
+        self.flat, self.image = scene(syn.flat, scale=1.2), scene(ground, scale=1.2, noise=0.01)
+        self.left = flat_first
 
     def estimate(self, jpeg):
-        return self.image
+        self.left -= 1
+        return self.flat if self.left >= 0 else self.image
 
 
 def tilted_30(phone):
@@ -186,9 +253,20 @@ def test_a_drop_seen_by_the_camera_reaches_the_decision_core():
     from test_demo_server import jpeg, run, snapshot_where, with_clients
 
     async def go(client, phone, dash):
+        async def drain(ws):  # the phone reads what it is sent, or the server's sends back up
+            async for _ in ws:
+                pass
+
+        reader = asyncio.create_task(drain(phone))
         await tilted_30(phone)
-        await phone.send_bytes(b"\x01" + jpeg())
-        snap = await snapshot_where(dash, lambda s: (s.get("depth") or {}).get("ground"))
+        for _ in range(100):  # frames until the scale is learned and the drop is read
+            await phone.send_bytes(b"\x01" + jpeg())
+            await asyncio.sleep(0.05)
+            if (client.app["depth"].get("view") or {}).get("ground") == "drop":
+                break
+        snap = await snapshot_where(
+            dash, lambda s: (s.get("depth") or {}).get("ground") == "drop", tries=400
+        )
         view = snap["depth"]
         assert view["ground"] == "drop" and view["distance_m"] == pytest.approx(2.0, abs=0.25)
         assert view["pitch_deg"] == 30 and view["scale"] == pytest.approx(1 / 1.2, abs=0.03)
@@ -197,6 +275,7 @@ def test_a_drop_seen_by_the_camera_reaches_the_decision_core():
         assert held.ground == Ground.DROP  # the camera's own report, not a second sensor
         r = await client.get("/depth.jpg")
         assert r.status == 200 and (await r.read())[:2] == b"\xff\xd8"
+        reader.cancel()
 
     run(with_clients(go, depth=RenderedDepth(syn.step(2.0, -1.0)), mount=MOUNT))
 
@@ -246,9 +325,9 @@ def test_with_depth_the_obstacle_distance_is_measured_not_estimated():
 
             return [Detection("person", 0.9, 200, 20, 280, 160)], 480, 360
 
-    class PersonAt3m:
-        def estimate(self, jpeg):
-            return scene(wall(3.0), scale=1.2)  # a person as wide as a wall, 3 m ahead
+    class PersonAt3m(RenderedDepth):
+        def __init__(self):
+            super().__init__(wall(3.0))  # a person as wide as a wall, 3 m ahead
 
     async def go(client, phone, dash):
         mw = client.app["mw"]
