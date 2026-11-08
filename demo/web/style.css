@@ -268,6 +268,7 @@ body.dash {
 
 .camera { position: relative; flex: 1; min-height: 0; background: #0f172a; border-radius: 0.8em; overflow: hidden;
   display: flex; align-items: center; justify-content: center; }
+.carried { float: right; font-size: 0.8em; padding: 0.2em 0.7em; text-transform: none; letter-spacing: 0; }
 .path { height: 11em; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.6em; overflow: hidden; }
 .path canvas { width: 100%; height: 100%; display: block; }
 .camera .depth { position: absolute; right: 0.6em; bottom: 0.6em; width: 32%; border-radius: 0.5em; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }

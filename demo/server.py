@@ -353,6 +353,8 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
             command = BUTTONS.get(str(d.get("name", "")).lower())
             if d.get("type") == "button" and command is not None:
                 app["mw"].on_command(command, 1.0, source="dashboard")
+            elif d.get("type") == "carried" and isinstance(d.get("on_foot"), bool):
+                app["mw"].set_on_foot(d["on_foot"])
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -486,6 +488,8 @@ def main(argv=None) -> None:
                    help="metres from the floor to the camera, as it is held")  # fmt: skip
     p.add_argument("--camera-fov", type=float, default=66.0,
                    help="degrees across the long side of the picture")  # fmt: skip
+    p.add_argument("--on-foot", action="store_true",
+                   help="the phone is carried by a person walking, not on the device")  # fmt: skip
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -496,7 +500,12 @@ def main(argv=None) -> None:
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
     mount = dz.Mount(a.camera_height, a.camera_fov)
     app = build_app(
-        Middleware(directions=a.directions), detector, classifier, recognizer, depth, mount
+        Middleware(directions=a.directions, on_foot=a.on_foot),
+        detector,
+        classifier,
+        recognizer,
+        depth,
+        mount,
     )
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
