@@ -313,6 +313,8 @@ Until the Gazebo world is ready, `mana_core/world.py` scripts a simple world: a 
 | `imu_lost` | Failure case: the IMU stops during the climb, so MANA cannot confirm level ground and stays on tracks |
 | `entry` | Full system: up the entrance ramp on GPS, then inside without GPS; the lidar map keeps the position, so MANA does not slow down for it |
 | `wifi_drop` | Full system: Wi-Fi fades and Bluetooth carries the alerts at full speed; with both gone MANA slows down until one is back |
+| `glare` | Edge case: glare makes the 3D camera see a drop on level ground at a trust of 0.3; MANA does not act on it and drives on at full speed |
+| `person_leaves` | Edge case: MANA stops for a person, who steps aside; the last report gets old, so MANA drives on |
 
 The pass marks are the team's targets: no track request on flat ground or ramps, tracks requested at least 1.5 m before the first step, a stop acted on within 1 s, and obstacles still announced in the dark. No scenario may end with the chair on a step on wheels, over a drop or against an obstacle.
 
@@ -328,7 +330,7 @@ Compare MANA with the if-else baseline (`mana_core/baseline.py`, FR-26). The bas
 ros2 run mana_core evaluate --compare    # --baseline runs the baseline alone, mark by mark
 ```
 
-In the scripted world MANA meets 63 of 63 pass marks and the baseline 56: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), it never asks before stairs down (`stairs_down`), and in the dark it crosses stairs and a curb on one sensor without stopping (`dark_stairs`, `dark_curb`).
+In the scripted world MANA meets 71 of 71 pass marks and the baseline 60: one camera is enough for the baseline to ask for tracks at the picture of stairs, it does not slow down when no alert link is left (`wifi_drop`), it never asks before stairs down (`stairs_down`), and in the dark it crosses stairs and a curb on one sensor without stopping (`dark_stairs`, `dark_curb`). It also stops for good for a drop it should not trust (`glare`) and for a person who has stepped aside (`person_leaves`), because every report counts for it, however doubtful or old.
 
 The scripted world is exact. To see how each controller copes with imperfect inputs, `repeat` runs every scenario many times with lost reports, noisy trust, distance and tilt, false one-sensor reports, and faults and spoken commands moved in time. MANA and the baseline get the same seed for the same run. The table for 200 runs, and what it shows, is in [docs/results.md](docs/results.md):
 

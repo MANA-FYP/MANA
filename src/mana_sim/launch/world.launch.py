@@ -7,13 +7,15 @@
     ros2 launch mana_sim world.launch.py world:=/path/to/world.sdf   # another world, for a scenario
     ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
+    ros2 launch mana_sim world.launch.py panel:=true      # the supervisor's panel, localhost:8090
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (config/bridge.yaml) and starts the host node, the sensors node, MANA's position and link nodes
 and the depth node (the ground reports from the 3D camera, told where the camera is mounted).
 With detector:=true it also starts the object detector on the RGB camera, which needs
 `pip install ultralytics`. The core node is started separately, on the same clock:
-ros2 run mana_core core_node --ros-args -p use_sim_time:=true
+ros2 run mana_core core_node --ros-args --params-file <mana_sim share>/config/core.yaml
+(config/core.yaml: the simulation clock, and where the chair's front and sensors are, #96)
 """
 
 import os
@@ -93,6 +95,11 @@ def generate_launch_description():
                 default_value="false",
                 description="follow cmd_vel (forward and turn) from a driver, capped by MANA",
             ),
+            DeclareLaunchArgument(
+                "panel",
+                default_value="false",
+                description="the supervisor's panel on http://localhost:8090",
+            ),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 models + os.pathsep + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
@@ -120,11 +127,15 @@ def generate_launch_description():
                     )
                 ],
             ),
+            # started again if it dies: the drive plugins keep the last command they got, so
+            # without the bridge the host cannot stop the chair (#85)
             Node(
                 package="ros_gz_bridge",
                 executable="parameter_bridge",
                 parameters=[{"config_file": os.path.join(share, "config", "bridge.yaml")}],
                 output="screen",
+                respawn=True,
+                respawn_delay=0.5,
             ),
             # with a driver: who drives (supervisor or autopilot) is chosen here, then capped by
             # MANA in the host. The supervisor's keyboard runs in its own terminal.
@@ -189,6 +200,14 @@ def generate_launch_description():
                         "camera_pitch_rad": depth_pitch_rad,
                     }
                 ],
+            ),
+            # the supervisor's panel: MANA's decision live, and the fault and command switches
+            Node(
+                package="mana_sim",
+                executable="panel_node",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+                condition=IfCondition(LaunchConfiguration("panel")),
             ),
             # obstacles from the simulated RGB camera (camera/image, camera/camera_info)
             Node(

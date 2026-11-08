@@ -49,6 +49,7 @@ class Stretch:
 class Obstacle:
     at_m: float
     label: str
+    gone_s: float = math.inf  # when it moves out of the way, such as a person who steps aside
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class World:
     def __init__(self, route: Route):
         self.route = route
         self.x = 0.0
+        self.t = 0.0  # the time of the last sense()
         self.mishaps: list[str] = []
 
     @property
@@ -90,6 +92,9 @@ class World:
             if f.sensor == sensor and f.from_m <= self.x < f.to_m:
                 return f.trust
         return TRUST
+
+    def _obstacles(self) -> list[Obstacle]:
+        return [o for o in self.route.obstacles if o.gone_s > self.t]
 
     def _under(self) -> Stretch | None:
         return next(
@@ -111,7 +116,7 @@ class World:
 
     def sense(self, t: float) -> list:
         """The reports every working sensor sends at time t."""
-        reports = []
+        self.t, reports = t, []
         for name, source in SENSOR.items():
             trust = self._trust(name)
             if trust is None:
@@ -119,7 +124,7 @@ class World:
             if source != Source.LIDAR:
                 reports.append(self._ground(t, source, trust))
             if source != Source.DEPTH_CAMERA:
-                seen = [o for o in self.route.obstacles if 0 <= o.at_m - self.x <= RANGE_M[source]]
+                seen = [o for o in self._obstacles() if 0 <= o.at_m - self.x <= RANGE_M[source]]
                 if seen:
                     o = min(seen, key=lambda o: o.at_m)
                     reports.append(ObstacleReport(t, trust, source, o.at_m - self.x, o.label))
@@ -152,6 +157,6 @@ class World:
         elif under and under.ground in STEPS and mode == Mode.WHEELS:
             what = "curb" if under.ground == Ground.CURB else "stairs"
             self.mishaps.append(f"on the {what} on wheels at {self.x:.2f} m")
-        for o in self.route.obstacles:
+        for o in self._obstacles():
             if self.x >= o.at_m:
                 self.mishaps.append(f"hit the {o.label} at {o.at_m:.1f} m")

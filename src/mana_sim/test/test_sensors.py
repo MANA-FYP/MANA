@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from mana_sim.frames import SENSORS, quaternion
+from mana_sim.host import TOP_SPEED
 
 from mana_sim import converters as c
 
@@ -95,3 +96,34 @@ def test_the_frames_in_the_code_are_the_ones_in_the_model():
         sensor = re.search(rf"<pose>([^<]*)</pose>\s*<gz_frame_id>{frame}</gz_frame_id>", sdf)
         assert sensor, f"{frame} is not in the model"
         assert [float(v) for v in sensor.group(1).split()] == pytest.approx(pose)
+
+
+def test_the_cores_mount_is_the_models():
+    # config/core.yaml tells the core where the chair's sensors and front are (#96)
+    share = Path(__file__).resolve().parents[1]
+    core = dict(
+        re.findall(r"^\s+(\w+_m): ([0-9.]+)", (share / "config/core.yaml").read_text(), re.M)
+    )
+    for name, frame in (
+        ("camera_m", "camera_link"),
+        ("depth_camera_m", "depth_link"),
+        ("lidar_m", "lidar_link"),
+    ):
+        assert float(core[name]) == SENSORS[frame][0]
+    model = (share / "models/mana_chair/model.sdf").read_text()
+    axle = float(re.search(r"<link name=\"wheel_fl\">\s*<pose>([0-9.]+)", model).group(1))
+    radius = float(re.search(r"<cylinder><radius>([0-9.]+)", model).group(1))
+    assert float(core["front_wheels_m"]) == round(axle + radius, 2)
+
+
+def test_the_cores_travel_after_a_stop_is_the_hosts():
+    # the host's top speed and the drive plugin's braking, as config/core.yaml tells the core
+    share = Path(__file__).resolve().parents[1]
+    core = dict(
+        re.findall(r"^\s+(\w+): ([0-9.]+)$", (share / "config/core.yaml").read_text(), re.M)
+    )
+    model = (share / "models/mana_chair/model.sdf").read_text()
+    braking = re.search(r"<min_linear_acceleration>-([0-9.]+)<", model).group(1)
+    assert float(core["top_mps"]) == TOP_SPEED
+    assert float(core["decel_mps2"]) == float(braking)
+    assert float(core["reaction_s"]) > 0

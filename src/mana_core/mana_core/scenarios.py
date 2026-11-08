@@ -433,5 +433,43 @@ SCENARIOS = {
                 reaches_end(14.0),
             ),
         ),
+        Scenario(
+            "glare",
+            "Glare: a doubtful drop (edge case)",
+            "Glare makes the 3D camera see a drop on level ground, at a trust of 0.3. MANA does "
+            "not act on a report it cannot trust, and the camera sees level ground, so it drives "
+            "on at full speed. A controller that counts every report stops there.",
+            Route(
+                10.0,
+                (
+                    Stretch(
+                        5.0,
+                        5.3,
+                        Ground.DROP,
+                        seen_by=frozenset({Source.DEPTH_CAMERA}),
+                        real=False,
+                    ),
+                ),
+                # the glare lasts until well past the false drop: the repeated runs move the end of
+                # a fault up to 0.5 m, and the drop must never be seen at full trust
+                faults=(Fault("depth", to_m=7.0, trust=0.3),),
+            ),
+            15.0,
+            marks=(no_tracks(), full_speed_on(0.5, 9.5, "level ground"), reaches_end(10.0)),
+        ),
+        Scenario(
+            "person_leaves",
+            "A person steps aside (edge case)",
+            "MANA stops for a person ahead, who then steps aside. No sensor reports them again, so "
+            "the last report gets old: MANA no longer acts on it and drives on. A controller that "
+            "keeps every last report waits for ever.",
+            Route(12.0, obstacles=(Obstacle(7.0, "person", gone_s=12.0),)),
+            25.0,
+            marks=(
+                tells("Obstacle ahead, stopping"),
+                full_speed_on(8.0, 11.5, "way past where the person stood"),
+                reaches_end(12.0),
+            ),
+        ),
     )
 }

@@ -24,7 +24,9 @@ The stairs, the drops and the obstacles stay where the pass marks expect them. T
 - **Building entry**: up a ramp on GPS, then inside, where GPS is lost but the lidar map still has the position.
 - **Wi-Fi drop**: Wi-Fi fades and Bluetooth carries the alerts; then both are gone for 2 m.
 
-Darkness and the spoken stop are the existing dark-corridor and spoken-stop scenarios.
+Darkness and the spoken stop are the existing dark-corridor and spoken-stop scenarios. Two edge cases show what MANA's trust and age checks add, which the other scenarios do not, since their sensors always report the right ground:
+- **Glare**: the 3D camera alone sees a drop on level ground, at a trust of 0.3.
+- **A person steps aside**: MANA stops for a person, who then steps aside, so their last report gets old.
 
 "All marks met" counts the runs that met every pass mark of the scenario, with the 95% (Wilson) interval. A mishap is going over a drop, onto steps on wheels, or into an obstacle.
 
@@ -45,10 +47,12 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
 | IMU lost on the stairs (failure case) | 200/200 (98.1% to 100.0%) | 200/200 (98.1% to 100.0%) | 0/200 | 0/200 | 100.0% (sd 0.0%) | 100.0% (sd 0.0%) |
 | Building entry (full system) | 182/200 (86.2% to 94.2%) | 120/200 (53.1% to 66.5%) | 0/200 | 0/200 | 98.2% (sd 5.7%) | 90.2% (sd 13.1%) |
 | Wi-Fi drop (full system) | 186/200 (88.6% to 95.8%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.8% (sd 4.3%) | 64.8% (sd 5.5%) |
+| Glare: a doubtful drop (edge case) | 174/200 (81.6% to 91.0%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 96.8% (sd 8.4%) | 47.0% (sd 8.1%) |
+| A person steps aside (edge case) | 187/200 (89.2% to 96.2%) | 0/200 (0.0% to 1.9%) | 0/200 | 0/200 | 98.4% (sd 6.2%) | 50.0% (sd 0.0%) |
 
 ### What the table shows
 
-- **Neither controller had a mishap in any of the 6,000 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
+- **Neither controller had a mishap in any of the 6,800 runs.** The scripted world's sensors see every hazard in time, and both controllers stop for drops and obstacles from one sensor. The difference between them is in the other marks.
 - **A stop holds through a noisy reading (#97).** "Stops before" fails if the chair moves at all after its first stop for the hazard. Before #97, one noisy distance over `edge_m` or `obstacle_stop_m` released the stop for a tick, and it happened again and again while the chair waited. MANA met the stop mark in 2 of 200 drop runs, 32 of 200 manual-mode drop runs and 1 of 200 dark-corridor runs, and came within 0.20 m of an edge the rule keeps 0.5 m away. Now a stop holds for 0.5 s after its hazard was last seen, and while it holds, a hazard up to 0.1 m past its limit still counts (`docs/decisions.md`, D5). Once the chair has stopped within the limit, it no longer moves on in any of the 200 runs of each scenario. Where MANA still misses the mark (6 drop runs, 25 dark-corridor runs), a noisy reading stopped it early: 0.57 to 0.68 m from the edge, 0.85 to 0.98 m from the person. Once the hold ran out, the chair moved on to the real limit and stopped there. The baseline still releases its stops in nearly every run.
 - **Stairs down: every mark in 200 of 200 runs.** Before #97 a yes was lost in 13 runs. It was heard on a tick where one lost camera report, or a reading just past `step_m`, had ended the question. The question now holds the same way, and a yes heard up to 2 s after it was last asked still answers it.
 - **Where the baseline falls short:**
@@ -56,8 +60,9 @@ Darkness and the spoken stop are the existing dark-corridor and spoken-stop scen
   - **The ramp** (118 of 200): a single false camera report of stairs makes it ask for tracks on the ramp. **Building entry** (120 of 200) fails for the same reason, on its entrance ramp, so it is the same weakness, not a second one. With false reports turned off, the baseline meets every mark on both in 200 of 200 runs.
   - **The Wi-Fi drop** (0 of 200): the alert link is not part of its rules, so it drives on at full speed while no alert could be sent.
   - **Stairs down** (0 of 200): its if-else rules have no question, so it never asks before going down.
+  - **Glare and a person who steps aside** (0 of 200 each): every report counts for it, however doubtful or old. It stops for the drop at trust 0.3 and for the person's last report, and waits there until the time runs out. MANA drives on in both.
   - **Stairs and a curb in the dark** (0 of 200 each): one sensor is enough for it to change to tracks, so it crosses on the 3D camera alone without stopping. It has no mishap there, but it is the same one-sensor rule that asks for tracks on a wall at the picture of stairs. MANA stops and waits for the user to choose tracks, in 200 of 200 runs of each.
-- **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182) and the Wi-Fi drop (186), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all three in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
+- **Where MANA misses other marks, it is by design.** On level ground (170 of 200), building entry (182), the Wi-Fi drop (186), glare (174) and the person who steps aside (187), every miss comes from the false camera report. One sensor saying stairs is not enough to change mode, but it is enough to slow down for a moment, as the design asks ("possible step ahead"). That slow-down fails the strict "full speed" marks, but it isn't a mishap. With false reports turned off, MANA meets every mark on all five in 200 of 200 runs. On the picture of stairs (186 of 200), a lost camera report can leave one tick at full speed before the picture.
 
 To make the table without false reports:
 
@@ -72,6 +77,83 @@ python3 -m mana_core.repeat --runs 200 --seed 1 --no-false-reports
 - There is one kind of false report: the camera alone saying stairs, which MANA's two-sensor rule is built to reject. There are no false 3D camera or lidar reports, and no missed detections near steps, where needing two sensors could cost MANA. The table is biased towards MANA in that way.
 - The position module switches at once here, where the real node takes up to 2 s (#59). The alert link is up or down, without the heartbeat counting of the link node (#62).
 - The scripted world measures distances from the front of the device. The simulated sensors measure from where they are mounted, which matters on tracks: **#96**.
+
+## Reaction time and stopping distance (#84)
+
+How far the chair travels between a hazard appearing and the chair standing still, and whether the stop distances leave room for it.
+
+### From a depth frame to the wheels at 0
+
+`tools/measure_latency.py` runs the real `depth_node`, `core_node` and `host_node` (ROS 2 Jazzy in WSL, on the AMD Ryzen 7 7730U laptop, 8 cores). It sends them 30 depth frames a second. Each trial is level ground, then, at a random moment, a drop in the blind zone, which stops the chair from one sensor. The times are taken by the probe's own clock when each message arrives. Gazebo is not needed, because the host's wheel command is where a chair starts to brake.
+
+```bash
+python3 tools/measure_latency.py --trials 50   # in a built and sourced workspace
+```
+
+| Stage, 50 trials | Median | 95th percentile | Most |
+|---|---|---|---|
+| frame to DROP report (`depth_node`) | 45 ms | 105 ms | 119 ms |
+| DROP report to stop request (`core_node`) | 16 ms | 77 ms | 103 ms |
+| stop request to wheels at 0 (`host_node`) | 29 ms | 30 ms | 31 ms |
+| **frame to wheels at 0** | **116 ms** | **150 ms** | **184 ms** |
+
+Most of the time is waiting, not computing. `depth_node` reads at most 10 frames a second, so a frame can wait up to 100 ms for its turn. `core_node` ticks at 10 Hz, so a report can wait up to 100 ms. `host_node` ticks at 20 Hz, so up to 50 ms. The host's share is nearly fixed within one launch (29 to 31 ms here, 45 ms in a 5-trial launch before), because the two timers keep their phase. A later launch can give anything up to 50 ms.
+
+Not in these numbers:
+- the camera's own exposure and transfer before a frame is published;
+- an obstacle seen by the detector. The detector takes 73 ms a frame (median, 87 ms at the 90th percentile, YOLOE at 480: `src/mana_perception/README.md`), instead of the time `depth_node` takes to read a frame. That path is not measured end to end;
+- a computer other than this laptop (we have no other target yet).
+
+### Where the chair stands still
+
+`tools/stopping_distance.py` drives the chair at top speed (1.2 m/s). It slows to 0.36 m/s once the hazard is within 2 m and stops it at the stop distance. Each request reaches the wheels after the reaction time above, and the chair then brakes at a constant deceleration. A real chair's deceleration is not measured yet. The simulated chair allows 3 m/s², so the table runs from 0.5 to 3.
+
+Metres left to the hazard at standstill, with a reaction of 0.2 s (the most measured, 184 ms, rounded up). In brackets is the speed when the hazard crossed the stop distance:
+
+| Case | 0.5 m/s² | 1.0 m/s² | 1.5 m/s² | 2.0 m/s² | 3.0 m/s² |
+|---|---|---|---|---|---|
+| drop: seen at 2 m, stop at 0.5 m | 0.29 (0.42 m/s) | 0.36 (0.36 m/s) | 0.38 (0.36 m/s) | 0.40 (0.36 m/s) | 0.41 (0.36 m/s) |
+| obstacle: seen at 2 m, stop at 0.8 m | 0.32 (0.69 m/s) | 0.66 (0.36 m/s) | 0.68 (0.36 m/s) | 0.70 (0.36 m/s) | 0.71 (0.36 m/s) |
+| late: an obstacle appears 1.2 m ahead | **−0.48** (1.13 m/s) | 0.24 (1.06 m/s) | 0.48 (0.98 m/s) | 0.60 (0.89 m/s) | 0.69 (0.69 m/s) |
+
+With 0.3 s, which allows for the detector or a slower computer, the late obstacle has 0.12 m left at 1.0 m/s², and the drop 0.20 m at 0.5 m/s².
+
+What this shows:
+- **A hazard seen 2 m ahead is stopped for at every deceleration in the table.** With 1.0 m/s² or more, the chair has slowed to 0.36 m/s before the stop distance, and it stands 0.33 m or more from a drop and 0.63 m or more from an obstacle, even with a 0.3 s reaction. At 0.5 m/s² it is still going faster when it crosses the stop distance and stands only 0.20 to 0.32 m away.
+- **An obstacle that appears close is the case that decides.** A chair at top speed reaches a person who steps out 1.2 m ahead if it brakes at 0.5 m/s². At 1.0 m/s² it stops only 0.12 to 0.24 m short of them. From 1.5 m/s² it keeps 0.36 m or more.
+- **For #86:** at 1.5 m/s² or more, the chair keeps 0.35 m or more from every hazard in the table, with either reaction time. Below that, either the top speed should come down, or the stop distance for obstacles should grow, and the tool shows what either change gives. The real chair's deceleration must be measured first. That number is the input this check is waiting for.
+
+## Fail-safe: one of MANA's own parts dies mid-drive (#85)
+
+What MANA should do when one of its own nodes dies or hangs, then what it did. The node cases are in `src/mana_sim/test/test_failsafe.py`. It runs the real nodes as processes (`ros2 run`), on a ROS domain of their own. A probe feeds them what the sensors would, then kills one node (SIGKILL) or freezes it (SIGSTOP). The times are from the kill to the first message that shows the safe behaviour. They come from 3 or 4 runs of the file in WSL. The test checks each against the limit it gives, plus 0.3 s for the timers and a loaded machine.
+
+| Case | Expected | Test | Measured |
+|---|---|---|---|
+| The core node is killed, or hangs | The host's watchdog stops the chair `watchdog_s` (0.5 s) after the last drive request | `test_when_the_core_dies_or_hangs_...` | the wheels' command is 0 after 0.50 s, both ways, in 4 runs, and stays 0 |
+| A perception node dies or a camera topic stalls | Its reports age out after `max_age_s` (0.5 s). With no ground sensor left, MANA slows down: "Ground sensors not available, slowing down", speed 0.3 | `test_when_the_ground_reports_stop_...` | slowed after 0.50 s in 4 runs |
+| The position node dies | Its reports age out after `position_max_age_s` (2.5 s): "Position unknown, slowing down" | `test_when_the_position_or_link_node_dies_...` | slowed after 2.54 and 2.59 s, and once after 1.43 s |
+| The link node dies | Its reports age out after `link_max_age_s` (2.5 s): "No alert link, slowing down" | same | slowed after 2.50 to 2.58 s, and once after 1.35 s |
+| The bridge to Gazebo dies | The host cannot stop the chair: the drive plugins keep the last command they got. So the launch file starts the bridge again (`respawn`, after 0.5 s) | by hand, in Gazebo without cameras; the respawn also in `tools/sim_faults.py` (sim-smoke in CI) | **without respawn** the chair drove on at 0.36 m/s for at least 10 s of simulation time. **With respawn** a new bridge was up within 3 s, and a stop said after the kill stopped the chair. In `sim_faults.py` the clock came back 2.9 to 3.9 s after the kill |
+| The user's commands stop coming, in manual mode | Commands are single events, not a stream. MANA keeps manual mode, and its stops still apply. A driver that goes quiet is stood still by the host (D7) | `test_when_following_a_driver_the_chair_stands_still_...` (host) | as expected |
+| All ground sensors lost in manual mode | MANA cannot see a drop, so it slows down as in automatic mode, on the user's undercarriage (D7) | `test_in_manual_mode_with_no_ground_sensor_...` | before #85 it kept the user's speed |
+| The clock jumps back (a world reset) | The core drops what it saw before (#109, #111). The host stands still on a request received "in the future" | `test_after_the_clock_goes_back_...` (core), `test_a_clock_gone_back_...` (host) | before #85 the host kept driving on the last request until the clock caught up |
+| The clock stops | On simulation time, every node's timer stops with it. If Gazebo is paused, the chair stands still. If the bridge died, see that row | `tools/sim_faults.py` (sim-smoke): Gazebo paused for 5 s of wall time, then run again | while paused, Gazebo still sent the clock but its time stood still: 0.00 s of simulation time and no new decisions, in 2 runs. When it ran again, the core decided again ("Level ground") |
+
+Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system clock, which is stepped while the tests run. The probe's clock is monotonic. The nodes stamp their reports with the system clock, and the core ages the reports by it. In a later run, two position reports came 5.2 s apart by the probe's clock, but their stamps were 8.1 s apart. In another, a link report came 0.09 s before the kill, stamped 3 s before it. A step forward makes every report look older at once, so the core slows down early: the safe side. A step back is the clock going back (#109). A real device's clock can be stepped the same way, by NTP. On a real device, the motor controller needs its own command timeout, just as the drive plugin should have had one here.
+
+## Faults switched in Gazebo (#42, #44)
+
+`tools/sim_smoke.sh --faults` starts the world headless with no cameras and no lidar, as in CI, and starts the core. Then `tools/sim_faults.py` switches the simulation's faults (`set_fault`) one after the other, and checks what MANA does. The world has no cameras, so the probe sends flat ground from both cameras: otherwise the core slows down for the missing ground first and never gets to the position or the link. The chair follows only a driver (`driver:=true`), and none drives, so it stands still while the core decides. The times are in simulation seconds, from 5 runs in WSL. The same check runs in the sim-smoke job in CI.
+
+| Fault | Expected | Measured |
+|---|---|---|
+| GPS lost (`gps dropout`) | The position node stops reporting: there is no lidar map in this world yet (#43). The core says "Position unknown, slowing down" once the last report is older than 2.5 s | after 4.0 to 4.1 s: the fix ages out after 1.5 s, then the report after 2.5 s |
+| GPS back | The selector takes GPS back after 5 s of good fixes (`back_s`), and the core says "Level ground" again | after 5.3 to 5.4 s |
+| Wi-Fi fade over 10 s (`wifi fade`) | The link node gives Wi-Fi up, Bluetooth still carries the alerts, and the core never slows down for the link | Wi-Fi given up after 6.4 to 9.5 s. The core said "Level ground" throughout, in every run |
+| Alerts during the fade | The probe is the helper's phone. It sends an urgent message every 0.5 s of the fade (20 in all), answers the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began, the worst case. Every alert still arrives, and the alert link changes at most once | in 4 runs, all 20 alerts arrived and the link changed once. In the last 2 runs, 17 and 20 of them had gone out on Wi-Fi first and were sent again on Bluetooth |
+| The bridge is killed | The launch file starts it again (#85), and the clock comes back | after 2.9 to 3.9 s of wall time |
+
+Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
 
 ## Mutation testing (#83)
 

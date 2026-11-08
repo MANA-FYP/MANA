@@ -4,6 +4,8 @@ Perception for MANA (M1 Vision). It holds:
 
 - **`detector_node`**: the nearest obstacle in the camera image (a person, a chair, a car...),
   from the same object detector as the phone demo.
+- **`classifier_node`**: level ground or stairs from the camera image, from the StairNet ground
+  classifier: the camera's half of the two-sensor rule for stairs.
 - **`depth_node`**: the ground ahead from the 3D camera (flat, ramp, curb, stairs up, stairs down
   or a drop), the second ground source the decision core's two-sensor rule needs.
 - **`stub_node`**: scripted ground and obstacle reports on the real message interface, so the
@@ -68,6 +70,25 @@ this laptop. On the same street picture both find the same person at the same es
 version missed the bus there, so `bus` and `truck` were added (#72), and rebuilt with 42 names it
 finds the bus at 6.1 m. Rebuild `yoloe-26n-mana.pt` with `python -m demo.build_detector` after the
 names change.
+
+## Ground from the camera
+
+```bash
+python3 tools/train_ground.py --data datasets/stairnet --out models/ground   # once, see #38
+ros2 run mana_perception classifier_node --ros-args   -p model:=models/ground/ground.onnx -r camera/image:=/camera/image
+```
+
+`classifier_node` runs the ground classifier (`ground_classifier.py`, MobileNetV2 trained on
+StairNet and exported to ONNX) on at most `rate_hz` frames a second (default 5) and publishes a
+`GroundReport` on `ground` from the `CLASSIFIER` source: `FLAT` for level ground, `STAIRS_UP` for
+stairs ahead, on them, or at their top (StairNet's LG-IS, IS and IS-LG). The trust is the class's
+probability times the same light factor as the detector, so the camera is trusted less in the dark.
+It cannot tell how far the stairs are, so the distance and the step height are NaN. It needs
+`onnxruntime` and Pillow; without a model file it logs an error and sends nothing.
+
+Known limits: StairNet has stairs going up only, and no ramps, curbs or drops, so those come from
+the 3D camera alone. The classifier and the detector both look through the camera, so the core
+counts them as one sensor.
 
 ## Ground from the 3D camera
 
@@ -180,6 +201,16 @@ Known limits:
   of 0.1 or 0.2 m up or down in the blind zone is still an edge at 0 m, going up and going down.
   With no recent or trusted `motion` report the mounting tilt is used alone. Roll is not corrected
   yet.
+- **Climbing stairs or a curb** the chair is pitched more nose up than any ramp (0.28 to 0.52 rad on
+  the route's stairs), and the plane it stands on, the line of the nosings, ends at the landing.
+  Carried on ahead it rose above the landing, which read as a drop at 0 m, and the core held a stop
+  (#117). Nose up steeper than a steep ramp (`steep / 4`, 25 %), the nearest ground is therefore
+  measured from level: on the route's stairs, every 10 cm from the first riser onto the landing
+  reads STAIRS_UP, UNKNOWN (the landing is taller than one riser) or FLAT, and never a drop at 0 m;
+  the curb, with the nose lifted 0.3 to 0.47 rad by the tracks, is no drop at 0 m either. Going
+  **down** the stairs nose down it is unchanged: measured from level the next tread would read as a
+  drop, and the readings there stay a mix of STAIRS_DOWN, CURB and STAIRS_UP at 0 m (slow, not
+  stop); the Gazebo `stairs_down` scenario is not played yet.
 - **At the foot or the crest of a ramp** the chair is still on one slope while the nearest ground
   in view is already 6 to 9 cm up or down the next, so the pitch does not help there (single frames
   of `CURB 0.00 m` on the Gazebo run of #100). It is no edge if the near ground seen (0.6 m of it)
@@ -248,6 +279,7 @@ ros2 run mana_perception stub_node --ros-args -p scenario:=stairs
 ## Tests
 
 ```bash
-python -m pytest tests/test_detection.py tests/test_depth_ground.py tests/test_perception_stub.py
-colcon test --packages-select mana_perception    # the detector and depth nodes end to end, in ROS 2
+python -m pytest tests/test_detection.py tests/test_ground_classifier.py tests/test_depth_ground.py \
+  tests/test_perception_stub.py
+colcon test --packages-select mana_perception    # the detector, classifier and depth nodes end to end
 ```

@@ -34,7 +34,11 @@ class CoreNode(Node):
         limits = d.Limits(
             **{f.name: self.declare_parameter(f.name, f.default).value for f in fields(d.Limits)}
         )
-        self.core = d.DecisionCore(limits)
+        # where the front and the sensors are (all 0: the reports measure from the front, #96)
+        mount = d.Mount(
+            **{f.name: self.declare_parameter(f.name, f.default).value for f in fields(d.Mount)}
+        )
+        self.core = d.DecisionCore(limits, mount)
         self.last_reason = None
         # what the user hears: one message at a time, the most urgent first (see messages.py)
         self.queue = MessageQueue(

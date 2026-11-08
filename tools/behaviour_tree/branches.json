@@ -65,7 +65,7 @@
     "group": "user",
     "icon": "joystick",
     "when": "The user chose manual mode: by voice, with a speed command, or by choosing wheels or tracks.",
-    "does": "The user's mode and speed.",
+    "does": "The user's mode and speed. With no ground sensor at all, the user's mode at 30% at most, saying \"Ground sensors not available, slowing down\" (D7).",
     "says": "Manual mode",
     "why": "Every branch above this one still holds in manual mode: the user drives, but not over an edge or into an obstacle."
   },

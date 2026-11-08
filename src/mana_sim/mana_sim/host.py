@@ -110,11 +110,15 @@ class Host:
         watchdog_s without a new one the chair stands still. With follow_driver, the chair moves
         only as the driver asks; a driver silent for watchdog_s (keys let go) means stand still,
         never "drive on by itself"."""
-        if request is None or now - received_at > watchdog_s:
+        if request is None or not 0.0 <= now - received_at <= watchdog_s:  # also a clock gone back
             return self.halt()
         mode, stop, speed_limit = request
         if follow_driver:
-            driver = driver if driver is not None and now - driver_at <= watchdog_s else (0.0, 0.0)
+            driver = (
+                driver
+                if driver is not None and 0.0 <= now - driver_at <= watchdog_s
+                else (0.0, 0.0)
+            )
         else:
             driver = None
         return self.update(int(mode), bool(stop), float(speed_limit), now, driver)
