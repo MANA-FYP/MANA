@@ -274,6 +274,8 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
             command = BUTTONS.get(str(d.get("name", "")).lower())
             if d.get("type") == "button" and command is not None:
                 app["mw"].on_command(command, 1.0, source="dashboard")
+            elif d.get("type") == "carried" and isinstance(d.get("on_foot"), bool):
+                app["mw"].set_on_foot(d["on_foot"])
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -398,6 +400,8 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--on-foot", action="store_true",
+                   help="the phone is carried by a person walking, not on the device")  # fmt: skip
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -405,7 +409,9 @@ def main(argv=None) -> None:
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
-    app = build_app(Middleware(directions=a.directions), detector, classifier, recognizer)
+    app = build_app(
+        Middleware(directions=a.directions, on_foot=a.on_foot), detector, classifier, recognizer
+    )
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")

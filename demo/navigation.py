@@ -12,8 +12,8 @@ point (east, north), with latitude and longitude once a GPS fix has been seen.
 
 The filter is a Kalman filter with one variance for both axes: a step adds its own uncertainty
 (length and heading), a GPS fix of accuracy a metres counts with variance a squared. A fix far
-outside what the two allow is refused as a jump, unless several in a row agree (the person moved
-without steps, as on a device with wheels).
+outside what the two allow is refused as a jump, unless several in a row agree with each other
+(the person moved without steps, as on a device with wheels).
 
 Pure Python, no network: the demo server feeds it, and the tests feed it recorded or made-up walks.
 """
@@ -72,8 +72,9 @@ class StepCounter:
     def add(self, t: float, ax: float, ay: float, az: float) -> Step | None:
         m = math.sqrt(ax * ax + ay * ay + az * az)
         if self.t is None or t <= self.t or t - self.t > 1.0:  # first reading, or a gap
-            self.t, self.smooth = t, 0.0
-            self.pending = None
+            # start over: a swing half before the gap is not a step
+            self.t, self.smooth, self.pending = t, 0.0, None
+            self.above, self.peak, self.valley = False, -math.inf, math.inf
             return None
         dt, self.t = t - self.t, t
         self.gravity += (m - self.gravity) * min(1.0, dt / 2.0)  # follows over about 2 s
@@ -179,7 +180,7 @@ class Track:
         self.last_gps_t: float | None = None
         self.last_step_t: float | None = None
         self.last_fix: Fix | None = None
-        self.refused = 0  # fixes refused as jumps, in a row
+        self.refused: deque = deque(maxlen=agree_to_jump)  # fixes refused as jumps, in a row
         self.t: float | None = None
         self._recent: deque = deque(maxlen=50)  # (t, distance) for the speed
 
@@ -221,10 +222,11 @@ class Track:
         r = fix.accuracy_m**2
         gap = math.hypot(e - self.x, n - self.y)
         if gap > self.gate_sigmas * math.sqrt(self.var + r):
-            self.refused += 1
-            if self.refused < self.agree_to_jump:
+            self.refused.append((e, n, fix.accuracy_m))
+            agreed = self._agreed()
+            if agreed is None:
                 return False
-            self.x, self.y, self.var = e, n, r  # several fixes agree: the person did move
+            self.x, self.y, self.var = agreed  # several fixes agree: the person did move
         else:
             gain = self.var / (self.var + r)
             self.x += gain * (e - self.x)
@@ -281,8 +283,21 @@ class Track:
             self.var += self.drift * (now - self.t)
         self.t = now if self.t is None else max(self.t, now)
 
+    def _agreed(self) -> tuple[float, float, float] | None:
+        """Where the refused fixes put the person, when there are agree_to_jump of them in a row
+        and each lies within twice its own accuracy of their mean: then the person moved without
+        steps. Fixes scattered in different directions (multipath) never agree."""
+        if len(self.refused) < self.agree_to_jump:
+            return None
+        me = sum(e for e, _, _ in self.refused) / len(self.refused)
+        mn = sum(n for _, n, _ in self.refused) / len(self.refused)
+        if any(math.hypot(e - me, n - mn) > 2.0 * a for e, n, a in self.refused):
+            return None
+        var = max(a for _, _, a in self.refused) ** 2
+        return me, mn, var
+
     def _used(self, fix: Fix) -> None:
-        self.refused = 0
+        self.refused.clear()
         self.last_gps_t = fix.t
         self.source = self.GPS
         self._extend(fix.t)

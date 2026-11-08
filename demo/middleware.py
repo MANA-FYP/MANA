@@ -339,9 +339,16 @@ class Middleware:
     VIBRATION_SLIP = 2.0  # m/s^2 of acceleration spread over one second counts as rough ground
 
     def __init__(
-        self, core: DecisionCore | None = None, clock=time.monotonic, directions: bool = False
+        self,
+        core: DecisionCore | None = None,
+        clock=time.monotonic,
+        directions: bool = False,
+        on_foot: bool = False,
     ):
         self.core = core or DecisionCore()
+        # how the phone is carried: on the device (wheels, the default) or by a person on foot
+        # (a cane, walking). Only on foot are the steps the person's, not jolts of rough ground.
+        self.on_foot = on_foot
         # what the user hears: one message at a time, the most urgent first (mana_core.messages)
         self.queue = MessageQueue()
         self.directions = directions  # also say what is ahead, for a cane or glasses host
@@ -597,9 +604,11 @@ class Middleware:
         self._accel.append((now, math.sqrt(ax * ax + ay * ay + az * az)))
         recent = [m for t, m in self._accel if now - t <= 1.0]
         spread = (max(recent) - min(recent)) if len(recent) > 3 else 0.0
-        # a person walking with the phone shakes it too: that is their steps, not rough ground
+        # a person walking with the phone shakes it too: on foot, that is their steps, not rough
+        # ground. On wheels a jolt at a walking pace (paving slabs) counts as a step as well, so
+        # there the shaking is always rough ground.
         last_step = self.nav.track.last_step_t
-        walking = last_step is not None and now - last_step < 2.0
+        walking = self.on_foot and last_step is not None and now - last_step < 2.0
         slip = spread > self.VIBRATION_SLIP and not walking
         self.core.on_motion(MotionReport(now, 0.9, pitch_rad=pitch, roll_rad=roll, wheel_slip=slip))
         deg = math.degrees(max(abs(pitch), abs(roll)))
@@ -627,6 +636,21 @@ class Middleware:
             "position",
             "no fix" if accuracy_m is None else f"+/-{accuracy_m:.0f} m",
             trust,
+        )
+
+    def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
+        """How the phone is carried: by a person on foot, or on the device."""
+        now = self.clock() if now is None else now
+        if on_foot == self.on_foot:
+            return
+        self.on_foot = on_foot
+        self._decide(
+            now,
+            "switch",
+            "The phone is carried on foot. Walking is not rough ground."
+            if on_foot
+            else "The phone is on the device. Shaking counts as rough ground.",
+            Priority.INFO,
         )
 
     def on_orientation(
@@ -910,6 +934,7 @@ class Middleware:
             },
             "rules": self.rule_names(),
             "manual": not self.core.automatic,
+            "on_foot": self.on_foot,
             "position": {
                 "source": pos,
                 "accuracy_m": self.accuracy_m,

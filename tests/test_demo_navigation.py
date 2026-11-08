@@ -173,6 +173,34 @@ def test_one_fix_far_off_is_refused_but_several_that_agree_move_the_track():
     assert track.x == pytest.approx(80.0, abs=0.01)
 
 
+def test_far_fixes_scattered_in_different_directions_do_not_move_the_track():
+    # multipath while standing: three far fixes that do not agree with each other (Waqas, #137)
+    track = Track()
+    track.on_gps(fix_at(track, 0, 0, 0.0, 5.0))
+    for i, (e, n) in enumerate([(80, 0), (0, -90), (-70, 40), (80, 0), (0, -90)]):
+        assert not track.on_gps(fix_at(track, e, n, 1.0 + i, 10.0))
+    assert math.hypot(track.x, track.y) < 0.01 and track.distance_m == 0.0
+
+
+def test_after_scattered_fixes_three_that_agree_still_move_it():
+    track = Track()
+    track.on_gps(fix_at(track, 0, 0, 0.0, 5.0))
+    track.on_gps(fix_at(track, 0, -90, 1.0, 10.0))  # one outlier first
+    for i, e in enumerate([60, 62, 59]):  # then the person really is 60 m east
+        moved = track.on_gps(fix_at(track, e, 1.0, 2.0 + i, 5.0))
+    assert moved and track.x == pytest.approx(60.3, abs=0.1)
+
+
+def test_a_gap_in_the_middle_of_a_swing_starts_over():
+    counter = StepCounter()
+    count(walk(5.0), counter)
+    rising = [(5.0 + i / 30, 0.0, 0.0, G + 2.5) for i in range(4)]  # part of a rise, then a gap
+    count(rising, counter)
+    assert counter.above
+    count([(9.0, 0.0, 0.0, G)], counter)  # 3.9 s later
+    assert not counter.above and counter.pending is None
+
+
 def test_a_still_person_on_gps_does_not_add_distance_from_the_gps_wander():
     track = Track()
     rnd = random.Random(4)

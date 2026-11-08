@@ -290,3 +290,14 @@ def test_a_walk_from_the_phone_shows_steps_and_the_gps_position_on_the_dashboard
         assert track["lat"] > 31.5204 and track["lon"] == pytest.approx(74.3587, abs=1e-6)
 
     run(with_clients(go))
+
+
+def test_the_dashboard_says_how_the_phone_is_carried():
+    async def go(client, phone, dash):
+        await dash.send_json({"type": "carried", "on_foot": True})
+        await snapshot_where(dash, lambda s: s["on_foot"] is True)
+        await dash.send_json({"type": "carried", "on_foot": "yes"})  # not a switch: ignored
+        await dash.send_json({"type": "carried", "on_foot": False})
+        await snapshot_where(dash, lambda s: s["on_foot"] is False)
+
+    run(with_clients(go))

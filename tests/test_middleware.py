@@ -704,14 +704,49 @@ def test_a_cane_demo_is_told_what_is_ahead():
     assert "Steps up ahead, 1 metre." in [h["text"] for h in heard]
 
 
-def test_walking_with_the_phone_is_not_wheel_slip():
+def walk_or_jolts(m, signal):
+    m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=0.0)
+    for i in range(1, 300):  # 10 s at 30 readings a second
+        t = i / 30
+        m.on_motion(0.0, 0.0, G + signal(t), t, phone_t=t)
+        if i % 15 == 0:
+            m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=t)
+    return m.tick(10.0)["decision"]
+
+
+def walking(t):  # a strong swing at 1.8 steps a second
     import math
 
-    m = Middleware()
-    m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=0.0)
-    for i in range(1, 300):  # 10 s walking at 1.8 steps a second, a strong swing
-        t = i / 30
-        m.on_motion(0.0, 0.0, G + 2.5 * math.sin(2 * math.pi * 1.8 * t), t, phone_t=t)
+    return 2.5 * math.sin(2 * math.pi * 1.8 * t)
+
+
+def paving(hz, size):  # short jolts at each joint of the slabs, as Waqas measured on #137
+    import math
+
+    return lambda t: size * math.exp(-(((t * hz) % 1.0 - 0.5) ** 2) / 0.002)
+
+
+def test_carried_on_foot_walking_is_not_wheel_slip():
+    m = Middleware(on_foot=True)
+    d = walk_or_jolts(m, walking)
     assert m.nav.track.steps >= 15
-    d = m.tick(10.0)["decision"]
     assert d["reason"] != "Wheel slip, changing to tracks"
+
+
+@pytest.mark.parametrize("signal", [walking, paving(1.2, 5.0), paving(1.8, 5.0), paving(2.5, 3.0)])
+def test_on_the_device_a_jolt_at_a_walking_pace_is_still_wheel_slip(signal):
+    d = walk_or_jolts(Middleware(), signal)  # on the device: the default
+    assert (d["mode"], d["reason"]) == ("TRACKS", "Wheel slip, changing to tracks")
+
+
+def test_saying_how_the_phone_is_carried_is_written_down_once():
+    m = Middleware()
+    m.set_on_foot(True, now=1.0)
+    m.set_on_foot(True, now=2.0)
+    m.set_on_foot(False, now=3.0)
+    texts = [e["text"] for e in m.decisions]
+    assert texts == [
+        "The phone is carried on foot. Walking is not rough ground.",
+        "The phone is on the device. Shaking counts as rough ground.",
+    ]
+    assert m.tick(4.0)["on_foot"] is False

@@ -56,6 +56,8 @@ function render(s) {
 
   updateTiles($("inputs"), s.sensors);
   drawTrack(s.position.track);
+  onFoot = s.on_foot;
+  setText($("carried"), onFoot ? "Carried on foot" : "On the device");
 
   // middleware messages: newest first, replaced only when something new arrived
   const rows = s.messages.slice().reverse().slice(0, 4);
@@ -217,6 +219,11 @@ async function loadFrame(seq) {
 document.querySelectorAll("[data-button]").forEach((b) => {
   b.onclick = () => ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: "button", name: b.dataset.button }));
 });
+
+// how the phone is carried: on foot its steps are walking, on the device shaking is rough ground
+let onFoot = false;
+$("carried").onclick = () => ws && ws.readyState === 1 &&
+  ws.send(JSON.stringify({ type: "carried", on_foot: !onFoot }));
 
 $("voice").onclick = () => {
   voiceOn = !voiceOn;
