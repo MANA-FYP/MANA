@@ -135,6 +135,32 @@ the USB cable, and GPS works without a network.
 Limits: the compass is disturbed near steel and motors, and step counting measures a person
 walking. On a device with wheels the steps would come from wheel odometry instead (#78).
 
+## Depth from the camera image
+
+`python -m demo.server --depth` adds a depth model (Depth Anything V2, metric, small; Apache-2.0)
+that runs on the laptop's CPU, about half a second a frame on its own (more while the detector
+runs). The first run downloads it (about 100 MB) from Hugging Face; after that it works offline.
+It gives the camera two things it could not measure before (#131):
+
+- **Ground reports**: level floor, ramp, curb, steps up, and a drop or steps down, with the
+  distance to the edge, through the same reader as the 3D camera (`mana_perception.depth`).
+- **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
+  box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+
+The model's own metres can be 10 to 20 percent off, and the ground reader needs better: it compares
+the ground with the camera's height. So the depth is scaled first: the phone's motion sensors give
+the camera's tilt, the person holds it at a known height (`--camera-height`, default 1.2 m), and
+the floor at the bottom of the picture must lie that far below the camera. Hold the phone tilted
+at least 15 degrees down, so the floor ahead is in the picture; otherwise the dashboard says
+"tilt the camera down to the floor" and no ground report is made. Distances come from the depth
+only once it is scaled; otherwise the box-height estimate is kept.
+
+It is the same camera as the detector, so for the decision core it is the camera, not a second
+sensor: a drop or a step it sees close ahead stops, one farther off slows, and changing to tracks
+still needs a second sensor. The model on the indoor data (the default) or
+`--depth depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf` outdoors; the scale from the
+floor makes the choice matter less. How close its readings come to a tape measure is #133.
+
 ## Optional models
 
 The server starts without any model and says which ones are missing.
@@ -145,20 +171,22 @@ The server starts without any model and says which ones are missing.
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
 | Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included.** |
+| Depth from the camera | `pip install torch transformers`, then `--depth` | ground reports and distances in metres from the camera image (see above) |
 
 ## Known limits
 
 - **Without a ground model the chair reports "Ground sensors not available, slowing down".**
   The decision layer needs ground reports (level, stairs, curb), and a plain phone does not
-  provide them. The stairs classifier fills this gap once a model is trained.
+  provide them. `--depth` fills this gap (see above), and so will the stairs classifier once a
+  model is trained.
 - **The COCO detector has no stairs or curb class.** It finds obstacles only. A step is confirmed
   when two different sensors agree. The classifier and the detector both use the camera image, so
   they count as one sensor: on a phone without depth, stairs only slow the chair down.
-- **Distances from the camera are estimates**, made from the size of the box and a typical
-  object height. Calibrate with `vision.calibrate_focal`.
-- **Drops and step height need depth.** They are verified by the scripted scenarios
-  (`python -m mana_core.evaluate`, or `/api/evidence` on the server), which are an automated test
-  and not live data.
+- **Without `--depth`, distances from the camera are estimates**, made from the size of the box
+  and a typical object height. Calibrate with `vision.calibrate_focal`.
+- **Drops and step height need depth.** With `--depth` they come from the camera image (see
+  above). Without it, they are verified by the scripted scenarios (`python -m mana_core.evaluate`,
+  or `/api/evidence` on the server), which are an automated test and not live data.
 - **Wi-Fi detection needs Android Chrome.** Other browsers cannot see the network type, and then
   the tile shows N/A and the alert link shows "unknown" rather than a guess.
 - **The browser's speech recognition is an online service.** Chrome sends the audio to Google, so

@@ -378,6 +378,7 @@ class Middleware:
         self.brightness = 1.0
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
+        self.gravity: tuple[float, float, float] | None = None
         self._last_decision = None
         self._t0: float | None = (
             None  # the first time seen, so the dashboard shows seconds since start
@@ -594,6 +595,7 @@ class Middleware:
         now = self.clock() if now is None else now
         self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
         pitch, roll = tilt(ax, ay, az)
+        self.gravity = (ax, ay, az)  # the last reading, for the camera's tilt
         self._accel.append((now, math.sqrt(ax * ax + ay * ay + az * az)))
         recent = [m for t, m in self._accel if now - t <= 1.0]
         spread = (max(recent) - min(recent)) if len(recent) > 3 else 0.0
@@ -768,10 +770,11 @@ class Middleware:
         confidence: float,
         bearing_rad: float = 0.0,
         now: float | None = None,
+        source: Source = Source.DETECTOR,
     ) -> None:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
-        self.core.on_obstacle(ObstacleReport(now, trust, Source.DETECTOR, distance_m, label))
+        self.core.on_obstacle(ObstacleReport(now, trust, source, distance_m, label))
         # not written to the decision log: a detection is shown as a box on the camera, and the
         # log says "Obstacle ahead, slowing down" or "stopping" once the core acts on it
         self._say(now, "detector", "obstacle", f"{label} {distance_m:.1f} m", trust)
@@ -826,10 +829,11 @@ class Middleware:
         confidence: float,
         distance_m: float = math.nan,
         now: float | None = None,
+        step_height_m: float = math.nan,
     ) -> None:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
-        self.core.on_ground(GroundReport(now, trust, source, ground, distance_m))
+        self.core.on_ground(GroundReport(now, trust, source, ground, distance_m, step_height_m))
         self._say(now, source.name.lower(), "ground", ground.name.lower(), trust)
 
     # -- one decision and a snapshot of everything

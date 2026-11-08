@@ -270,6 +270,8 @@ body.dash {
   display: flex; align-items: center; justify-content: center; }
 .path { height: 11em; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.6em; overflow: hidden; }
 .path canvas { width: 100%; height: 100%; display: block; }
+.camera .depth { position: absolute; right: 0.6em; bottom: 0.6em; width: 32%; border-radius: 0.5em; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+#depthText { margin: 0.5em 0 0; }
 .camera canvas { max-width: 100%; max-height: 100%; display: block; }
 .camera .empty { position: absolute; color: #94a3b8; font-size: 0.9em; padding: 1.4em; text-align: center; }
 

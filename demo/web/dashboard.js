@@ -51,11 +51,13 @@ function render(s) {
     chip(link[0], link[1]) + pos +
     chip("Detector " + (m.detector ? "on" : "off"), m.detector ? "" : "off") +
     chip("Voice model " + (m.speech ? "on" : "off"), m.speech ? "" : "off") +
-    chip("Stairs model " + (m.classifier ? "on" : "off"), m.classifier ? "" : "off");
+    chip("Stairs model " + (m.classifier ? "on" : "off"), m.classifier ? "" : "off") +
+    chip("Depth model " + (m.depth ? "on" : "off"), m.depth ? "" : "off");
   if (chips !== chipsKey) { chipsKey = chips; $("chips").innerHTML = chips; }
 
   updateTiles($("inputs"), s.sensors);
   drawTrack(s.position.track);
+  showDepth(s.depth);
 
   // middleware messages: newest first, replaced only when something new arrived
   const rows = s.messages.slice().reverse().slice(0, 4);
@@ -131,6 +133,24 @@ function render(s) {
     frameSize = { w: s.frame.w, h: s.frame.h };
     loadFrame(s.frame.seq);
   }
+}
+
+// Depth from the camera image: a small picture over the camera, and what was read from it.
+const GROUND_TEXT = { flat: "level floor", ramp: "ramp", stairs_up: "steps up", stairs_down: "steps down",
+  curb: "curb", drop: "drop" };
+let depthSeq = 0;
+function showDepth(d) {
+  $("depthText").hidden = !d;
+  if (!d) return;
+  if (d.seq > depthSeq) { depthSeq = d.seq; $("depthImg").src = "/depth.jpg?seq=" + d.seq; $("depthImg").hidden = false; }
+  let text;
+  if (!d.ground) text = "Depth: no ground reading (" + d.why + ").";
+  else {
+    text = "Depth: " + GROUND_TEXT[d.ground] + (d.distance_m === null ? "" : " at " + d.distance_m.toFixed(1) + " m") +
+      (d.step_m === null ? "" : ", " + Math.round(d.step_m * 100) + " cm") + ".";
+    text += d.ahead_m === null ? " Path clear." : " Something in the path at " + d.ahead_m.toFixed(1) + " m.";
+  }
+  setText($("depthText"), text + " Camera tilted " + (d.pitch_deg === null ? "?" : d.pitch_deg) + "°, " + Math.round(d.ms) + " ms a frame.");
 }
 
 // The path walked, north up, in metres from the start, scaled to fit, with a scale bar.
