@@ -145,16 +145,37 @@ async function startMotion() {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x === null || now - lastMotion < 33) return;  // about 30 readings a second
     lastMotion = now;
-    send({ type: "motion", ax: a.x, ay: a.y, az: a.z });
+    send({ type: "motion", ax: a.x, ay: a.y, az: a.z, t: now / 1000 });   // t: for counting steps
   };
   window.addEventListener("devicemotion", onMotion);
-  return () => window.removeEventListener("devicemotion", onMotion);
+  const stopHeading = startHeading();
+  return () => { window.removeEventListener("devicemotion", onMotion); stopHeading(); };
+}
+
+// the compass: Android Chrome gives an absolute orientation, an iPhone gives its heading
+let lastHeading = 0;
+function startHeading() {
+  const absolute = "ondeviceorientationabsolute" in window;
+  const name = absolute ? "deviceorientationabsolute" : "deviceorientation";
+  const onTurn = (e) => {
+    const now = performance.now();
+    if (now - lastHeading < 100) return;   // ten a second
+    const compass = typeof e.webkitCompassHeading === "number" ? e.webkitCompassHeading : null;
+    if (compass === null && (e.alpha === null || !(absolute || e.absolute))) return;   // not tied to north
+    lastHeading = now;
+    send({ type: "orientation", alpha: e.alpha, beta: e.beta, gamma: e.gamma, compass });
+  };
+  window.addEventListener(name, onTurn);
+  return () => window.removeEventListener(name, onTurn);
 }
 
 function startGps() {
   if (!("geolocation" in navigator)) return null;
   const id = navigator.geolocation.watchPosition(
-    (p) => send({ type: "gps", accuracy: p.coords.accuracy }),
+    (p) => send({
+      type: "gps", accuracy: p.coords.accuracy, lat: p.coords.latitude, lon: p.coords.longitude,
+      speed: p.coords.speed, heading: p.coords.heading,
+    }),
     () => send({ type: "gps", accuracy: null }),
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
   return () => navigator.geolocation.clearWatch(id);

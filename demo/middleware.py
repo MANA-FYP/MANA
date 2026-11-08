@@ -33,6 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
+from demo.navigation import Fix, Navigator
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -349,6 +350,7 @@ class Middleware:
         self.clock = clock
         self.sensors = {s.id: SensorState(s) for s in SENSORS}
         self.position = PositionSource()
+        self.nav = Navigator()  # where the person is and the path travelled (#129)
         self.link = LinkSelector()  # heartbeats: round trip and missed beats of the data path
         self.radio = RadioLink()
         self.wifi: bool | None = None
@@ -580,21 +582,43 @@ class Middleware:
             }
         )
 
-    def on_motion(self, ax: float, ay: float, az: float, now: float | None = None) -> None:
+    def on_motion(
+        self,
+        ax: float,
+        ay: float,
+        az: float,
+        now: float | None = None,
+        phone_t: float | None = None,
+    ) -> None:
+        """phone_t: the phone's own time of the reading in seconds, for counting steps."""
         now = self.clock() if now is None else now
+        self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
         pitch, roll = tilt(ax, ay, az)
         self._accel.append((now, math.sqrt(ax * ax + ay * ay + az * az)))
         recent = [m for t, m in self._accel if now - t <= 1.0]
         spread = (max(recent) - min(recent)) if len(recent) > 3 else 0.0
-        slip = spread > self.VIBRATION_SLIP
+        # a person walking with the phone shakes it too: that is their steps, not rough ground
+        last_step = self.nav.track.last_step_t
+        walking = last_step is not None and now - last_step < 2.0
+        slip = spread > self.VIBRATION_SLIP and not walking
         self.core.on_motion(MotionReport(now, 0.9, pitch_rad=pitch, roll_rad=roll, wheel_slip=slip))
         deg = math.degrees(max(abs(pitch), abs(roll)))
         self._seen("motion", now, f"{deg:.0f}° {'rough' if slip else 'smooth'}", 0.9)
         self._say(now, "motion", "motion", f"tilt {deg:.0f} deg, slip {slip}", 0.9)
 
-    def on_gps(self, accuracy_m: float | None, now: float | None = None) -> None:
+    def on_gps(
+        self,
+        accuracy_m: float | None,
+        now: float | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        speed: float | None = None,
+        heading: float | None = None,
+    ) -> None:
         now = self.clock() if now is None else now
         self.accuracy_m = accuracy_m
+        if None not in (accuracy_m, lat, lon):
+            self.nav.on_gps(Fix(now, lat, lon, accuracy_m, speed, heading))
         trust = 0.0 if accuracy_m is None else max(0.2, min(1.0, 1.0 - accuracy_m / 50.0))
         self._seen("gps", now, "no fix" if accuracy_m is None else f"+/-{accuracy_m:.0f} m", trust)
         self._say(
@@ -604,6 +628,16 @@ class Middleware:
             "no fix" if accuracy_m is None else f"+/-{accuracy_m:.0f} m",
             trust,
         )
+
+    def on_orientation(
+        self,
+        alpha: float | None,
+        beta: float | None,
+        gamma: float | None,
+        compass: float | None = None,
+    ) -> None:
+        """The phone's absolute orientation (degrees), or the compass heading an iPhone gives."""
+        self.nav.on_orientation(alpha, beta, gamma, compass)
 
     def on_light(self, brightness: float, now: float | None = None) -> None:
         now = self.clock() if now is None else now
@@ -880,6 +914,7 @@ class Middleware:
                 "source": pos,
                 "accuracy_m": self.accuracy_m,
                 "indoor_map_available": False,
+                "track": self.nav.view(now),
             },
             "link": {
                 "state": link,

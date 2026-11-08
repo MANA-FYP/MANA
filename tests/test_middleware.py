@@ -702,3 +702,16 @@ def test_a_chair_demo_gets_no_step_directions():
 def test_a_cane_demo_is_told_what_is_ahead():
     heard = drive_towards_steps(Middleware(directions=True), 9.0)
     assert "Steps up ahead, 1 metre." in [h["text"] for h in heard]
+
+
+def test_walking_with_the_phone_is_not_wheel_slip():
+    import math
+
+    m = Middleware()
+    m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=0.0)
+    for i in range(1, 300):  # 10 s walking at 1.8 steps a second, a strong swing
+        t = i / 30
+        m.on_motion(0.0, 0.0, G + 2.5 * math.sin(2 * math.pi * 1.8 * t), t, phone_t=t)
+    assert m.nav.track.steps >= 15
+    d = m.tick(10.0)["decision"]
+    assert d["reason"] != "Wheel slip, changing to tracks"

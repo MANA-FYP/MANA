@@ -55,6 +55,7 @@ function render(s) {
   if (chips !== chipsKey) { chipsKey = chips; $("chips").innerHTML = chips; }
 
   updateTiles($("inputs"), s.sensors);
+  drawTrack(s.position.track);
 
   // middleware messages: newest first, replaced only when something new arrived
   const rows = s.messages.slice().reverse().slice(0, 4);
@@ -129,6 +130,54 @@ function render(s) {
     boxes = s.frame.boxes;
     frameSize = { w: s.frame.w, h: s.frame.h };
     loadFrame(s.frame.seq);
+  }
+}
+
+// The path walked, north up, in metres from the start, scaled to fit, with a scale bar.
+const SOURCE_COLOUR = { gps: "#2563eb", steps: "#d97706", none: "#94a3b8" };
+const SOURCE_TEXT = { gps: "GPS", steps: "steps (no GPS)", none: "waiting for steps or GPS" };
+let trackKey = "";
+function drawTrack(t) {
+  if (!t) return;
+  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m]);
+  if (key === trackKey) return;
+  trackKey = key;
+  setText($("posText"), t.distance_m.toFixed(1) + " m walked, " + t.steps + " steps, " +
+    (t.heading === null ? "no compass" : "heading " + t.heading + "°") + ", " + t.speed.toFixed(1) +
+    " m/s, from " + SOURCE_TEXT[t.source] + (t.lat === null ? "" : " · " + t.lat.toFixed(6) + ", " + t.lon.toFixed(6)));
+  const cv = $("path");
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const pts = t.path.concat([[t.x, t.y, t.source]]);
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const span = Math.max(10, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.2;
+  const k = Math.min(w, h) / span;   // pixels per metre
+  const X = (x) => w / 2 + (x - cx) * k, Y = (y) => h / 2 - (y - cy) * k;
+  // a grid every 'step' metres, and its scale bar
+  const step = [1, 2, 5, 10, 20, 50, 100, 200, 500].find((m) => m * k >= 40) || 1000;
+  ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+  for (let gx = Math.ceil((cx - w / 2 / k) / step) * step; X(gx) <= w; gx += step) { ctx.beginPath(); ctx.moveTo(X(gx), 0); ctx.lineTo(X(gx), h); ctx.stroke(); }
+  for (let gy = Math.ceil((cy - h / 2 / k) / step) * step; Y(gy) >= 0; gy += step) { ctx.beginPath(); ctx.moveTo(0, Y(gy)); ctx.lineTo(w, Y(gy)); ctx.stroke(); }
+  ctx.fillStyle = "#475569"; ctx.font = "11px Segoe UI, Arial";
+  ctx.fillRect(10, h - 12, step * k, 3); ctx.fillText(step + " m", 10, h - 16);
+  ctx.fillText("N ↑", w - 28, 14);
+  ctx.lineWidth = 3; ctx.lineJoin = "round";
+  for (let i = 1; i < pts.length; i++) {
+    ctx.strokeStyle = SOURCE_COLOUR[pts[i][2]] || SOURCE_COLOUR.none;
+    ctx.beginPath(); ctx.moveTo(X(pts[i - 1][0]), Y(pts[i - 1][1])); ctx.lineTo(X(pts[i][0]), Y(pts[i][1])); ctx.stroke();
+  }
+  // the start, the uncertainty circle and where the person is now, with the heading
+  ctx.fillStyle = "#16a34a"; ctx.beginPath(); ctx.arc(X(0), Y(0), 4, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(37, 99, 235, 0.12)"; ctx.beginPath(); ctx.arc(X(t.x), Y(t.y), Math.max(5, t.accuracy_m * k), 0, 7); ctx.fill();
+  ctx.fillStyle = SOURCE_COLOUR[t.source]; ctx.beginPath(); ctx.arc(X(t.x), Y(t.y), 6, 0, 7); ctx.fill();
+  if (t.heading !== null) {
+    const a = t.heading * Math.PI / 180;
+    ctx.strokeStyle = SOURCE_COLOUR[t.source]; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(X(t.x), Y(t.y)); ctx.lineTo(X(t.x) + 16 * Math.sin(a), Y(t.y) - 16 * Math.cos(a)); ctx.stroke();
   }
 }
 

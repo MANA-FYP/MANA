@@ -1,0 +1,210 @@
+"""Position and path from the phone (#129): steps, compass heading and GPS, on made-up walks
+whose answer is known."""
+
+import math
+import random
+
+import pytest
+
+from demo.navigation import Fix, Navigator, Step, StepCounter, Track, compass_heading
+
+G = 9.81
+RATE = 30.0  # readings a second, as the phone page sends them
+
+
+def walk(seconds, cadence=1.8, swing=3.0, noise=0.15, seed=1, t0=0.0):
+    """Acceleration of a person walking with the phone in hand: one rise and fall per step, on
+    an axis that changes as the hand turns (the counter uses the size only)."""
+    rnd = random.Random(seed)
+    for i in range(int(seconds * RATE)):
+        t = t0 + i / RATE
+        m = G + swing / 2 * math.sin(2 * math.pi * cadence * t) + rnd.gauss(0, noise)
+        tilt = 0.3 * math.sin(0.2 * t)
+        yield t, m * math.sin(tilt), 0.0, m * math.cos(tilt)
+
+
+def still(seconds, noise=0.15, seed=2, t0=0.0):
+    rnd = random.Random(seed)
+    for i in range(int(seconds * RATE)):
+        yield t0 + i / RATE, rnd.gauss(0, noise), rnd.gauss(0, noise), G + rnd.gauss(0, noise)
+
+
+def count(readings, counter=None):
+    counter = counter or StepCounter()
+    return [s for r in readings if (s := counter.add(*r)) is not None]
+
+
+# ---- steps
+
+
+def test_a_walk_of_20_s_at_1_8_steps_a_second_counts_36_steps():
+    steps = count(walk(20.0))
+    assert abs(len(steps) - 36) <= 1  # the first one is lost while gravity is found
+
+
+@pytest.mark.parametrize("cadence", [1.2, 1.6, 2.2])
+def test_slow_and_fast_walks_count_every_step(cadence):
+    assert abs(len(count(walk(20.0, cadence=cadence))) - 20 * cadence) <= 1
+
+
+def test_a_phone_held_still_counts_no_steps():
+    assert count(still(30.0)) == []
+
+
+def test_a_gap_in_the_readings_does_not_make_a_step():
+    counter = StepCounter()
+    count(still(5.0), counter)
+    assert count(still(5.0, t0=20.0), counter) == []  # 15 s with nothing, then still again
+
+
+def test_step_length_is_longer_for_a_stronger_swing_and_stays_in_bounds():
+    soft = count(walk(10.0, swing=2.4))
+    hard = count(walk(10.0, swing=6.0))
+    mean = lambda steps: sum(s.length_m for s in steps) / len(steps)  # noqa: E731
+    assert 0.3 <= mean(soft) < mean(hard) <= 1.0
+
+
+def test_a_walk_of_known_length_sets_the_step_length():
+    counter = StepCounter()
+    steps = count(walk(20.0), counter)
+    counter.calibrate(steps, walked_m=25.0)
+    again = count(walk(20.0, seed=3), StepCounter(k=counter.k))
+    assert sum(s.length_m for s in again) == pytest.approx(25.0, rel=0.05)
+
+
+# ---- heading
+
+
+@pytest.mark.parametrize(
+    "alpha, beta, gamma, heading",
+    [
+        (0, 0, 0, 0),  # flat, top edge to the north
+        (90, 0, 0, 270),  # flat, turned left: alpha counts anticlockwise
+        (270, 0, 0, 90),
+        (0, 90, 0, 0),  # upright, the back camera looks north
+        (90, 90, 0, 270),
+        (180, 80, 0, 180),
+        (0, 60, 0, 0),  # tilted down at the floor ahead, as for the camera
+    ],
+)
+def test_the_compass_heading_from_the_phone_orientation(alpha, beta, gamma, heading):
+    got = compass_heading(alpha, beta, gamma)
+    assert min(abs(got - heading), 360 - abs(got - heading)) < 0.5
+
+
+# ---- the track
+
+
+def walk_legs(nav, legs, step_m=0.7, t0=0.0, every=0.55):
+    """Walk straight legs of (heading, steps); returns the time at the end."""
+    t = t0
+    for heading, n in legs:
+        nav.on_orientation(None, None, None, compass=heading)
+        for _ in range(n):
+            t += every
+            nav.track.on_step(Step(t, step_m), t)
+    return t
+
+
+def test_a_square_walked_on_steps_ends_where_it_started():
+    nav = Navigator()
+    walk_legs(nav, [(0, 20), (90, 20), (180, 20), (270, 20)])
+    v = nav.view(50.0)
+    assert math.hypot(v["x"], v["y"]) < 0.01
+    assert v["steps"] == 80 and v["distance_m"] == pytest.approx(56.0, abs=0.1)
+    assert v["source"] == "steps" and v["lat"] is None  # no GPS yet, so no latitude
+    xs = [p[0] for p in v["path"]]
+    assert max(xs) == pytest.approx(14.0, abs=0.1)  # 20 steps of 0.7 m to the east
+
+
+def test_steps_with_no_heading_yet_are_counted_but_do_not_move():
+    track = Track()
+    track.on_step(Step(1.0, 0.7), 1.0)
+    assert (track.steps, track.x, track.y) == (1, 0.0, 0.0)
+
+
+def fix_at(track, e, n, t, acc=5.0, origin=(31.5204, 74.3587)):
+    """A GPS fix e metres east and n metres north of origin."""
+    lat = origin[0] + math.degrees(n / 6_371_000.0)
+    lon = origin[1] + math.degrees(e / (6_371_000.0 * math.cos(math.radians(origin[0]))))
+    return Fix(t, lat, lon, acc)
+
+
+def test_the_first_good_fix_ties_the_track_to_the_earth_where_the_person_is():
+    nav = Navigator()
+    walk_legs(nav, [(90, 10)])  # 7 m east before GPS
+    fix = fix_at(nav.track, 0, 0, 10.0)
+    assert nav.on_gps(fix)
+    lat, lon = nav.track.latlon()
+    assert (lat, lon) == pytest.approx((fix.lat, fix.lon), abs=1e-7)
+    assert nav.track.x == pytest.approx(7.0)  # the path so far is kept
+
+
+def test_outdoors_the_track_follows_gps_and_indoors_it_carries_on_from_steps():
+    nav = Navigator()
+    origin = (31.5204, 74.3587)
+    nav.on_gps(Fix(0.0, *origin, 4.0))
+    # outdoors: walk north with GPS agreeing
+    t = 0.0
+    nav.on_orientation(None, None, None, compass=0)
+    for i in range(1, 21):
+        t = i * 0.55
+        nav.track.on_step(Step(t, 0.7), t)
+        if i % 2 == 0:
+            assert nav.on_gps(fix_at(nav.track, 0.0, 0.7 * i, t, 4.0))
+    assert nav.view(t)["source"] == "gps"
+    assert nav.track.y == pytest.approx(14.0, abs=0.5)
+    # into the building: GPS goes poor, so it is not used, and the steps carry on east
+    assert not nav.on_gps(fix_at(nav.track, 30.0, 30.0, t + 0.5, 60.0))
+    walk_legs(nav, [(90, 10)], t0=t + 4.0)
+    v = nav.view(t + 10.0)
+    assert v["source"] == "steps"
+    assert (v["x"], v["y"]) == pytest.approx((7.0, 14.0), abs=0.5)
+    assert v["distance_m"] == pytest.approx(21.0, abs=1.0)
+
+
+def test_one_fix_far_off_is_refused_but_several_that_agree_move_the_track():
+    track = Track()
+    track.on_gps(fix_at(track, 0, 0, 0.0, 3.0))
+    assert not track.on_gps(fix_at(track, 80, 0, 1.0, 3.0))  # 80 m in a second: a jump
+    assert track.x == pytest.approx(0.0, abs=0.01)
+    assert not track.on_gps(fix_at(track, 80, 0, 2.0, 3.0))
+    assert track.on_gps(fix_at(track, 80, 0, 3.0, 3.0))  # the third in a row: it moved
+    assert track.x == pytest.approx(80.0, abs=0.01)
+
+
+def test_a_still_person_on_gps_does_not_add_distance_from_the_gps_wander():
+    track = Track()
+    rnd = random.Random(4)
+    for i in range(120):  # two minutes standing, the fix wandering by a few metres
+        track.on_gps(fix_at(track, rnd.gauss(0, 2.5), rnd.gauss(0, 2.5), float(i), 5.0))
+    assert track.distance_m < 10.0
+    assert math.hypot(track.x, track.y) < 2.0
+
+
+def test_the_speed_is_the_distance_over_the_last_seconds():
+    nav = Navigator()
+    t = walk_legs(nav, [(0, 20)], every=0.5)  # 0.7 m every 0.5 s: 1.4 m/s
+    assert nav.track.speed(t) == pytest.approx(1.4, abs=0.15)
+    assert nav.track.speed(t + 30.0) == 0.0  # standing since
+
+
+def test_the_whole_chain_from_acceleration_to_position():
+    nav = Navigator()
+    nav.on_orientation(90.0, 0.0, 0.0)  # flat, top edge west
+    for t, ax, ay, az in walk(10.0):
+        nav.on_accel(t, ax, ay, az, now=t)
+    v = nav.view(10.0)
+    assert abs(v["steps"] - 18) <= 1
+    assert v["x"] < -5.0 and abs(v["y"]) < 0.5  # walked west
+    assert v["heading"] == 270
+
+
+def test_shaking_faster_than_anyone_steps_is_not_counted():
+    shaking = []
+    for i in range(100):  # 10 s of a square wave at 5 Hz, as on a rough floor
+        t = i / 10
+        shaking.append((t, 0.0, 0.0, G + (6.0 if i % 2 else -6.0)))
+    fine = [(i / 30, 0.0, 0.0, G + (3.0 if (i // 3) % 2 else -3.0)) for i in range(300)]
+    assert count(shaking) == []
+    assert count(fine) == []  # the same at 30 readings a second
