@@ -10,10 +10,13 @@ to_level for StairNet's LG, LG-IS, IS and IS-LG), so the exported model drops in
 Images are found either from --index, a CSV file with the columns path, label and video, or from
 --data, where an image's class is the nearest folder named after a StairNet class and its video is
 the folder under that (or, with the images straight in the class folder, the file name up to its
-last frame number). The split is **by video**, 70 / 15 / 15 with a fixed seed, because neighbouring
-frames are nearly the same picture: a random split of frames leaks them into the test set (see
-docs/datasets.md). The videos in each part are written next to the model, so the split can be
-repeated.
+last frame number). The same folder name under two classes is one video, so a recording that goes
+from level ground to stairs stays in one part. The split is **by video**, 70 / 15 / 15 with a fixed
+seed, because neighbouring frames are nearly the same picture: a random split of frames leaks them
+into the test set (see docs/datasets.md). The videos in each part are written next to the model, so
+the split can be repeated. Before training it prints the number of videos and images per video,
+and warns when the ids look wrong (very few videos, about one per frame, or one holding most
+images): then give the ids with --index.
 
 The input is the demo's: the whole frame resized to 224 x 224 (no crop) with ImageNet
 normalisation, as demo/vision.py's preprocess() does. The classes are very unbalanced (86 % level
@@ -86,7 +89,7 @@ def index_csv(path: Path) -> list[tuple[str, str, str]]:
     """(path, class, video) from a CSV file with those columns; class may be StairNet's name."""
     base = path.parent
     items = []
-    with path.open(newline="") as f:
+    with path.open(newline="", encoding="utf-8-sig") as f:  # a BOM from Excel too
         for row in csv.DictReader(f):
             label = class_of(row["label"].strip())
             if label is None:
@@ -110,6 +113,28 @@ def split_by_video(items, seed: int = 0, parts=(0.7, 0.15, 0.15)) -> dict[str, l
         "val": sorted(videos[n_train : n_train + n_val]),
         "test": sorted(videos[n_train + n_val :]),
     }
+
+
+def check_videos(items) -> tuple[str, list[str]]:
+    """A summary of the videos found, and warnings when the video ids look wrong. The split is by
+    video, so ids that merge every video into one, or give each frame its own, quietly bring back
+    the leak the split is there to stop."""
+    per_video = Counter(video for _, _, video in items)
+    sizes = sorted(per_video.values())
+    n, images = len(per_video), len(items)
+    summary = (
+        f"{images} images in {n} videos; images per video: least {sizes[0]}, "
+        f"median {sizes[len(sizes) // 2]}, most {sizes[-1]}"
+    )
+    warnings = []
+    hint = "check the video ids, or give them with --index"
+    if n < 10:
+        warnings.append(f"only {n} videos: the split by video has little to split; {hint}")
+    if n > 1 and n >= 0.5 * images:
+        warnings.append(f"{n} videos for {images} images, about one per frame: {hint}")
+    if n > 1 and sizes[-1] > 0.5 * images:
+        warnings.append(f"one video holds {sizes[-1]} of {images} images: {hint}")
+    return summary, warnings
 
 
 def per_class(confusion: list[list[int]]) -> dict:
@@ -208,6 +233,11 @@ def train(items, out: Path, epochs=10, batch=64, lr=1e-3, seed=0, device="cpu",
 
     torch.manual_seed(seed)
     out.mkdir(parents=True, exist_ok=True)
+    videos = len({video for _, _, video in items})
+    if videos < 3:
+        raise ValueError(
+            f"{videos} video(s): the split by video needs at least 3 (train, val, test)"
+        )
     split = split_by_video(items, seed)
     part = {
         name: [(p, c) for p, c, v in items if v in set(videos)] for name, videos in split.items()
@@ -244,7 +274,8 @@ def train(items, out: Path, epochs=10, batch=64, lr=1e-3, seed=0, device="cpu",
             total, seen = total + loss.item() * len(y), seen + len(y)
         schedule.step()
         val = per_class(confusion_on(model, val_loader, device)) if part["val"] else None
-        score = val["mean_per_class"] if val else -epoch  # no validation videos: keep the last
+        # no validation score: keep the last epoch (a later epoch scores higher)
+        score = val["mean_per_class"] if val and val["mean_per_class"] is not None else float(epoch)
         history.append({"epoch": epoch, "loss": total / max(1, seen), "val": val})
         shown = f"{score:.3f}" if val else "-"
         took = time.monotonic() - started
@@ -293,13 +324,26 @@ def main(argv=None) -> int:
     items = index_csv(a.index) if a.index else index_folder(a.data)
     if not items:
         raise SystemExit("no images found: see the folder layout in this script's help")
-    results = train(items, a.out, a.epochs, a.batch, a.lr, a.seed, a.device,
-                    not a.no_pretrained, a.workers)  # fmt: skip
+    summary, warnings = check_videos(items)
+    print(summary)
+    for w in warnings:
+        print(f"warning: {w}")
+    try:
+        results = train(items, a.out, a.epochs, a.batch, a.lr, a.seed, a.device,
+                        not a.no_pretrained, a.workers)  # fmt: skip
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
     test = results["test"]
-    print(f"test: accuracy {test['accuracy']:.3f}, mean per class {test['mean_per_class']:.3f}")
+
+    def shown(v):
+        return "-" if v is None else f"{v:.3f}"
+
+    print(
+        f"test: accuracy {shown(test['accuracy'])}, mean per class {shown(test['mean_per_class'])}"
+    )
     for c in STAIR_CLASSES:
         v = test["per_class"][c]
-        print(f"  {c:10} {'-' if v is None else f'{v:.3f}'}  ({test['images'][c]} images)")
+        print(f"  {c:10} {shown(v)}  ({test['images'][c]} images)")
     print(f"written to {a.out}")
     return 0
 

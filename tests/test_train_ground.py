@@ -96,6 +96,7 @@ def test_training_input_is_the_demos_input(tmp_path):
 
 def test_a_short_run_writes_a_model_the_demo_loads(tmp_path):
     pytest.importorskip("torchvision")
+    pytest.importorskip("onnx")  # torch.onnx.export needs it
     pytest.importorskip("onnxruntime")
     data = tmp_path / "stairnet"
     write_images(
@@ -119,3 +120,59 @@ def test_a_short_run_writes_a_model_the_demo_loads(tmp_path):
     Image.new("RGB", (1280, 720), (120, 120, 120)).save(jpeg, "JPEG")
     label, confidence = classifier.classify(jpeg.getvalue())
     assert label in vision.STAIR_CLASSES and 0.0 <= confidence <= 1.0
+
+
+def test_the_same_recording_under_two_classes_is_one_video(tmp_path):
+    write_images(tmp_path, {"LG": {"walk7": 2}, "LG-IS": {"walk7": 2}, "IS": {"walk8": 1}})
+    items = tg.index_folder(tmp_path)
+    assert {v for _, lab, v in items if lab in ("level", "to_stairs")} == {"walk7"}
+    split = tg.split_by_video(items + [("x", "level", "w9")], seed=0)
+    assert sum("walk7" in part for part in split.values()) == 1
+
+
+def test_an_index_saved_by_excel_with_a_bom_is_read(tmp_path):
+    (tmp_path / "list.csv").write_bytes("path,label,video\na.jpg,LG,v1\n".encode("utf-8-sig"))
+    assert tg.index_csv(tmp_path / "list.csv")[0][1:] == ("level", "v1")
+
+
+def items_of(videos: dict[str, int]):
+    return [(f"{v}/{n}.jpg", "level", v) for v, count in videos.items() for n in range(count)]
+
+
+def test_video_ids_that_look_right_give_no_warning():
+    summary, warnings = tg.check_videos(items_of({f"v{i}": 50 + i for i in range(20)}))
+    assert summary.startswith("1190 images in 20 videos") and warnings == []
+
+
+@pytest.mark.parametrize(
+    "videos, says",
+    [
+        ({"IMG": 300, "v2": 5, "v3": 5}, "one video holds 300"),  # IMG_0012.jpg -> IMG
+        ({f"{n:06d}": 1 for n in range(40)}, "about one per frame"),  # 000123.jpg -> 000123
+        ({"a": 30, "b": 30, "c": 30}, "only 3 videos"),
+    ],
+)
+def test_video_ids_that_look_wrong_are_warned_about(videos, says):
+    _, warnings = tg.check_videos(items_of(videos))
+    assert any(says in w for w in warnings) and all("--index" in w for w in warnings)
+
+
+def test_fewer_than_three_videos_stop_before_training(tmp_path):
+    items = [(f"{n}.jpg", "level", f"v{n % 2}") for n in range(6)]
+    with pytest.raises(ValueError, match="at least 3"):
+        tg.train(items, tmp_path / "out")
+
+
+def test_without_validation_videos_the_last_epoch_is_kept(tmp_path, monkeypatch):
+    pytest.importorskip("torchvision")
+    pytest.importorskip("onnx")
+    data = tmp_path / "stairnet"
+    write_images(data, {c: {f"{c}-{v}": 2 for v in range(2)} for c in ("LG", "IS")})
+    items = tg.index_folder(data)
+    videos = sorted({v for *_, v in items})
+    monkeypatch.setattr(
+        tg, "split_by_video", lambda *_: {"train": videos[:-1], "val": [], "test": videos[-1:]}
+    )
+    results = tg.train(items, tmp_path / "out", epochs=2, batch=4, pretrained=False, workers=0,
+                       log=lambda *_: None)  # fmt: skip
+    assert results["best_epoch"] == 2
