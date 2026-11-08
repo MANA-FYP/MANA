@@ -228,16 +228,16 @@ def export_onnx(model, path: Path) -> None:
 
 def train(items, out: Path, epochs=10, batch=64, lr=1e-3, seed=0, device="cpu",
           pretrained=True, workers=4, log=print) -> dict:  # fmt: skip
+    videos = len({video for _, _, video in items})
+    if videos < 3:  # before torch: the message, not an import error, on a machine without it
+        raise ValueError(
+            f"{videos} video(s): the split by video needs at least 3 (train, val, test)"
+        )
     import torch
     from torch.utils.data import DataLoader
 
     torch.manual_seed(seed)
     out.mkdir(parents=True, exist_ok=True)
-    videos = len({video for _, _, video in items})
-    if videos < 3:
-        raise ValueError(
-            f"{videos} video(s): the split by video needs at least 3 (train, val, test)"
-        )
     split = split_by_video(items, seed)
     part = {
         name: [(p, c) for p, c, v in items if v in set(videos)] for name, videos in split.items()
