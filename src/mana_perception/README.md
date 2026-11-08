@@ -4,6 +4,8 @@ Perception for MANA (M1 Vision). It holds:
 
 - **`detector_node`**: the nearest obstacle in the camera image (a person, a chair, a car...),
   from the same object detector as the phone demo.
+- **`classifier_node`**: level ground or stairs from the camera image, from the StairNet ground
+  classifier: the camera's half of the two-sensor rule for stairs.
 - **`depth_node`**: the ground ahead from the 3D camera (flat, ramp, curb, stairs up, stairs down
   or a drop), the second ground source the decision core's two-sensor rule needs.
 - **`stub_node`**: scripted ground and obstacle reports on the real message interface, so the
@@ -68,6 +70,25 @@ this laptop. On the same street picture both find the same person at the same es
 version missed the bus there, so `bus` and `truck` were added (#72), and rebuilt with 42 names it
 finds the bus at 6.1 m. Rebuild `yoloe-26n-mana.pt` with `python -m demo.build_detector` after the
 names change.
+
+## Ground from the camera
+
+```bash
+python3 tools/train_ground.py --data datasets/stairnet --out models/ground   # once, see #38
+ros2 run mana_perception classifier_node --ros-args   -p model:=models/ground/ground.onnx -r camera/image:=/camera/image
+```
+
+`classifier_node` runs the ground classifier (`ground_classifier.py`, MobileNetV2 trained on
+StairNet and exported to ONNX) on at most `rate_hz` frames a second (default 5) and publishes a
+`GroundReport` on `ground` from the `CLASSIFIER` source: `FLAT` for level ground, `STAIRS_UP` for
+stairs ahead, on them, or at their top (StairNet's LG-IS, IS and IS-LG). The trust is the class's
+probability times the same light factor as the detector, so the camera is trusted less in the dark.
+It cannot tell how far the stairs are, so the distance and the step height are NaN. It needs
+`onnxruntime` and Pillow; without a model file it logs an error and sends nothing.
+
+Known limits: StairNet has stairs going up only, and no ramps, curbs or drops, so those come from
+the 3D camera alone. The classifier and the detector both look through the camera, so the core
+counts them as one sensor.
 
 ## Ground from the 3D camera
 
@@ -248,6 +269,6 @@ ros2 run mana_perception stub_node --ros-args -p scenario:=stairs
 ## Tests
 
 ```bash
-python -m pytest tests/test_detection.py tests/test_depth_ground.py tests/test_perception_stub.py
-colcon test --packages-select mana_perception    # the detector and depth nodes end to end, in ROS 2
+python -m pytest tests/test_detection.py tests/test_ground_classifier.py tests/test_depth_ground.py \n  tests/test_perception_stub.py
+colcon test --packages-select mana_perception    # the detector, classifier and depth nodes end to end
 ```
