@@ -1,6 +1,7 @@
 """tools/sanpo_to_yolo.py: SANPO masks become YOLO boxes, split by session, with data.yaml."""
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -93,7 +94,7 @@ def test_convert_writes_images_labels_and_data_yaml_by_session(tmp_path):
     assert (out / "images" / "val" / f"{val}__camera_chest__000000.png").is_file()
     yaml = (out / "data.yaml").read_text()
     assert "train: images/train" in yaml and "test: images/test" in yaml
-    assert "  1: stairs" in yaml
+    assert '  1: "stairs"' in yaml
     assert json.loads((out / "parts.json").read_text())["sessions"] == s["sessions"]
 
 
@@ -101,3 +102,48 @@ def test_converting_again_reuses_what_is_there(tmp_path):
     write_sanpo(tmp_path / "sanpo")
     first = sy.convert(tmp_path / "sanpo", tmp_path / "yolo")
     assert sy.convert(tmp_path / "sanpo", tmp_path / "yolo") == first
+
+
+def stems(out: Path) -> dict[str, set[str]]:
+    return {p: {f.stem for f in (out / "images" / p).iterdir()} for p in sy.PARTS}
+
+
+def test_a_second_run_with_another_split_leaves_no_session_in_two_parts(tmp_path):
+    write_sanpo(tmp_path / "sanpo")
+    out = tmp_path / "yolo"
+    first = sy.convert(tmp_path / "sanpo", out, val_share=0.34, seed=0)
+    before = first["sessions"]["val"]
+    seed = next(
+        k for k in range(1, 50) if sy.split_sessions(["a", "b", "c"], [], 0.34, k)["val"] != before
+    )
+    second = sy.convert(tmp_path / "sanpo", out, val_share=0.34, seed=seed)
+    assert second["sessions"]["val"] != first["sessions"]["val"]
+    found = stems(out)
+    assert not found["train"] & found["val"]
+    assert sum(len(v) for v in found.values()) == 8  # every frame once
+    labels = {p: {f.stem for f in (out / "labels" / p).iterdir()} for p in sy.PARTS}
+    assert labels == found
+
+
+def test_one_training_session_is_refused_with_a_clear_message(tmp_path):
+    root = tmp_path / "sanpo"
+    write_sanpo(root)
+    for session in ("b", "c"):
+        shutil.rmtree(root / "train" / session)
+    with pytest.raises(ValueError, match="no validation sessions"):
+        sy.convert(root, tmp_path / "yolo")
+    with pytest.raises(SystemExit, match="no validation sessions"):
+        sy.main(["--root", str(root), "--out", str(tmp_path / "yolo")])
+
+
+def test_names_and_path_are_quoted_in_data_yaml(tmp_path):
+    root = tmp_path / "sanpo #1"
+    write_sanpo(root)
+    labelmap = dict(LABELMAP, **{"sign: stop": 30})
+    (root / "labelmap.json").write_text(json.dumps(labelmap))
+    (root / "labeltype.json").write_text(json.dumps(dict(LABELTYPE, **{"sign: stop": "panoptic"})))
+    out = tmp_path / "out #2"
+    sy.convert(root, out, val_share=0.34)
+    yaml = (out / "data.yaml").read_text()
+    assert f"path: {json.dumps(out.resolve().as_posix())}" in yaml
+    assert '  3: "sign: stop"' in yaml

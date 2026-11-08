@@ -11,7 +11,10 @@ object smaller than --min-pixels (100) is left out, as in the counts in docs/dat
 
 Parts: SANPO's own test sessions are the test part. Of its training sessions, --val (10 %) are
 held out **by session** for validation, with a fixed seed, so neighbouring frames of one walk are
-never in two parts. A frame with no object is kept with an empty label file (a background image).
+never in two parts. Each run writes the parts from scratch, so a run with another seed or more
+sessions leaves nothing behind in the old parts. It needs at least two training sessions, or the
+validation part would be empty. A frame with no object is kept with an empty label file (a
+background image).
 
 Written to --out: images/<part>/ (hard links to the frames where the disk allows, else copies),
 labels/<part>/ (one line per box: class cx cy w h, all 0 to 1), data.yaml (the paths and the
@@ -76,8 +79,6 @@ def split_sessions(train: list[str], test: list[str], val_share: float = 0.1, se
 
 def place(src: Path, dest: Path) -> None:
     """A hard link to src at dest, or a copy where the disk cannot link."""
-    if dest.exists():
-        return
     try:
         os.link(src, dest)
     except OSError:
@@ -105,9 +106,18 @@ def convert(root: Path, out: Path, val_share: float = 0.1, seed: int = 0,
                if sess in sessions[s]}  # fmt: skip
     objects = {p: Counter() for p in PARTS}
     images = Counter()
+    if not parts["val"]:
+        raise ValueError(
+            f"no validation sessions: {len(parts['train'])} training session(s) with frames and "
+            f"--val {val_share}; yolo detect train stops on an empty images/val. Fetch more "
+            "training sessions (fetch_sanpo.py --train) or raise --val."
+        )
+    # each part from scratch: frames an earlier run with another split left in another part would
+    # be in two parts, and YOLO reads the folders, not parts.json
     for p in PARTS:
-        (out / "images" / p).mkdir(parents=True, exist_ok=True)
-        (out / "labels" / p).mkdir(parents=True, exist_ok=True)
+        for kind in ("images", "labels"):
+            shutil.rmtree(out / kind / p, ignore_errors=True)
+            (out / kind / p).mkdir(parents=True)
     for split in ("train", "test"):
         for session, camera, image, mask in frames_of(root, split):
             p = part_of[(split, session)]
@@ -119,8 +129,10 @@ def convert(root: Path, out: Path, val_share: float = 0.1, seed: int = 0,
             (out / "labels" / p / f"{stem}.txt").write_text("".join(f"{line}\n" for line in lines))
             objects[p].update(names[k] for k, *_ in found)
             images[p] += 1
-    yaml = [f"path: {out.resolve().as_posix()}"] + [f"{p}: images/{p}" for p in PARTS]
-    yaml += ["names:"] + [f"  {k}: {n}" for k, n in enumerate(names)]
+    # JSON strings are valid YAML, quoted: a '#' in the path or a ':' in a name stays text
+    yaml = [f"path: {json.dumps(out.resolve().as_posix())}"]
+    yaml += [f"{p}: images/{p}" for p in PARTS]
+    yaml += ["names:"] + [f"  {k}: {json.dumps(n)}" for k, n in enumerate(names)]
     (out / "data.yaml").write_text("\n".join(yaml) + "\n")
     summary = {
         "names": names,
@@ -143,7 +155,10 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     if not (a.root / "labelmap.json").exists():
         raise SystemExit(f"no SANPO at {a.root}: run tools/fetch_datasets.sh sanpo first")
-    s = convert(a.root, a.out, a.val, a.seed, a.min_pixels)
+    try:
+        s = convert(a.root, a.out, a.val, a.seed, a.min_pixels)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
     for part in PARTS:
         counts = ", ".join(f"{n} {c}" for n, c in sorted(s["objects"][part].items()))
         print(f"{part}: {len(s['sessions'][part])} sessions, {s['images'].get(part, 0)} images; "
