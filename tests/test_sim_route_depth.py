@@ -190,3 +190,40 @@ def test_the_drop_in_the_blind_zone_is_reported_at_0_m(real):
     assert blind == pytest.approx(0.53, abs=0.03)
     r = read_at(38.0 - 0.35 - 0.3, real)  # the edge 0.3 m ahead, inside the blind zone
     assert r.ground == dp.DROP and r.distance_m == 0.0
+
+
+@pytest.mark.parametrize("settled", sorted(SETTLED_CHASSIS_M), ids=lambda s: f"on-{s}")
+def test_climbing_the_stairs_no_frame_reads_a_drop_at_0_m(settled):
+    # #117: on the first risers the chair is pitched 0.28 to 0.52 rad nose up, and the nosings'
+    # line it stands on, carried on ahead, rose above the landing, which then read as a drop at
+    # 0 m and the core held a stop. Every 10 cm from before the first riser to onto the landing.
+    found = []
+    for chair_x in np.arange(21.0, 23.4, 0.1):
+        pitch, r = read_on_route(chair_x, SETTLED_CHASSIS_M[settled])
+        if r.ground == dp.DROP and r.distance_m == 0.0:
+            found.append((round(chair_x, 2), round(pitch, 3), r))
+    assert not found
+
+
+def read_pitched(chair_x: float, pitch: float, settled: float) -> dp.Reading:
+    """The reading with the chair's rear contact on the ground at chair_x - AXLE_M and the chassis
+    pitched by pitch about it: the tracks' front incline on the curb lifts the nose more than the
+    two axles of read_on_route do."""
+    rear = route_height(np.array([chair_x - AXLE_M]))[0]
+    mx, _y, mz, *_ = SENSORS["depth_link"]
+    camera_x = chair_x + mx * math.cos(pitch) + mz * math.sin(pitch)
+    camera_z = (
+        rear - AXLE_M * math.sin(pitch) + settled - mx * math.sin(pitch) + mz * math.cos(pitch)
+    )
+    floor = route_height(np.array([camera_x]))[0]
+    seen_from = replace(CAM, height_m=camera_z - floor, pitch_rad=CAM.pitch_rad + pitch)
+    image = syn.render(lambda a: route_height(camera_x + a) - floor, seen_from, CAM_ROWS, CAM_COLS)
+    return dp.read_ground(image, CAM, chair_pitch_rad=pitch)
+
+
+@pytest.mark.parametrize("pitch", [-0.3, -0.4, -0.47])
+@pytest.mark.parametrize("chair_x", [30.5, 30.8, 31.1])
+def test_climbing_the_curb_nose_up_on_tracks_is_no_drop_at_0_m(chair_x, pitch):
+    # #117, the curb half: the rear still on the road, the nose lifted by the tracks
+    r = read_pitched(chair_x, pitch, SETTLED_CHASSIS_M["tracks"])
+    assert not (r.ground == dp.DROP and r.distance_m == 0.0), r

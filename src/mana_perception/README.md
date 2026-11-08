@@ -180,6 +180,16 @@ Known limits:
   of 0.1 or 0.2 m up or down in the blind zone is still an edge at 0 m, going up and going down.
   With no recent or trusted `motion` report the mounting tilt is used alone. Roll is not corrected
   yet.
+- **Climbing stairs or a curb** the chair is pitched more nose up than any ramp (0.28 to 0.52 rad on
+  the route's stairs), and the plane it stands on, the line of the nosings, ends at the landing.
+  Carried on ahead it rose above the landing, which read as a drop at 0 m, and the core held a stop
+  (#117). Nose up steeper than a steep ramp (`steep / 4`, 25 %), the nearest ground is therefore
+  measured from level: on the route's stairs, every 10 cm from the first riser onto the landing
+  reads STAIRS_UP, UNKNOWN (the landing is taller than one riser) or FLAT, and never a drop at 0 m;
+  the curb, with the nose lifted 0.3 to 0.47 rad by the tracks, is no drop at 0 m either. Going
+  **down** the stairs nose down it is unchanged: measured from level the next tread would read as a
+  drop, and the readings there stay a mix of STAIRS_DOWN, CURB and STAIRS_UP at 0 m (slow, not
+  stop); the Gazebo `stairs_down` scenario is not played yet.
 - **At the foot or the crest of a ramp** the chair is still on one slope while the nearest ground
   in view is already 6 to 9 cm up or down the next, so the pitch does not help there (single frames
   of `CURB 0.00 m` on the Gazebo run of #100). It is no edge if the near ground seen (0.6 m of it)

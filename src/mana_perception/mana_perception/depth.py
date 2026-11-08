@@ -305,8 +305,15 @@ def classify(prof: Profile, settings: Settings = DEFAULTS, chair_pitch_rad: floa
     if changes.size:
         near[changes[0] + 1 :] = False
     level = float(np.median(h[near]))  # height of the nearest ground seen, against the chair's
-    # the plane the chair stands on, carried on ahead: higher ahead going up (nose up)
-    under = -d * math.tan(chair_pitch_rad)
+    # the plane the chair stands on, carried on ahead: higher ahead going up (nose up). Only on a
+    # ramp does that plane go on. Nose up steeper than a steep ramp, the chair can only be climbing
+    # stairs or a curb, whose plane (the line of the nosings) ends at the landing or the kerb top:
+    # carried on, it rises above the landing, which then reads as a drop at 0 m (#117). So there the
+    # ground ahead is measured from level. Not nose down: going down the stairs the landing below
+    # is still under the nosings' line, and measured from level the next tread reads as a drop.
+    tan_pitch = math.tan(chair_pitch_rad)
+    climbing = -tan_pitch > settings.steep / 4
+    under = np.zeros_like(d) if climbing else -d * tan_pitch
     slope_m = float(np.median(under[near]))
     if level - slope_m > settings.riser_max_m:
         # taller than a riser: stairs if more risers climb behind it, else a wall or an object
