@@ -45,6 +45,13 @@ class Session:
     class Input:
         name = "image"
 
+    class Output:
+        def __init__(self, n):
+            self.shape = ["n", n]
+
+    def get_outputs(self):
+        return [self.Output(len(self.logits))]
+
     def __init__(self, logits):
         self.logits, self.fed = logits, []
 
@@ -64,5 +71,17 @@ def test_the_model_gives_the_most_likely_class_and_its_probability():
     assert session.fed[0]["image"].shape == (1, 3, 224, 224)
 
 
-def test_a_missing_model_file_is_none_not_a_crash(tmp_path):
-    assert gc.GroundModel.load(str(tmp_path / "missing.onnx")) is None
+def test_a_missing_or_broken_model_file_is_none_and_says_why(tmp_path):
+    said = []
+    assert gc.GroundModel.load(str(tmp_path / "missing.onnx"), log=said.append) is None
+    (tmp_path / "broken.onnx").write_bytes(b"not a model")
+    assert gc.GroundModel.load(str(tmp_path / "broken.onnx"), log=said.append) is None
+    assert len(said) == 2 and all("cannot load the ground classifier" in s for s in said)
+    assert "broken.onnx" in said[1]
+
+
+def test_a_model_for_other_classes_is_refused_at_load_not_on_the_first_frame():
+    said = []
+    assert gc.GroundModel.checked(Session([0.0] * 5), log=said.append) is None
+    assert "5 outputs" in said[0]
+    assert gc.GroundModel.checked(Session([0.0] * 4)) is not None

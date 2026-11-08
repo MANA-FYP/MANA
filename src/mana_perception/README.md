@@ -269,6 +269,7 @@ ros2 run mana_perception stub_node --ros-args -p scenario:=stairs
 ## Tests
 
 ```bash
-python -m pytest tests/test_detection.py tests/test_ground_classifier.py tests/test_depth_ground.py \n  tests/test_perception_stub.py
+python -m pytest tests/test_detection.py tests/test_ground_classifier.py tests/test_depth_ground.py \
+  tests/test_perception_stub.py
 colcon test --packages-select mana_perception    # the detector, classifier and depth nodes end to end
 ```

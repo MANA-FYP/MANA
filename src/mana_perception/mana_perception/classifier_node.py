@@ -36,11 +36,10 @@ class ClassifierNode(Node):
         super().__init__("mana_ground_classifier")
         path = self.declare_parameter("model", "ground.onnx").value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 5.0).value
-        self.model = model or ground_classifier.GroundModel.load(path)
+        log = self.get_logger().error
+        self.model = model or ground_classifier.GroundModel.load(path, log=log)
         if self.model is None:
-            self.get_logger().error(
-                f"no ground classifier: install onnxruntime and check the model {path!r}"
-            )
+            log(f"no ground classifier: install onnxruntime and check the model {path!r}")
         self.last: Time | None = None
         self.warned: set[str] = set()
         self.create_subscription(Image, "camera/image", self.on_image, 10)

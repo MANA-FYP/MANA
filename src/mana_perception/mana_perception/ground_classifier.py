@@ -55,13 +55,28 @@ class GroundModel:
         self.session, self.classes = session, classes
 
     @classmethod
-    def load(cls, path: str, classes=CLASSES) -> GroundModel | None:
-        """The model, or None when onnxruntime or the file is missing."""
+    def load(cls, path: str, classes=CLASSES, log=None) -> GroundModel | None:
+        """The model, or None when onnxruntime or the file is missing, the file is not a model,
+        or the model does not give one output per class. log, if given, is told why."""
         try:
             ort = importlib.import_module("onnxruntime")
-            return cls(ort.InferenceSession(path, providers=["CPUExecutionProvider"]), classes)
-        except Exception:
+            session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        except Exception as e:  # onnxruntime missing, no such file, or not a model
+            if log is not None:
+                log(f"cannot load the ground classifier {path!r}: {type(e).__name__}: {e}")
             return None
+        return cls.checked(session, classes, path, log)
+
+    @classmethod
+    def checked(cls, session, classes=CLASSES, path="model", log=None) -> GroundModel | None:
+        """The model on session, or None when its output is not one score per class: a model for
+        other classes would otherwise fail on the first frame."""
+        outputs = session.get_outputs()[0].shape[-1]
+        if outputs != len(classes):
+            if log is not None:
+                log(f"{path!r} gives {outputs} outputs, not one for each of {len(classes)} classes")
+            return None
+        return cls(session, classes)
 
     def classify(self, rgb) -> tuple[str, float]:
         """The most likely class of an RGB frame and its probability."""
