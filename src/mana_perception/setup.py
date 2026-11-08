@@ -22,6 +22,7 @@ setup(
             "stub_node = mana_perception.stub_node:main",
             "depth_node = mana_perception.depth_node:main",
             "detector_node = mana_perception.detector_node:main",
+            "classifier_node = mana_perception.classifier_node:main",
         ]
     },
 )
