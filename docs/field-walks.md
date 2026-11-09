@@ -14,21 +14,22 @@ covers all six. The results go in `docs/results.md`.
   `python -m demo.build_detector`, which needs the internet). For walks 3 and 4 the depth model
   downloads once, about 100 MB, so start the server with `--depth` before leaving the internet.
 - Each walk is recorded into its own new folder (a folder that holds a recording is refused).
-  **Recordings show faces: they stay in `recordings/`, which is not in git, and nothing from them
-  is published unless the faces are blurred first.**
-- Carry the phone as on the device: held still, camera forward, about 1.2 m up
-  (`--camera-height` if not). For walks on foot add `--on-foot`.
+  **Recordings show faces and hold GPS positions: they stay in `recordings/`, which is not in git.
+  Before a frame from one goes into a report or a slide, the faces are blurred, the GPS is left
+  out, and anyone recorded is asked first (`docs/datasets.md`).**
+- Carry the phone as it would sit on the device: held still, camera forward, about 1.2 m up
+  (`--camera-height` if not). Every walk here is on foot, so each command has `--on-foot`.
 
 ## The walks
 
 | # | Walk | Start the server with | Note down on the spot | Feeds |
 |---|---|---|---|---|
-| 1 | **Indoor loop**: a corridor loop of 50 to 100 m, ending where it began. Phone Wi-Fi off, no GPS indoors | `--record recordings/loop-1` | the steps you take (count them) and the place | #129, #133 |
-| 2 | **Outdoor route**: 100 to 200 m on a campus road, its length measured on a map or with a wheel | `--record recordings/road-1` | the route's length, the steps, the place | #129, #133 |
-| 3 | **Stairs**: walk from about 6 m away towards stairs going up, stop at the first step; then the same towards stairs going down, stopping at the top | `--depth --weights yoloe-26n-mana.pt --imgsz 480 --record recordings/stairs-1` | tape marks at 4, 3, 2 and 1 m from the first step; the time you pass each, from a watch | #131, #89 |
-| 4 | **A person ahead**: a person stands still; stop for 5 s at 5, 3, 2 and 1 m from them, measured with the tape | `--depth --record recordings/person-1` | the distance at each stop, and what the dashboard said there (the obstacle distance) | #131, #88 (D12, #172) |
-| 5 | **Alert link**: during a short walk switch Wi-Fi off, then Bluetooth off, then both back on | `--record recordings/link-1` | the times you switched each | #89 |
-| 6 | **Dark corridor**: a corridor with its lights on, then off, walked slowly | `--record recordings/dark-1` | where the lights went off | #87 (light factor), #89 |
+| 1 | **Indoor loop**: a corridor loop of 50 to 100 m, ending where it began. Phone Wi-Fi off, no GPS indoors | `--on-foot --record recordings/loop-1` | the steps you take (count them) and the place | #129, #133 |
+| 2 | **Outdoor route**: 100 to 200 m on a campus road, its length measured on a map or with a wheel | `--on-foot --record recordings/road-1` | the route's length, the steps, the place | #129, #133 |
+| 3 | **Stairs**: walk from about 6 m away towards stairs going up, stop at the first step; then the same towards stairs going down, stopping at the top | `--on-foot --depth --weights yoloe-26n-mana.pt --imgsz 480 --record recordings/stairs-1` | tape marks at 4, 3, 2 and 1 m from the first step; the time you pass each, from a watch | #131, #89 |
+| 4 | **A person ahead**: a person who has agreed to be recorded (ask first) stands still; stop for 5 s at 5, 3, 2 and 1 m from them, measured with the tape | `--on-foot --depth --record recordings/person-1` | that they agreed, the distance at each stop, and what the dashboard said there (the obstacle distance) | #131, #88 (D12, #172) |
+| 5 | **Alert link**: during a short walk, switch Wi-Fi off and tap the page's Wi-Fi tile off (the page cannot see the radio itself, `demo/README.md`); then the same for Bluetooth; then both back on, radios and tiles | `--on-foot --record recordings/link-1` | the times you switched each | #89 |
+| 6 | **Dark corridor**: a corridor with its lights on, then off, walked slowly | `--on-foot --record recordings/dark-1` | where the lights went off | #87 (light factor), #89 |
 
 ## Scoring
 
