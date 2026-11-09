@@ -750,3 +750,73 @@ def test_saying_how_the_phone_is_carried_is_written_down_once():
         "The phone is on the device. Shaking counts as rough ground.",
     ]
     assert m.tick(4.0)["on_foot"] is False
+
+
+def held(pitch_deg=0.0, roll_deg=0.0, base="upright"):
+    """The gravity reading of a phone held upright (camera forward) or lying flat, then tilted:
+    pitch looks the camera (or the top edge) down, roll leans it to the right."""
+    import math
+
+    p, r = math.radians(pitch_deg), math.radians(roll_deg)
+    if base == "upright":  # up is +y, forward is -z
+        up = (math.sin(r), math.cos(p) * math.cos(r), math.sin(p) * math.cos(r))
+    else:  # flat: up is +z, forward is +y
+        up = (math.sin(r), -math.sin(p) * math.cos(r), math.cos(p) * math.cos(r))
+    return tuple(G * c for c in up)
+
+
+@pytest.mark.parametrize("base", ["upright", "flat"])
+def test_the_tilt_is_measured_from_how_the_phone_is_held(base):
+    import math
+
+    from demo.middleware import tilt
+
+    m = Middleware()
+    for i in range(20):  # held still for the first moment: that is level
+        m.on_motion(*held(base=base), now=i / 30)
+    if base == "upright":
+        assert math.degrees(max(map(abs, tilt(*held())))) > 70  # what it was measured as before
+    m.on_motion(*held(base=base), now=1.0)
+    d = m.core.motion
+    assert abs(d.pitch_rad) < 0.01 and abs(d.roll_rad) < 0.01
+    m.on_motion(*held(10.0, base=base), now=1.1)
+    assert math.degrees(m.core.motion.pitch_rad) == pytest.approx(10.0, abs=0.5)
+    assert abs(math.degrees(m.core.motion.roll_rad)) < 0.5
+    m.on_motion(*held(0.0, 10.0, base=base), now=1.2)
+    assert abs(math.degrees(m.core.motion.roll_rad)) == pytest.approx(10.0, abs=0.5)
+
+
+def test_a_phone_held_upright_to_film_is_level_ground_for_the_core():
+    m = Middleware()
+    m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=0.0)
+    m.on_ground(Source.DETECTOR, Ground.FLAT, 0.9, now=0.0)
+    t = 0.0
+    while t < 2.0:
+        m.on_motion(*held(), now=t)
+        t = round(t + 1 / 30, 4)
+    d = m.tick(2.0)["decision"]
+    assert d["mode"] == "WHEELS" and "until the ground is level" not in d["reason"]
+
+
+def test_switching_motion_on_again_takes_level_afresh():
+    import math
+
+    m = Middleware()
+    for i in range(20):
+        m.on_motion(*held(), now=i / 30)
+    m.on_sensor_switch("motion", False, now=1.0)
+    m.on_sensor_switch("motion", True, now=1.1)  # now mounted 20 degrees down
+    for i in range(20):
+        m.on_motion(*held(20.0), now=1.2 + i / 30)
+    assert abs(math.degrees(m.core.motion.pitch_rad)) < 0.5
+
+
+def test_on_foot_the_first_second_of_a_walk_is_not_wheel_slip_either():
+    import math
+
+    m = Middleware(on_foot=True)
+    m.on_ground(Source.CLASSIFIER, Ground.FLAT, 0.9, now=0.0)
+    for i in range(1, 30):  # the first second of a walk, the swing already past the limit
+        t = i / 30
+        m.on_motion(0.0, 0.0, G + 1.5 * math.sin(2 * math.pi * 1.8 * t), t, phone_t=t)
+    assert m.tick(1.0)["decision"]["reason"] != "Wheel slip, changing to tracks"
