@@ -229,6 +229,65 @@ def tilt(ax: float, ay: float, az: float) -> tuple[float, float]:
     return math.atan2(-ax, math.hypot(ay, az)), math.atan2(ay, az)
 
 
+def _unit(v):
+    n = math.sqrt(sum(c * c for c in v))
+    return tuple(c / n for c in v) if n > 1e-9 else None
+
+
+def _dot(a, b):
+    return sum(x * y for x, y in zip(a, b, strict=True))
+
+
+class LevelReference:
+    """How the phone is held when the device is level, so its tilt is measured from there.
+
+    A sensor on a device is zeroed for how it is mounted; the phone stands in for that sensor, and
+    a phone held upright to film reads 78 degrees from lying flat, which the core took for a device
+    tipped over ("On tracks until the ground is level"). The first `samples` readings (about half
+    a second) are taken as level; switching Motion off and on on the phone takes them again.
+
+    Pitch is about the phone's right axis (the camera looking down is positive, REP 103's nose
+    down), roll about its forward axis: the back camera's direction, or the top edge when the
+    phone lies flat."""
+
+    def __init__(self, samples: int = 15):
+        self.samples = samples
+        self.reset()
+
+    def reset(self) -> None:
+        self.sum, self.n = [0.0, 0.0, 0.0], 0
+        self.up = self.forward = self.right = None
+
+    def add(self, g: tuple[float, float, float]) -> None:
+        if self.n >= self.samples:
+            return
+        self.sum = [s + c for s, c in zip(self.sum, g, strict=True)]
+        self.n += 1
+        up = _unit(self.sum)
+        if up is None:
+            return
+        back = (0.0, 0.0, -1.0)  # the back camera looks along the phone's -z
+        along = [b - _dot(back, up) * u for b, u in zip(back, up, strict=True)]
+        if math.sqrt(_dot(along, along)) < 0.5:  # lying flat: the top edge is forward
+            top = (0.0, 1.0, 0.0)
+            along = [t - _dot(top, up) * u for t, u in zip(top, up, strict=True)]
+        self.up, self.forward = up, _unit(along)
+        f, u = self.forward, self.up
+        self.right = (
+            f[1] * u[2] - f[2] * u[1],
+            f[2] * u[0] - f[0] * u[2],
+            f[0] * u[1] - f[1] * u[0],
+        )
+
+    def tilt(self, g: tuple[float, float, float]) -> tuple[float, float]:
+        """Pitch and roll in radians from level as held."""
+        u = _unit(g)
+        if u is None or self.up is None:
+            return 0.0, 0.0
+        level = _dot(u, self.up)
+        return math.atan2(-_dot(u, self.forward), level), math.atan2(_dot(u, self.right), level)
+
+
 WORD_COMMANDS = {
     "stop": Command.STOP,
     "go": Command.GO,
@@ -388,6 +447,7 @@ class Middleware:
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
         self.gravity: tuple[float, float, float] | None = None
+        self.level = LevelReference()  # how the phone is held when level
         self._last_decision = None
         self._t0: float | None = (
             None  # the first time seen, so the dashboard shows seconds since start
@@ -603,17 +663,16 @@ class Middleware:
         """phone_t: the phone's own time of the reading in seconds, for counting steps."""
         now = self.clock() if now is None else now
         self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
-        pitch, roll = tilt(ax, ay, az)
+        self.level.add((ax, ay, az))
+        pitch, roll = self.level.tilt((ax, ay, az))
         self.gravity = (ax, ay, az)  # the last reading, for the camera's tilt
         self._accel.append((now, math.sqrt(ax * ax + ay * ay + az * az)))
         recent = [m for t, m in self._accel if now - t <= 1.0]
         spread = (max(recent) - min(recent)) if len(recent) > 3 else 0.0
-        # a person walking with the phone shakes it too: on foot, that is their steps, not rough
-        # ground. On wheels a jolt at a walking pace (paving slabs) counts as a step as well, so
-        # there the shaking is always rough ground.
-        last_step = self.nav.track.last_step_t
-        walking = self.on_foot and last_step is not None and now - last_step < 2.0
-        slip = spread > self.VIBRATION_SLIP and not walking
+        # on foot there are no wheels to slip: the shaking is the person's steps, from the very
+        # first one (before a step is counted, the first swing already passed the limit). On the
+        # device a jolt at a walking pace (paving slabs) is rough ground, as before.
+        slip = spread > self.VIBRATION_SLIP and not self.on_foot
         self.core.on_motion(MotionReport(now, 0.9, pitch_rad=pitch, roll_rad=roll, wheel_slip=slip))
         deg = math.degrees(max(abs(pitch), abs(roll)))
         self._seen("motion", now, f"{deg:.0f}° {'rough' if slip else 'smooth'}", 0.9)
@@ -717,6 +776,8 @@ class Middleware:
             return
         if on:
             st.switched_off = False
+            if sid == "motion":
+                self.level.reset()  # level as the phone is held now
             return
         st.switched_off = True
         self._available_since.pop(sid, None)
