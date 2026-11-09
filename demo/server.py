@@ -619,6 +619,9 @@ def main(argv=None) -> None:
                    help="degrees across the long side of the picture")  # fmt: skip
     p.add_argument("--tile-cache", metavar="FOLDER", default="tile-cache",
                    help="where the street map tiles are kept, for the map offline")  # fmt: skip
+    p.add_argument("--https", action="store_true",
+                   help="serve https on the network, so a phone on the same Wi-Fi can open it "
+                        "with no cable (demo/certs.py)")  # fmt: skip
     p.add_argument("--record", metavar="FOLDER",
                    help="keep what the phone sends, to play with demo.replay")  # fmt: skip
     p.add_argument("--on-foot", action="store_true",
@@ -649,12 +652,25 @@ def main(argv=None) -> None:
     )
     if a.record:
         print(f"recording the phone into {a.record}")
-    print(f"dashboard: http://localhost:{a.port}/dashboard")
-    print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
-    print(f"caregiver: http://localhost:{a.port}/caregiver   (read-only)")
+    ssl_context, host = None, a.host
+    if a.https:
+        from demo import certs
+
+        ssl_context = certs.context()
+        host = "0.0.0.0" if a.host == "127.0.0.1" else a.host
+        ips = certs.addresses()
+        if ips:
+            print(f"phone:     https://{ips[0]}:{a.port}/phone   (same Wi-Fi; accept the warning)")
+        for ip in ips[1:]:
+            print(f"           https://{ip}:{a.port}/phone   (another network of this laptop)")
+    scheme = "https" if a.https else "http"
+    print(f"dashboard: {scheme}://localhost:{a.port}/dashboard")
+    if not a.https:
+        print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
+    print(f"caregiver: {scheme}://localhost:{a.port}/caregiver   (read-only)")
     for name, on in models_status(app).items():
         print(f"model {name}: {'loaded' if on else 'not available'}")
-    web.run_app(app, host=a.host, port=a.port, print=None)
+    web.run_app(app, host=host, port=a.port, ssl_context=ssl_context, print=None)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,36 @@ the data, so you can show the alert link changing.
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
 
+### Connect the phone over the network: no cable, no adb
+
+Chrome gives the camera, the motion sensors and GPS only to a secure page: `localhost` (the cable),
+or https. Two ways to an https page:
+
+**Same Wi-Fi (the fastest):** the laptop serves https itself.
+
+```bash
+python -m demo.server --https          # prints the phone's address, e.g. https://192.168.1.2:8000/phone
+```
+
+Open that address on the phone and, the first time, tap *Advanced*, then *Proceed*: the certificate
+is the laptop's own (`demo/certs.py`, kept in `certs/`, not in git). The data stays on the local
+network. If the server lists more than one address, the first is the Wi-Fi's; the others can be
+virtual adapters (WSL, VirtualBox) that the phone cannot reach.
+
+**Anywhere with internet:** a Cloudflare quick tunnel gives the laptop a public https address, so
+the phone can be on mobile data, with no warning.
+
+```bash
+python -m demo.server                  # as usual
+python -m demo.tunnel                  # prints https://<random words>.trycloudflare.com/phone
+```
+
+It needs Cloudflare's `cloudflared`, from Cloudflare's release page. Every message goes through
+Cloudflare, so the round trip is longer than on the same Wi-Fi. Anyone with that address can open
+the dashboard and see the camera, so stop the tunnel (Ctrl+C) when the demo ends.
+
+The dashboard shows the round trip to the phone under *Inputs from the phone*, for any of these ways.
+
 ### Or any other camera
 
 The vision part can be tested without the phone (#132). `demo.camera` sends frames from the

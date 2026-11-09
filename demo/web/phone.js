@@ -12,12 +12,14 @@ let audioRate = 48000;
 let laptopHasVoiceModel = false;   // when the laptop recognises speech itself, the phone streams audio
 
 // The data path is the USB cable (adb reverse), so the page is opened as localhost.
-document.getElementById("path").textContent = "data path: USB cable";
+document.getElementById("path").textContent =
+  location.hostname === "localhost" ? "data path: adb tunnel (cable or Wi-Fi)" : "data path: " + location.host;
 
 // ---- connection
 
 function connect() {
-  ws = new WebSocket("ws://" + location.host + "/ws/phone");
+  const scheme = location.protocol === "https:" ? "wss" : "ws"; // an https page may not use ws
+  ws = new WebSocket(scheme + "://" + location.host + "/ws/phone");
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     conn.textContent = "connected";
