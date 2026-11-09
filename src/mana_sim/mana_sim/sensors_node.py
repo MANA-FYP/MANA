@@ -31,6 +31,11 @@ class SensorsNode(Node):
         self.cone_rad = p("obstacle_cone_rad", 0.35).value
         self.obstacle_max_m = p("obstacle_max_m", 4.0).value
         self.obstacle_trust = p("obstacle_trust", 0.9).value
+        # odom from the simulation's ground truth (exact), or from the wheels and the gyro
+        # (drifts, as on a real chair: what a lidar localisation must correct, #43)
+        self.odom_from = p("odom_from", "ground_truth").value
+        self.pose = (0.0, 0.0, 0.0)  # x, y, yaw of the dead reckoning
+        self.imu_t: float | None = None
 
         self.mode = WHEELS
         self.left_rad_s: list[float] = []
@@ -71,6 +76,8 @@ class SensorsNode(Node):
 
     def on_ground_truth(self, m: Odometry) -> None:
         self.speed_mps = m.twist.twist.linear.x
+        if self.odom_from != "ground_truth":
+            return
         t = TransformStamped()
         t.header.stamp, t.header.frame_id, t.child_frame_id = m.header.stamp, ODOM, BASE
         t.transform.translation.x = m.pose.pose.position.x
@@ -87,6 +94,8 @@ class SensorsNode(Node):
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
         pitch, roll = conv.tilt(q.x, q.y, q.z, q.w)
+        if self.odom_from == "wheels":
+            self.dead_reckon(m)
         wheels = self.left_rad_s + self.right_rad_s
         slip = self.mode == WHEELS and (
             conv.wheel_slip(wheels, self.speed_mps)
@@ -96,6 +105,24 @@ class SensorsNode(Node):
         r.header.stamp, r.header.frame_id = m.header.stamp, BASE
         r.trust, r.pitch_rad, r.roll_rad, r.wheel_slip = 1.0, pitch, roll, slip
         self.motion.publish(r)
+
+    def dead_reckon(self, m: Imu) -> None:
+        """odom and odom > base_link from the wheels' speed and the gyro's turn rate."""
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        dt, self.imu_t = (0.0 if self.imu_t is None else t - self.imu_t), t
+        wheels = self.left_rad_s + self.right_rad_s
+        speed = sum(wheels) / len(wheels) * conv.WHEEL_RADIUS_M if wheels else 0.0
+        if 0 < dt < 0.5:
+            self.pose = conv.dead_reckon(*self.pose, speed, m.angular_velocity.z, dt)
+        x, y, yaw = self.pose
+        tf = self.transform(m.header.stamp, ODOM, BASE, (x, y, 0.0, 0.0, 0.0, yaw))
+        self.tf.sendTransform(tf)
+        o = Odometry()
+        o.header.stamp, o.header.frame_id, o.child_frame_id = m.header.stamp, ODOM, BASE
+        o.pose.pose.position.x, o.pose.pose.position.y = x, y
+        o.pose.pose.orientation = tf.transform.rotation
+        o.twist.twist.linear.x, o.twist.twist.angular.z = speed, m.angular_velocity.z
+        self.odom.publish(o)
 
     def on_scan(self, m: LaserScan) -> None:
         found = conv.nearest_ahead(
