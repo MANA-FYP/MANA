@@ -19,5 +19,10 @@ setup(
     maintainer_email="184832252+mushi0541@users.noreply.github.com",
     description="MANA position (M2): GPS, the lidar map or odometry as the position source.",
     license="AGPL-3.0-only",
-    entry_points={"console_scripts": ["position_node = mana_position.position_node:main"]},
+    entry_points={
+        "console_scripts": [
+            "position_node = mana_position.position_node:main",
+            "lidar_gate = mana_position.lidar_gate_node:main",
+        ]
+    },
 )

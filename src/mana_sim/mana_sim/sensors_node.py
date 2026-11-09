@@ -127,6 +127,7 @@ class SensorsNode(Node):
         o.pose.pose.position.x, o.pose.pose.position.y = x, y
         o.pose.pose.orientation = tf.transform.rotation
         o.twist.twist.linear.x, o.twist.twist.angular.z = speed, m.angular_velocity.z
+        o.twist.covariance = conv.WHEEL_TWIST_COVARIANCE  # an EKF needs to know it is not exact
         self.odom.publish(o)
 
     def on_scan(self, m: LaserScan) -> None:
