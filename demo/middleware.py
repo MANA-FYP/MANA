@@ -304,6 +304,8 @@ WORD_COMMANDS = {
 MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
+# a siren or a horn heard on the microphone (#47): said, not a decision of its own
+SOUND_TEXT = {"siren": "A siren nearby. Take care.", "horn": "A horn nearby. Take care."}
 # how urgent each kind of line is, when the core does not give a priority of its own
 KIND_PRIORITY = {
     "link": Priority.WARNING,
@@ -311,6 +313,7 @@ KIND_PRIORITY = {
     "mode": Priority.INFO,
     "switch": Priority.INFO,
     "coverage": Priority.INFO,
+    "sound": Priority.WARNING,
 }
 
 
@@ -440,6 +443,7 @@ class Middleware:
         self._said_at: dict[str, float] = {}
         self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
         self.detections: list[dict] = []
+        self.sounds: dict[str, tuple[float, float]] = {}  # hazard -> (score, when last heard)
         self._seen_candidate: tuple[frozenset | None, int] = (None, 0)
         self._seen_logged: frozenset | None = None
         self._last_active: set[str] | None = None
@@ -486,7 +490,7 @@ class Middleware:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
         detection also goes into the message queue, which says one at a time, urgent first."""
-        if kind in ("switch", "link", "position", "coverage"):  # stop and go may repeat
+        if kind in ("switch", "link", "position", "coverage", "sound"):  # stop and go may repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
                 return
@@ -864,6 +868,14 @@ class Middleware:
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )
 
+    def on_sounds(self, heard: dict[str, float], now: float | None = None) -> None:
+        """Sirens and horns heard in the last 10 s of the microphone (demo.sounds), with their
+        scores. Each is said once, and not again within 10 s while it goes on."""
+        now = self.clock() if now is None else now
+        for hazard, score in heard.items():
+            self.sounds[hazard] = (score, now)
+            self._decide(now, "sound", SOUND_TEXT[hazard])
+
     def on_word(
         self,
         word: str,
@@ -1068,5 +1080,10 @@ class Middleware:
                 "trust": self.link.trust(now),
             },
             "detections": self.detections[-5:],
+            "sounds": [
+                {"hazard": h, "score": s, "t": round(self._since_start(t), 1)}
+                for h, (s, t) in self.sounds.items()
+                if now - t < 4.0
+            ],
             "latency": dict(self.latency),
         }

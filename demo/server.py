@@ -44,10 +44,20 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
+import numpy as np  # noqa: E402
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E402
 
-from demo import access, caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
+from demo import (  # noqa: E402
+    access,
+    caregiver,
+    navigation,
+    recording,
+    sounds,
+    speech,
+    tiles,
+    vision,
+)
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -90,12 +100,14 @@ def build_app(
     recorder=None,
     tile_cache=None,
     key=None,
+    listener=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=checks)
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
+    app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -261,10 +273,30 @@ async def on_binary(app: web.Application, data: bytes) -> None:
         samples = array("f")
         samples.frombytes(payload[: len(payload) // 4 * 4])
         mw.on_microphone(now)
+        hear(app, samples, now)
         if app["recognizer"] is not None:
             pcm = speech.to_pcm16_16k(list(samples), app["live"]["audio_rate"])
             for word, confidence in app["recognizer"].feed(pcm):
                 mw.on_word(word, confidence, now)
+
+
+def hear(app: web.Application, samples, now: float) -> None:
+    """Keep the sound, and once a second score the last 10 s for sirens and horns, off the loop."""
+    listener = app["listener"]
+    if listener is None:
+        return
+    listener.feed(np.frombuffer(samples, dtype=np.float32), app["live"]["audio_rate"])
+    if listener.due(now) and not app["live"].get("hearing"):
+        app["live"]["hearing"] = True
+        asyncio.get_running_loop().create_task(hear_task(app, now))
+
+
+async def hear_task(app: web.Application, now: float) -> None:
+    try:
+        heard = await asyncio.get_running_loop().run_in_executor(None, app["listener"].hear, now)
+        app["mw"].on_sounds(heard)
+    finally:
+        app["live"]["hearing"] = False
 
 
 async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
@@ -583,6 +615,7 @@ def models_status(app: web.Application) -> dict:
         "classifier": app["classifier"] is not None,
         "speech": app["recognizer"] is not None,
         "depth": app["depth_model"] is not None,
+        "sounds": app["listener"] is not None,
     }
 
 
@@ -644,6 +677,8 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--sounds", metavar="EFFICIENTAT",
+                   help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
     p.add_argument("--depth-size", type=int, default=266, help="depth model input; 518 is finer")
@@ -675,6 +710,7 @@ def main(argv=None) -> None:
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
+    listener = sounds.Listener(sounds.load(a.sounds)) if a.sounds else None
     mount = dz.Mount(a.camera_height, a.camera_fov)
     key = access.load_or_make()  # the server can drive the device: no answer without it
     app = build_app(
@@ -688,6 +724,7 @@ def main(argv=None) -> None:
         recorder=recorder,
         tile_cache=tiles.TileCache(a.tile_cache),
         key=key,
+        listener=listener,
     )
     if a.record:
         print(f"recording the phone into {a.record}")
