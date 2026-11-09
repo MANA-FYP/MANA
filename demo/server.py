@@ -44,7 +44,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
         sys.path.insert(0, str(extra))
 
 from aiohttp import WSMsgType, web  # noqa: E402
-from mana_core.decision import Command, Ground, Source  # noqa: E402
+from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E402
 
 from demo import caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
 from demo import depth as dz  # noqa: E402
@@ -105,6 +105,7 @@ def build_app(
     app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
+    app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard_page)
@@ -344,6 +345,25 @@ async def walk_geojson(request: web.Request) -> web.Response:
 
 
 STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
+# the depth sees stairs up as something in the path from the second or third riser: on real frames
+# 0.2 to 1.3 m past where they start (#159)
+STAIRS_RISE_M = 1.5
+
+
+def the_stairs(report, ahead_m: float, now: float) -> bool:
+    """The depth's something in the path is the stairs up that the detector saw in the last second:
+    from where they start to STAIRS_RISE_M past it. Not an obstacle, so the stairs rule handles
+    them; something nearer than the stairs, or further past them, still is. Stairs without a
+    distance (no tilt) cannot be placed, and the obstacle stays. Both distances are from the
+    camera: the report is the one the server made (app["stairs"]), not the core's copy, which
+    counts from the device's front (Waqas, #160)."""
+    return (
+        report is not None
+        and report.ground == Ground.STAIRS_UP
+        and 0.0 <= now - report.stamp <= 1.0
+        and math.isfinite(report.distance_m)
+        and report.distance_m - 0.2 <= ahead_m <= report.distance_m + STAIRS_RISE_M
+    )
 
 
 def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) -> None:
@@ -359,7 +379,9 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
-    mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, mw.clock())
+    stamp = mw.clock()
+    app["stairs"] = GroundReport(stamp, box.confidence, Source.DETECTOR, Ground(ground), distance)
+    mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
 def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
@@ -403,7 +425,8 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     r = seen.reading
     if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
-    if seen.ahead_m is not None:
+    stairs = seen.ahead_m is not None and the_stairs(app["stairs"], seen.ahead_m, now)
+    if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     d = app["depth"]
     d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now)
@@ -416,6 +439,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
         "distance_m": None if r is None or math.isnan(r.distance_m) else round(r.distance_m, 2),
         "step_m": None if r is None or math.isnan(r.step_height_m) else round(r.step_height_m, 2),
         "ahead_m": None if seen.ahead_m is None else round(seen.ahead_m, 2),
+        "ahead_is_stairs": stairs,  # then not sent as an obstacle (#159)
         "why": seen.why,
         "sent": app["depth_ground"],  # the ground goes to the core only with --depth-ground
     }

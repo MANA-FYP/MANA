@@ -209,6 +209,9 @@ With the detector it gives the camera what it could not measure before (#131):
 
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
   box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+  Stairs up rise into that from their second or third step, so while the detector sees stairs up,
+  something from where they start to 1.5 m past it is taken to be the stairs, not an obstacle
+  (#159). The stairs rule handles them, and the dashboard says "the stairs rise at ...".
 - **Stairs, where and which way**: when the detector (the open-vocabulary YOLOE model from
   `demo/build_detector.py`) boxes stairs, the stairs are where the box's bottom edge meets the
   floor (camera height and tilt), and up or down by whether the depth in the box is above or
