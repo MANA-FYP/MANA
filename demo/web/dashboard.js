@@ -141,7 +141,7 @@ const SOURCE_TEXT = { gps: "GPS", steps: "steps (no GPS)", none: "waiting for st
 let trackKey = "";
 function drawTrack(t) {
   if (!t) return;
-  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m]);
+  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m, t.marks]);
   if (key === trackKey) return;
   trackKey = key;
   setText($("posText"), t.distance_m.toFixed(1) + " m walked, " + t.steps + " steps, " +
@@ -154,7 +154,9 @@ function drawTrack(t) {
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, w, h);
   const pts = t.path.concat([[t.x, t.y, t.source]]);
-  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const marks = Object.values(t.marks || {});
+  const xs = pts.map((p) => p[0]).concat(marks.map((m) => m[0]));
+  const ys = pts.map((p) => p[1]).concat(marks.map((m) => m[1]));
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
   const span = Math.max(10, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.2;
   const k = Math.min(w, h) / span;   // pixels per metre
@@ -172,6 +174,11 @@ function drawTrack(t) {
     ctx.strokeStyle = SOURCE_COLOUR[pts[i][2]] || SOURCE_COLOUR.none;
     ctx.beginPath(); ctx.moveTo(X(pts[i - 1][0]), Y(pts[i - 1][1])); ctx.lineTo(X(pts[i][0]), Y(pts[i][1])); ctx.stroke();
   }
+  // marked places: a flag
+  Object.entries(t.marks || {}).forEach(([name, [mx, my]]) => {
+    ctx.fillStyle = "#7c3aed"; ctx.fillRect(X(mx) - 1, Y(my) - 14, 2, 14);
+    ctx.beginPath(); ctx.moveTo(X(mx) + 1, Y(my) - 14); ctx.lineTo(X(mx) + 11, Y(my) - 10); ctx.lineTo(X(mx) + 1, Y(my) - 6); ctx.fill();
+  });
   // the start, the uncertainty circle and where the person is now, with the heading
   ctx.fillStyle = "#16a34a"; ctx.beginPath(); ctx.arc(X(0), Y(0), 4, 0, 7); ctx.fill();
   ctx.fillStyle = "rgba(37, 99, 235, 0.12)"; ctx.beginPath(); ctx.arc(X(t.x), Y(t.y), Math.max(5, t.accuracy_m * k), 0, 7); ctx.fill();
@@ -222,6 +229,10 @@ document.querySelectorAll("[data-button]").forEach((b) => {
 
 // how the phone is carried: on foot its steps are walking, on the device shaking is rough ground
 let onFoot = false;
+document.querySelectorAll("[data-place]").forEach((b) => {
+  b.onclick = () => ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: "place", do: b.dataset.place }));
+});
+
 $("carried").onclick = () => ws && ws.readyState === 1 &&
   ws.send(JSON.stringify({ type: "carried", on_foot: !onFoot }));
 

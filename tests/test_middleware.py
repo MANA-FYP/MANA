@@ -750,3 +750,13 @@ def test_saying_how_the_phone_is_carried_is_written_down_once():
         "The phone is on the device. Shaking counts as rough ground.",
     ]
     assert m.tick(4.0)["on_foot"] is False
+
+
+def test_saying_mark_this_place_then_where_is_the_mark():
+    m = Middleware()
+    m.on_heard("mark this place", now=1.0)
+    m.nav.track.x, m.nav.track.y = 0.0, 5.0  # walked 5 m north, no compass
+    m.on_heard("where is the mark", now=2.0)
+    texts = [e["text"] for e in m.decisions]
+    assert texts == ["Place marked.", "The mark is 5 metres to the south."]
+    assert [i["command"] for i in m.inputs] == ["Mark", "Way back"]

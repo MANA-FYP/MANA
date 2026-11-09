@@ -33,7 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
-from demo.navigation import Fix, Navigator
+from demo.navigation import Fix, Navigator, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -638,6 +638,19 @@ class Middleware:
             trust,
         )
 
+    def mark_place(self, now: float | None = None) -> None:
+        """Remember where the person is, to find the way back later."""
+        now = self.clock() if now is None else now
+        self.nav.track.mark()
+        self._decide(now, "way", "Place marked.", Priority.INFO)
+
+    def way_back(self, now: float | None = None) -> str:
+        """Say how far the marked place is and which way, as a clock face."""
+        now = self.clock() if now is None else now
+        text = way_text(self.nav.track.way_to())
+        self._decide(now, "way", text, Priority.INFO)
+        return text
+
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
         now = self.clock() if now is None else now
@@ -747,6 +760,14 @@ class Middleware:
         if not text:
             return
         found = [COMMAND_TEXT[WORD_COMMANDS[w]] for w in text.split() if w in WORD_COMMANDS]
+        words = set(text.split())
+        if "mark" in words:  # "mark this place", then "where is the mark" / "way back to the mark"
+            if words & {"where", "way", "back", "find"}:
+                self.way_back(now)
+                found.append("Way back")
+            else:
+                self.mark_place(now)
+                found.append("Mark")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )

@@ -301,3 +301,24 @@ def test_the_dashboard_says_how_the_phone_is_carried():
         await snapshot_where(dash, lambda s: s["on_foot"] is False)
 
     run(with_clients(go))
+
+
+def test_the_dashboard_marks_a_place_and_the_walk_can_be_saved():
+    async def go(client, phone, dash):
+        await dash.send_json({"type": "place", "do": "mark"})
+        await snapshot_where(dash, lambda s: s["position"]["track"]["marks"].get("mark"))
+        await dash.send_json({"type": "place", "do": "way"})
+        await snapshot_where(
+            dash, lambda s: any("at the mark" in e["text"] for e in s["decisions"])
+        )
+        r = await client.get("/api/walk.gpx")
+        assert r.status == 409  # no GPS fix yet
+        r = await client.get("/api/walk.geojson")
+        geo = await r.json(content_type=None)
+        assert r.status == 200 and geo["features"][1]["properties"]["name"] == "mark"
+        await phone.send_json({"type": "gps", "accuracy": 5.0, "lat": 31.52, "lon": 74.35})
+        await snapshot_where(dash, lambda s: s["position"]["track"]["lat"] is not None)
+        r = await client.get("/api/walk.gpx")
+        assert r.status == 200 and "<wpt" in await r.text()
+
+    run(with_clients(go))

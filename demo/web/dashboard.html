@@ -28,6 +28,12 @@
       <section class="card small">
         <h2>Position and path <button class="btn-secondary carried" id="carried">On the device</button></h2>
         <div class="hint" id="posText">Walk with the phone: GPS outdoors, steps indoors.</div>
+        <div class="row tight">
+          <button class="btn-secondary" data-place="mark">Mark this place</button>
+          <button class="btn-secondary" data-place="way">Way back</button>
+          <a class="btn-secondary" href="/api/walk.gpx" download>GPX</a>
+          <a class="btn-secondary" href="/api/walk.geojson" download>GeoJSON</a>
+        </div>
         <div class="path"><canvas id="path"></canvas></div>
       </section>
     </div>
