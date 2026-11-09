@@ -157,19 +157,21 @@ Not tested here: the switch from GPS to the lidar map, which needs the lidar loc
 
 ## Lidar localisation indoors (#43)
 
-`tools/indoor_localisation.sh` maps the indoor world (`worlds/mana_indoor.sdf`: a 16 by 10 m floor, a corridor loop round a central block, five cabinets and a pillar, no GPS) with slam_toolbox, then starts the world again and localises on the saved map. The chair drives the corridor loop by its ground truth (`mana_sim.loop_driver`), and its odometry comes from the wheels and the gyro (`odom:=wheels`), so it drifts as a real chair's would. Once a second the map pose (slam_toolbox) and the odom pose (the wheels) are compared with Gazebo's ground truth, both taken from the start pose, where the map and odom frames begin. Measured in WSL on 9 November 2026.
+`tools/indoor_localisation.sh` maps the indoor world (`worlds/mana_indoor.sdf`: a 16 by 10 m floor, a corridor loop round a central block, five cabinets and a pillar, no GPS) with slam_toolbox, then starts the world again and localises on the saved map. The chair drives the corridor loop by its ground truth (`mana_sim.loop_driver`), and its odometry comes from the wheels and the gyro (`odom:=wheels`), so it drifts as a real chair's would. Once a second the map pose (slam_toolbox) and the odom pose (the wheels) are compared with Gazebo's ground truth, both taken from the first row, which the driver writes at rest before it moves, where the map and odom frames begin; map and odom are looked up at the ground truth's own time. Measured in WSL on 9 November 2026.
 
 | Run | Driven | Map pose (slam_toolbox): mean / 95th / max | Wheel odometry: mean / 95th / max |
 |---|---|---|---|
-| Mapping, one lap (2 runs) | 47.6, 47.7 m | 0.21 / 0.48 / 0.66 m, 0.22 / 0.51 / 0.66 m | 0.28 / 0.76 / 0.77 m, 0.28 / 0.73 / 0.74 m |
-| Localisation, two laps, run 1 | 88.9 m | 0.19 / 0.83 / 0.91 m | 0.61 / 1.50 / 1.51 m |
-| Localisation, two laps, run 2 (same map) | 89.0 m | 0.15 / 0.36 / 0.60 m | 0.61 / 1.48 / 1.49 m |
-| Localisation, two laps, run 3 (a new map) | 89.0 m | 0.21 / 1.08 / 1.17 m | 0.61 / 1.45 / 1.46 m |
+| Mapping, one lap (2 runs, maps A and B) | 47.7, 47.7 m | 0.17 / 0.42 / 0.66 m, 0.24 / 0.62 / 0.68 m | 0.28 / 0.76 / 0.76 m, 0.28 / 0.74 / 0.74 m |
+| Localisation, two laps, run 1 (map A) | 88.9 m | 0.19 / 0.93 / 1.02 m | 0.61 / 1.48 / 1.48 m |
+| Localisation, two laps, run 2 (map B) | 88.9 m | 0.22 / 1.18 / 1.27 m | 0.61 / 1.47 / 1.47 m |
+| Localisation, two laps, run 3 (map B again) | 89.0 m | 0.23 / 1.20 / 1.28 m | 0.62 / 1.50 / 1.51 m |
+
+An earlier set of runs took the first row only after the chair had started moving, so every error included that move (Waqas, #179). Its localisation means were 0.15 to 0.21 m, against 0.19 to 0.23 m here: in these runs the bias was smaller than the spread from run to run.
 
 What the runs show:
-- **Wheel odometry drifts, the map pose does not.** Odometry ended 1.46 to 1.50 m off after two laps; the map pose ended 0.08 to 0.10 m off.
-- **The map pose can jump along a long, bare corridor.** In runs 1 and 3 it jumped 0.8 and 1.1 m back along the south corridor at x = 11.2 m, next to a cabinet, on the first lap, and stayed off by that much until the corner, where the end wall fixed it. On the second lap there was no jump at the same place. Two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
-- **One corner is off by about 0.5 m in every run,** the north-west one at (1.4, 8.55), on every lap and with both maps. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
+- **Wheel odometry drifts, the map pose does not.** Odometry ended 1.47 to 1.51 m off after two laps; the map pose ended 0.06 to 0.11 m off.
+- **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
+- **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
 
 A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
 
