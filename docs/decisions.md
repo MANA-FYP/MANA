@@ -256,3 +256,5 @@ Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): 3
 
 Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): `imu_lost` meets all four marks. "On tracks until the ground is level" is shown at 18.2 s, and the chair reaches the end of the run (6.82 m, as `stairs` does) with no mishap. Gazebo meets 36 of 39 marks; the three left are #118. On synthetic depth, the fit gives the pitch to within 0.5° from 27° nose up to 10° nose down. Stairs or a drop ahead leave it at 0°, and over a floor 0.4 m lower it gives no pitch, so the drop is still read.
 
+A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On a level chair where a ramp starts under them, it takes the ramp's plane for the floor and reads the ramp ahead as level until the chair is on it. On synthetic depth, a 0.1 slope starting 0 to 0.3 m ahead of the camera was read as flat (fitted pitch about 6°), and one starting 1 m or more ahead was still read as a ramp. This happens only with the IMU lost, and a ramp is the benign case: the steps down that matter are kept by the height bound above.
+
