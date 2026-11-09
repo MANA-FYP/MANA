@@ -33,7 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
-from demo.navigation import Fix, Navigator
+from demo.navigation import Fix, Navigator, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -241,6 +241,8 @@ WORD_COMMANDS = {
     "up": Command.SPEED_UP,
     "down": Command.SLOW_DOWN,
 }
+
+MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
 # how urgent each kind of line is, when the core does not give a priority of its own
@@ -640,6 +642,19 @@ class Middleware:
             trust,
         )
 
+    def mark_place(self, now: float | None = None) -> None:
+        """Remember where the person is, to find the way back later."""
+        now = self.clock() if now is None else now
+        self.nav.track.mark()
+        self._decide(now, "way", "Place marked.", Priority.INFO)
+
+    def way_back(self, now: float | None = None) -> str:
+        """Say how far the marked place is and which way, as a clock face."""
+        now = self.clock() if now is None else now
+        text = way_text(self.nav.track.way_to())
+        self._decide(now, "way", text, Priority.INFO)
+        return text
+
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
         now = self.clock() if now is None else now
@@ -749,6 +764,16 @@ class Middleware:
         if not text:
             return
         found = [COMMAND_TEXT[WORD_COMMANDS[w]] for w in text.split() if w in WORD_COMMANDS]
+        # recognisers add punctuation ("Where is the mark?"), so words are letters only; marking is
+        # checked as a phrase first, so "mark this place, I will come back" is not a question
+        words = re.findall(r"[a-z']+", text)
+        said = " ".join(words)
+        if said == "mark" or any(p in said for p in MARK_PHRASES):
+            self.mark_place(now)
+            found.append("Mark")
+        elif "mark" in words and set(words) & {"where", "way", "back", "find"}:
+            self.way_back(now)
+            found.append("Way back")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )
