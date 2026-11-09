@@ -171,7 +171,18 @@ What the runs show:
 - **The map pose can jump along a long, bare corridor.** In runs 1 and 3 it jumped 0.8 and 1.1 m back along the south corridor at x = 11.2 m, next to a cabinet, on the first lap, and stayed off by that much until the corner, where the end wall fixed it. On the second lap there was no jump at the same place. Two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
 - **One corner is off by about 0.5 m in every run,** the north-west one at (1.4, 8.55), on every lap and with both maps. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
 
-A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+### The jumps taken out before the EKF
+
+`ekf_global`'s own rejection threshold on the map pose either let a 1 m jump through (5 sigma) or, set tight, refused good poses too. So a small node sits between slam_toolbox and `ekf_global` (`mana_position.lidar_gate`). It compares each map pose with the one before it and with the wheels' move over that time. A difference over 0.5 m is a jump: it is taken off every pose after it, and that correction fades over 60 s, so a lasting change is taken in the end. `ekf_global` then fuses the gated pose with the wheels and the IMU.
+
+| Run | Driven | Map pose: mean / 95th / max | Jumps refused |
+|---|---|---|---|
+| Offline, 2 earlier recorded runs with a jump | | max 1.26 m to 0.59 m, and 1.13 m to 0.33 m | |
+| Offline, 2 earlier recorded runs with no jump | | max unchanged (0.35, 0.40 m) | |
+| Gazebo, EKF with the gated lidar, two laps, run 1 | 88.8 m | 0.17 / 0.37 / 0.57 m | 0 |
+| Gazebo, EKF with the gated lidar, two laps, run 2 | 88.7 m | 0.17 / 0.38 / 0.64 m | 0 |
+
+slam_toolbox did not jump in either Gazebo run, so the gate had nothing to refuse there; these two runs show only that the gate and the EKF do not make the map pose worse (mean 0.17 m, against 0.15 to 0.21 m before). Taking a jump out is shown offline, on the four runs recorded before the start-pose fix of the loop driver. Wheel odometry ended 1.48 and 1.51 m off; the EKF's map pose ended 0.05 and 0.04 m off.
 
 ## Camera depth and stairs on real phone frames (#131)
 
