@@ -488,6 +488,17 @@ def test_the_decision_sentence_is_in_the_snapshot():
     assert snap["decision"]["sentence"].startswith("Driving on wheels")
 
 
+def test_each_logged_decision_carries_its_state_and_why():
+    m = Middleware()
+    m.tick(0.0)
+    first = [e for e in m.decisions if e["kind"] == "decision"][0]
+    assert first["state"] in ("stop", "slow", "go") and first["why"]
+    m.on_command(Command.STOP, now=1.0, source="button")
+    m.tick(1.0)
+    last = [e for e in m.decisions if e["kind"] == "decision"][-1]
+    assert (last["state"], last["why"]) == ("stop", "You stopped it")
+
+
 def test_on_foot_the_sentence_does_not_talk_about_wheels():
     snap = Middleware(on_foot=True).tick(0.0)
     assert snap["decision"]["sentence"].split(".")[0] in ("Go on", "Slow down")

@@ -41,6 +41,8 @@ function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg))
 // the first clause of a message: "Obstacle ahead, stopping" -> "Obstacle ahead"
 function short(text) { return (text || "").split(/[.,]/)[0].trim(); }
 
+function ago(sec) { return sec < 60 ? Math.max(0, Math.round(sec)) + " s" : Math.round(sec / 60) + " min"; }
+
 function distColour(d) {
   return d === null || d === undefined ? "var(--box)" : d <= NEAR_M ? "var(--stop)" : d <= CLOSE_M ? "var(--slow)" : "var(--box)";
 }
@@ -81,6 +83,12 @@ function render(s) {
   $("speedBar").style.width = Math.round((d.stop ? 0 : d.speed) * 100) + "%";
   set($("btnAuto"), "class", s.manual ? "" : "on");
   set($("btnManual"), "class", s.manual ? "on" : "");
+
+  // the last decisions, newest first: a small sign, why, and how long ago
+  const past = s.decisions.filter((e) => e.state).slice(-4).reverse();
+  set($("history"), "html", past.map((e) =>
+    '<li data-state="' + e.state + '"><svg viewBox="0 0 100 100" aria-label="' + WORD[e.state] + '">' + SIGNS[e.state] +
+    "</svg><span>" + esc(short(e.why)) + "</span><time>" + ago(s.time - e.t) + "</time></li>").join(""));
 
   // the spoken message: the caption over the camera, and the laptop says it
   const said = s.heard || [];
@@ -212,7 +220,7 @@ function drawTrack(cv, t) {
   const w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h) return;
   const dpr = devicePixelRatio || 1;
-  if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
