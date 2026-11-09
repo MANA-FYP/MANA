@@ -236,3 +236,63 @@ def test_shaking_faster_than_anyone_steps_is_not_counted():
     fine = [(i / 30, 0.0, 0.0, G + (3.0 if (i // 3) % 2 else -3.0)) for i in range(300)]
     assert count(shaking) == []
     assert count(fine) == []  # the same at 30 readings a second
+
+
+# ---- marked places and the way back (#130)
+
+
+def test_the_way_back_to_a_mark_as_a_clock_face():
+    from demo.navigation import way_text
+
+    nav = Navigator()
+    nav.track.mark()
+    walk_legs(nav, [(0, 20)])  # 14 m north, facing north
+    assert way_text(nav.track.way_to()) == "The mark is 14 metres away, at 6 o'clock."
+    nav.on_orientation(None, None, None, compass=90)  # turn to face east
+    assert way_text(nav.track.way_to()) == "The mark is 14 metres away, at 3 o'clock."
+    walk_legs(nav, [(180, 19)])  # back south, near the mark
+    assert way_text(nav.track.way_to()) == "You are at the mark."
+
+
+def test_the_way_back_without_a_compass_or_a_mark():
+    from demo.navigation import way_text
+
+    track = Track()
+    assert way_text(track.way_to()) == "No mark yet. Say mark this place first."
+    track.mark()
+    track.x, track.y = 10.0, 10.0  # moved north-east, no compass
+    assert way_text(track.way_to()) == "The mark is 14 metres to the south-west."
+
+
+def test_a_walk_with_gps_is_saved_as_gpx_and_geojson():
+    import json
+    import xml.etree.ElementTree as ET
+
+    from demo.navigation import to_geojson, to_gpx
+
+    nav = Navigator()
+    nav.on_gps(Fix(0.0, 31.5204, 74.3587, 4.0))
+    nav.track.mark("door")
+    walk_legs(nav, [(0, 10)])
+    gpx = to_gpx(nav.track, wall_of=lambda t: 1_700_000_000.0 + t)
+    ns = {"g": "http://www.topografix.com/GPX/1/1"}
+    root = ET.fromstring(gpx.encode())
+    pts = root.findall(".//g:trkpt", ns)
+    assert len(pts) >= 10 and root.find(".//g:wpt/g:name", ns).text == "door"
+    assert float(pts[-1].get("lat")) > 31.5204 + 6.5 / 111_000  # 7 m north
+    assert pts[-1].find("g:time", ns).text.startswith("2023-11-14T")
+    geo = json.loads(json.dumps(to_geojson(nav.track)))
+    line, door = geo["features"]
+    assert line["geometry"]["type"] == "LineString" and "crs_note" not in geo
+    assert door["geometry"]["coordinates"] == [74.3587, 31.5204]  # longitude first
+
+
+def test_a_walk_indoors_with_no_fix_has_no_gpx_and_says_its_geojson_is_in_metres():
+    from demo.navigation import to_geojson, to_gpx
+
+    nav = Navigator()
+    walk_legs(nav, [(90, 10)])
+    assert to_gpx(nav.track) is None
+    geo = to_geojson(nav.track)
+    assert geo["features"][0]["geometry"]["coordinates"][-1] == [7.0, 0.0]
+    assert "metres east and north" in geo["crs_note"]

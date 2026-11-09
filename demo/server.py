@@ -46,7 +46,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, Source  # noqa: E402
 
-from demo import caregiver, speech, vision  # noqa: E402
+from demo import caregiver, navigation, speech, vision  # noqa: E402
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -113,6 +113,8 @@ def build_app(
     app.router.add_get("/frame.jpg", frame_jpg)
     app.router.add_get("/depth.jpg", depth_jpg)
     app.router.add_get("/api/evidence", evidence)
+    app.router.add_get("/api/walk.gpx", walk_gpx)
+    app.router.add_get("/api/walk.geojson", walk_geojson)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
     app.on_cleanup.append(stop_loop)
@@ -279,6 +281,35 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
 
 
+# ---- the walk, to keep
+
+
+def wall_of(app: web.Application):
+    """Turns the middleware's clock (monotonic) into Unix time, for the times in a saved walk."""
+    import time
+
+    offset = time.time() - app["mw"].clock()
+    return lambda t: None if t is None else t + offset
+
+
+async def walk_gpx(request: web.Request) -> web.Response:
+    gpx = navigation.to_gpx(request.app["mw"].nav.track, wall_of(request.app))
+    if gpx is None:
+        raise web.HTTPConflict(
+            text="no GPS fix yet: GPX needs latitude and longitude; take GeoJSON"
+        )
+    disposition = 'attachment; filename="mana-walk.gpx"'
+    return web.Response(text=gpx, content_type="application/gpx+xml",
+                        headers={"Content-Disposition": disposition})  # fmt: skip
+
+
+async def walk_geojson(request: web.Request) -> web.Response:
+    data = navigation.to_geojson(request.app["mw"].nav.track, wall_of(request.app))
+    disposition = 'attachment; filename="mana-walk.geojson"'
+    return web.json_response(data, content_type="application/geo+json",
+                             headers={"Content-Disposition": disposition})  # fmt: skip
+
+
 STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
 
 
@@ -385,6 +416,10 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 app["mw"].on_command(command, 1.0, source="dashboard")
             elif d.get("type") == "carried" and isinstance(d.get("on_foot"), bool):
                 app["mw"].set_on_foot(d["on_foot"])
+            elif d.get("type") == "place" and d.get("do") == "mark":
+                app["mw"].mark_place()
+            elif d.get("type") == "place" and d.get("do") == "way":
+                app["mw"].way_back()
     finally:
         app["dashboards"].discard(ws)
     return ws

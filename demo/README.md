@@ -147,6 +147,16 @@ the USB cable, and GPS works without a network.
   steps, and the path turns from blue (GPS) to orange (steps). The first good fix ties the path to
   latitude and longitude.
 
+**Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
+place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA says how far
+it is and which way as a clock face, 12 o'clock straight ahead, as orientation and mobility
+training gives directions: "The mark is 14 metres away, at 6 o'clock." Without a compass it gives
+the compass direction instead. The mark shows as a flag on the path.
+
+**Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
+GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
+fix, otherwise in metres from the start (it says so).
+
 Limits: the compass is disturbed near steel and motors, and step counting measures a person
 walking. On a device with wheels the steps would come from wheel odometry instead (#78).
 

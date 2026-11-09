@@ -25,6 +25,7 @@ from collections import deque
 from dataclasses import dataclass
 
 EARTH_R = 6_371_000.0  # m
+COMPASS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
 
 
 # ---- steps
@@ -175,7 +176,8 @@ class Track:
         self.steps = 0
         self.step_m = 0.0  # the distance of the steps alone
         self.distance_m = 0.0  # the length of the path
-        self.path: deque = deque([(0.0, 0.0, self.NONE)], maxlen=path_points)
+        self.path: deque = deque([(0.0, 0.0, self.NONE, None)], maxlen=path_points)  # x, y, src, t
+        self.marks: dict[str, tuple[float, float]] = {}  # places the person marked, by name
         self.source = self.NONE
         self.last_gps_t: float | None = None
         self.last_step_t: float | None = None
@@ -272,8 +274,32 @@ class Track:
             "distance_m": round(self.distance_m, 1),
             "speed": round(self.speed(now), 2),
             "source": source,
-            "path": [[round(x, 2), round(y, 2), s] for x, y, s in path],
+            "path": [[round(x, 2), round(y, 2), s] for x, y, s, _ in path],
+            "marks": {k: [round(x, 2), round(y, 2)] for k, (x, y) in self.marks.items()},
         }
+
+    # -- marked places, and the way back to them
+
+    def mark(self, name: str = "mark") -> None:
+        """Remember where the person is now."""
+        self.marks[name] = (self.x, self.y)
+
+    def way_to(self, name: str = "mark") -> tuple[float, float | None, str] | None:
+        """How far the marked place is, its direction relative to where the person faces (degrees,
+        clockwise; None without a compass), and its compass direction. None when not marked."""
+        if name not in self.marks:
+            return None
+        mx, my = self.marks[name]
+        dx, dy = mx - self.x, my - self.y
+        bearing = math.degrees(math.atan2(dx, dy)) % 360.0
+        turn = None if self.heading is None else (bearing - self.heading) % 360.0
+        return math.hypot(dx, dy), turn, COMPASS[round(bearing / 45.0) % 8]
+
+    # -- the walk, to keep
+
+    def points(self) -> list[tuple[float, float, str, float | None]]:
+        """The path with the current position: x, y, source, time."""
+        return list(self.path) + [(self.x, self.y, self.source, self.t)]
 
     # -- inside
 
@@ -304,17 +330,33 @@ class Track:
 
     def _extend(self, now: float) -> None:
         """Add the position to the path when it has moved far enough from the last point."""
-        lx, ly, _ = self.path[-1]
+        lx, ly, _, _ = self.path[-1]
         moved = math.hypot(self.x - lx, self.y - ly)
         if moved >= self.path_every_m:
             self.distance_m += moved
-            self.path.append((self.x, self.y, self.source))
+            self.path.append((self.x, self.y, self.source, now))
             self._recent.append((now, self.distance_m))
 
     def _shift(self, lat: float, lon: float, e: float, n: float) -> tuple[float, float]:
         lat2 = lat + math.degrees(n / EARTH_R)
         lon2 = lon + math.degrees(e / (EARTH_R * math.cos(math.radians(lat))))
         return lat2, lon2
+
+
+def way_text(way: tuple[float, float | None, str] | None, name: str = "mark") -> str:
+    """The way to a marked place, as the user hears it. The direction is a clock face, 12 o'clock
+    straight ahead, the way orientation and mobility teaching gives directions; without a compass
+    it is the compass direction."""
+    if way is None:
+        return f"No {name} yet. Say mark this place first."
+    distance, turn, compass = way
+    if distance < 2.0:
+        return f"You are at the {name}."
+    metres = f"{distance:.0f} metres"
+    if turn is None:
+        return f"The {name} is {metres} to the {compass}."
+    hour = round(turn / 30.0) % 12 or 12
+    return f"The {name} is {metres} away, at {hour} o'clock."
 
 
 class Navigator:
@@ -344,3 +386,82 @@ class Navigator:
 
     def view(self, now: float) -> dict:
         return self.track.view(now)
+
+
+# ---- a walk to keep: GPX for map apps, GeoJSON for anything else
+
+
+def _iso(wall: float | None) -> str | None:
+    import datetime as dt
+
+    if wall is None:
+        return None
+    return dt.datetime.fromtimestamp(wall, dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def to_gpx(track: Track, wall_of=lambda t: None) -> str | None:
+    """The walk as GPX 1.1, with the marks as waypoints. None until a GPS fix has tied the track
+    to the earth: GPX needs latitude and longitude. wall_of turns the track's clock into Unix
+    time."""
+    from xml.sax.saxutils import escape
+
+    if track.origin is None:
+        return None
+    pts = []
+    for x, y, src, t in track.points():
+        lat, lon = track._shift(*track.origin, x, y)
+        when = _iso(wall_of(t)) if t is not None else None
+        time = f"<time>{when}</time>" if when else ""
+        pts.append(f'<trkpt lat="{lat:.7f}" lon="{lon:.7f}">{time}<type>{src}</type></trkpt>')
+    wpts = []
+    for name, (x, y) in track.marks.items():
+        lat, lon = track._shift(*track.origin, x, y)
+        wpts.append(f'<wpt lat="{lat:.7f}" lon="{lon:.7f}"><name>{escape(name)}</name></wpt>')
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<gpx version="1.1" creator="MANA" xmlns="http://www.topografix.com/GPX/1/1">\n'
+        + "".join(w + "\n" for w in wpts)
+        + "<trk><name>MANA walk</name><trkseg>\n"
+        + "".join(p + "\n" for p in pts)
+        + "</trkseg></trk>\n</gpx>\n"
+    )
+
+
+def to_geojson(track: Track, wall_of=lambda t: None) -> dict:
+    """The walk as GeoJSON: a line and a point per mark. With a GPS fix the coordinates are
+    longitude and latitude, as GeoJSON wants; without one they are metres east and north of the
+    start, and the collection says so ("crs_note"), since a walk indoors never had a fix."""
+    geo = track.origin is not None
+
+    def where(x, y):
+        if not geo:
+            return [round(x, 2), round(y, 2)]
+        lat, lon = track._shift(*track.origin, x, y)
+        return [round(lon, 7), round(lat, 7)]
+
+    pts = track.points()
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [where(x, y) for x, y, _, _ in pts]},
+            "properties": {
+                "name": "MANA walk",
+                "distance_m": round(track.distance_m, 1),
+                "steps": track.steps,
+                "sources": [s for _, _, s, _ in pts],
+                "times": [_iso(wall_of(t)) if t is not None else None for _, _, _, t in pts],
+            },
+        }
+    ]
+    for name, (x, y) in track.marks.items():
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": where(x, y)},
+                "properties": {"name": name},
+            }
+        )
+    out = {"type": "FeatureCollection", "features": features}
+    if not geo:
+        out["crs_note"] = "metres east and north of the start: no GPS fix during this walk"
+    return out
