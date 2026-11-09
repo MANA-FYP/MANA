@@ -46,7 +46,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, Source  # noqa: E402
 
-from demo import caregiver, navigation, speech, vision  # noqa: E402
+from demo import caregiver, navigation, recording, speech, vision  # noqa: E402
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -86,6 +86,7 @@ def build_app(
     depth=None,
     mount=None,
     depth_ground=False,
+    recorder=None,
 ) -> web.Application:
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
@@ -101,6 +102,7 @@ def build_app(
     app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["snapshot"] = None  # the last tick's state, for /api/status
+    app["recorder"] = recorder  # keeps what the phone sends (#89), or None
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard_page)
@@ -151,9 +153,14 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
     try:
         async for msg in ws:
             app["live"]["phone_seen"] = app["mw"].clock()
+            rec = app["recorder"]
             if msg.type == WSMsgType.TEXT:
+                if rec is not None:
+                    rec.text(msg.data)
                 await on_text(app, ws, msg.data)
             elif msg.type == WSMsgType.BINARY:
+                if rec is not None:
+                    rec.binary(msg.data)
                 await on_binary(app, msg.data)
     finally:
         app["phones"].discard(ws)
@@ -540,6 +547,8 @@ async def stop_loop(app: web.Application) -> None:
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
+    if app["recorder"] is not None:
+        app["recorder"].close()
 
 
 # ---- command line
@@ -564,6 +573,8 @@ def main(argv=None) -> None:
                    help="metres from the floor to the camera, as it is held")  # fmt: skip
     p.add_argument("--camera-fov", type=float, default=66.0,
                    help="degrees across the long side of the picture")  # fmt: skip
+    p.add_argument("--record", metavar="FOLDER",
+                   help="keep what the phone sends, to play with demo.replay")  # fmt: skip
     p.add_argument("--on-foot", action="store_true",
                    help="the phone is carried by a person walking, not on the device")  # fmt: skip
     p.add_argument("--directions", action="store_true",
@@ -583,8 +594,10 @@ def main(argv=None) -> None:
         depth,
         mount,
         depth_ground=a.depth_ground,
+        recorder=recording.Recorder(a.record) if a.record else None,
     )
-
+    if a.record:
+        print(f"recording the phone into {a.record}")
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
     print(f"caregiver: http://localhost:{a.port}/caregiver   (read-only)")
