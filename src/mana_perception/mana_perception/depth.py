@@ -414,3 +414,36 @@ def read_ground(
     (REP 103: nose down is positive; 0 when unknown)."""
     seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
     return classify(profile(depth, seen_by, settings), settings, chair_pitch_rad)
+
+
+def floor_pitch(
+    depth: np.ndarray,
+    cam: Camera,
+    rows_share: float = 0.15,
+    strip: float = 0.3,
+    residual: float = 0.01,
+    height_tol_m: float = 0.25,
+) -> float | None:
+    """The chair's own pitch from the floor in the bottom rows of a 3D camera's image, for when
+    the IMU is lost (#156): on a plane, 1/depth is a straight line in the image row,
+    1/z = (cos(t) * yn + sin(t)) / h, which gives the camera's tilt t and height h above that
+    plane. The chair's pitch is t less the mounting tilt (REP 103: nose down is positive).
+
+    None unless the bottom rows are one plane (within `residual`) at about the camera's mounting
+    height (within `height_tol_m`): a step down already under the bottom rows would otherwise be
+    taken for the floor, and the drop beyond it missed. For true depth only: a monocular model's
+    depth bends the plane (on real phone frames its tilt was up to 17 degrees off)."""
+    rows, cols = depth.shape
+    v = np.arange(rows - max(3, int(rows * rows_share)), rows)
+    u = slice(int(cols * (0.5 - strip / 2)), int(cols * (0.5 + strip / 2)))
+    z = np.nanmedian(np.where(np.isfinite(depth[v, u]), depth[v, u], np.nan), axis=1)
+    ok = np.isfinite(z) & (z > 0)
+    if ok.sum() < 3:
+        return None
+    yn, inv = (v[ok] - cam.cy) / cam.fy, 1.0 / z[ok]
+    a, b = np.polyfit(yn, inv, 1)
+    if np.sqrt(np.mean((inv - (a * yn + b)) ** 2)) / np.mean(inv) > residual:
+        return None
+    if abs(1.0 / math.hypot(a, b) - cam.height_m) > height_tol_m:
+        return None
+    return math.atan2(b, a) - cam.pitch_rad

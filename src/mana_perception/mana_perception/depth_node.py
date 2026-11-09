@@ -19,8 +19,10 @@ Parameters:
   rate_hz           most reports per second; extra frames are skipped (default 10.0)
   trust             trust given to a reading (default 0.9); UNKNOWN is always sent with trust 0
   motion_max_age_s  a motion report older than this (by its header stamp, as the core ages it) is
-                    not used, and the tilt is the mounting's alone (default 0.5, as max_age_s);
-                    an untrusted or NaN report clears the pitch
+                    not used (default 0.5, as max_age_s); an untrusted or NaN report clears the
+                    pitch. Without a pitch from motion (the IMU lost), the chair's pitch comes
+                    from the floor plane under the camera when the bottom rows are one, at about
+                    the mounting height (#156); else the tilt is the mounting's alone
 """
 
 import rclpy
@@ -64,12 +66,17 @@ class DepthNode(Node):
         at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
         self.chair_pitch = (float(m.pitch_rad), at)
 
-    def pitch_now(self, now: Time) -> float:
-        """The chair's pitch if a recent motion report gave it, else 0: the mounting tilt alone."""
-        if self.chair_pitch is None:
-            return 0.0
-        pitch, at = self.chair_pitch
-        return pitch if (now - at).nanoseconds / 1e9 <= self.motion_max_age_s else 0.0
+    def pitch_now(self, now: Time, image=None) -> float:
+        """The chair's pitch if a recent motion report gave it. Else, with the IMU lost, from the
+        floor plane in the depth image itself: on the stairs a pitched chair with the mounting
+        tilt alone read the level top as a drop under it, and stopped there for good (#156).
+        Else 0: the mounting tilt alone."""
+        if self.chair_pitch is not None:
+            pitch, at = self.chair_pitch
+            if (now - at).nanoseconds / 1e9 <= self.motion_max_age_s:
+                return pitch
+        floor = None if image is None else dp.floor_pitch(image, self.cam)
+        return 0.0 if floor is None else floor
 
     def warn_once(self, text: str) -> None:
         if text not in self.warned:
@@ -88,7 +95,7 @@ class DepthNode(Node):
             self.warn_once(f"depth encoding {m.encoding!r} is not supported; use 32FC1 or 16UC1")
             return
         self.last = now
-        r = dp.read_ground(image, self.cam, self.settings, self.pitch_now(now))
+        r = dp.read_ground(image, self.cam, self.settings, self.pitch_now(now, image))
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,

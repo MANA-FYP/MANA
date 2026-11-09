@@ -397,3 +397,43 @@ def test_a_drop_whose_edge_runs_at_an_angle_across_the_path_is_still_a_fall():
     r = dp.read_ground(image, cam)
     assert r.ground in (dp.DROP, dp.STAIRS_DOWN)
     assert r.distance_m <= 1.15
+
+
+# ---- the chair's pitch from the floor plane, for when the IMU is lost (#156)
+
+
+def pitched(height_m, pitch_deg):
+    """The camera as a chair pitched pitch_deg (REP 103: nose down positive) carries it."""
+    return dp.Camera(
+        CAM.fx, CAM.fy, CAM.cx, CAM.cy, height_m, CAM.pitch_rad + math.radians(pitch_deg)
+    )
+
+
+@pytest.mark.parametrize("height_m, pitch_deg", [(1.0, 0), (0.8, -27), (0.9, -15), (1.05, 10)])
+def test_the_floor_plane_gives_the_chairs_pitch(height_m, pitch_deg):
+    image = render(flat, cam=pitched(height_m, pitch_deg))
+    assert math.degrees(dp.floor_pitch(image, CAM)) == pytest.approx(pitch_deg, abs=0.5)
+
+
+def test_a_chair_halfway_up_stairs_without_its_imu_does_not_read_a_drop_under_it():
+    # Gazebo's imu_lost: 27 degrees nose up, the camera 0.8 m above the top; with the mounting
+    # tilt alone that read as a drop at 0 m, and the core held its stop for good (#156)
+    image = render(flat, cam=pitched(0.8, -27))
+    pitch = dp.floor_pitch(image, CAM)
+    assert dp.read_ground(image, CAM, dp.DEFAULTS, pitch).ground not in (dp.DROP, dp.STAIRS_DOWN)
+
+
+@pytest.mark.parametrize("ground", [stairs(0.3, 0.17), step(0.8, -1.0)])
+def test_stairs_or_a_drop_ahead_leave_the_floor_under_the_camera_level(ground):
+    assert math.degrees(dp.floor_pitch(render(ground), CAM)) == pytest.approx(0.0, abs=0.5)
+
+
+def test_over_a_lower_floor_there_is_no_pitch_so_the_drop_is_still_read():
+    # the bottom rows on a floor 0.4 m lower: not the camera's height, so not taken for the floor
+    image = render(step(-5.0, -0.4))
+    assert dp.floor_pitch(image, CAM) is None
+    assert dp.read_ground(image, CAM).ground == dp.DROP
+
+
+def test_no_floor_in_the_bottom_rows_gives_no_pitch():
+    assert dp.floor_pitch(np.full((ROWS, COLS), np.inf), CAM) is None

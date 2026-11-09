@@ -242,3 +242,17 @@ Measured in Gazebo, all ten scenarios, twice. Second run (the one in [`results.m
 
 Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): 35 of 39 marks, the same marks met as on `main`. The wait showed in `stop` for its first 0.3 s, while only one sensor had reported. In this run the camera reported first in `picture`, so the race did not come up; the unit tests feed the 3D camera first.
 
+## D11. With the IMU lost, the 3D camera takes the chair's pitch from the floor (#156)
+
+**Chosen:** `depth_node` reads the ground with the chair's pitch added to the camera's mounting tilt. The pitch comes from the IMU's motion report. When there is none (the IMU lost, or a report older than `motion_max_age_s`), the pitch now comes from the floor plane in the bottom rows of the depth image (`mana_perception.depth.floor_pitch`). On a plane, 1/depth is a straight line in the image row, and its slope and offset give the camera's tilt and height above that plane. The fit is used only when the bottom rows are one plane (within 1 %) at about the camera's mounting height (within 0.25 m). Otherwise the tilt is the mounting's alone, as before. Only the pitch is taken from the fit, never the height, so a step down still reads as one.
+
+**Why.** In Gazebo's `imu_lost`, the IMU drops out halfway up the stairs. The run captured the moment the chair stopped: ground truth put it at x = 22.03 m, pitched 27.3° nose up, with its tracks over the top lip. Read with the mounting tilt alone, the depth image was a drop at 0 m. The core stopped for it, and because the chair had stopped, it stayed pitched and the false drop never cleared. It sat there from 14.8 s to the end of the 90 s run. On that same image, the floor fit gives a chair pitch of −27.3°, the ground truth's, with a residual under 0.01 %.
+
+| Option | Problem |
+|---|---|
+| Keep the mounting tilt alone | A chair halfway up stairs reads the top as a drop under it and stops for good |
+| Report the depth as untrusted without the IMU | A real drop would then be missed too |
+| **The floor plane gives the pitch, within bounds** | It needs true depth: a monocular model's depth bends the plane (up to 17° off on real phone frames, `demo/README.md`), so the phone demo does not use it |
+
+Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): `imu_lost` meets all four marks. "On tracks until the ground is level" is shown at 18.2 s, and the chair reaches the end of the run (6.82 m, as `stairs` does) with no mishap. Gazebo meets 36 of 39 marks; the three left are #118. On synthetic depth, the fit gives the pitch to within 0.5° from 27° nose up to 10° nose down. Stairs or a drop ahead leave it at 0°, and over a floor 0.4 m lower it gives no pitch, so the drop is still read.
+

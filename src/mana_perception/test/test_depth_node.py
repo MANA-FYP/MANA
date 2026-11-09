@@ -76,7 +76,8 @@ def test_stairs_in_a_depth_frame_are_reported_by_the_3d_camera(ros, stamped):
 @pytest.mark.parametrize("with_motion", [True, False], ids=["pitch-known", "no-motion"])
 def test_the_chairs_pitch_from_motion_keeps_level_ground_level(ros, with_motion):
     """The chair is pitched 0.2 rad nose up on level ground. Read with the mounting tilt alone,
-    the ground ahead is a curb at 0 m, which would stop the chair."""
+    the ground ahead is a curb at 0 m, which would stop the chair. With no motion report (the IMU
+    lost) the pitch comes from the floor plane under the camera instead (#156)."""
     node, probe = DepthNode(), rclpy.create_node("probe")
     reports = []
     probe.create_subscription(GroundReport, "ground", reports.append, 10)
@@ -106,7 +107,6 @@ def test_the_chairs_pitch_from_motion_keeps_level_ground_level(ros, with_motion)
 
     assert reports, "no ground report was published"
     no_hazard = (GroundReport.FLAT, GroundReport.RAMP)  # against the chair's plane: a slope
-    if with_motion:
-        assert reports[-1].ground in no_hazard
-    else:  # the mounting tilt alone reads the level ground ahead as a step
-        assert all(r.ground not in no_hazard for r in reports)
+    assert reports[-1].ground in no_hazard
+    # read with the mounting tilt alone, the same image is a hazard: the pitch is what fixes it
+    assert dp.read_ground(metres, CAM).ground not in no_hazard
