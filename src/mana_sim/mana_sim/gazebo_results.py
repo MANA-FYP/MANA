@@ -18,11 +18,8 @@ from mana_core.scenarios import SCENARIOS, check
 from mana_sim import gazebo_scenarios as gs
 
 # the issue of a mark that is missed in Gazebo for a known reason
-KNOWN_ISSUES = {
-    "Stops before the drop": 118,
-    "Stops before the person": 118,
-}
-MOVED_ON = re.compile(r"moved on ([\d.]+) m, to ([\d.]+) m before")
+KNOWN_ISSUES: dict[str, int] = {}
+LET_GO = re.compile(r"let the stop go at ([\d.]+) s, ([\d.]+) m before")
 
 
 def mark_results(scenario, trace) -> dict[str, tuple[bool, str]]:
@@ -60,14 +57,14 @@ def results_markdown(traces: Path) -> str:
 def why_marks_fail(failing: list[tuple[str, str]]) -> str:
     """What is known about the marks missed in these traces, with the numbers of the traces."""
     lines = []
-    moved = [tuple(map(float, m.groups())) for _, said in failing if (m := MOVED_ON.search(said))]
-    if moved:
-        on, before = [v for v, _ in moved], [v for _, v in moved]
+    let_go = [tuple(map(float, m.groups())) for _, said in failing if (m := LET_GO.search(said))]
+    if let_go:
+        at, before = [t for t, _ in let_go], [v for _, v in let_go]
         lines.append(
-            f'- **#118:** "Stops before the ..." counts the chair moving on after the first stop'
-            f" as a released stop. In these runs it moved on {min(on):.2f} to {max(on):.2f} m"
-            f", and stood {min(before):.2f} to"
-            f" {max(before):.2f} m before the hazard ({len(moved)} marks)."
+            f'- **Released stops:** "Stops before the ..." is missed when the core lets the stop go'
+            f" after the first one. In these runs it let go at {min(at):.1f} to {max(at):.1f} s"
+            f", with the chair {min(before):.2f} to {max(before):.2f} m before the hazard"
+            f" ({len(let_go)} marks)."
         )
     wrapped = [textwrap.fill(line, 100, subsequent_indent="  ") for line in lines]
     return "\n".join(wrapped) or "- none"

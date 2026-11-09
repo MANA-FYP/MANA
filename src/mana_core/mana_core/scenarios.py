@@ -185,9 +185,16 @@ def stops_before(at_m: float, what: str) -> Mark:
         gap = at_m - tr.end_m  # the closest it came: the chair never goes back
         if tr.mishaps or first is None or gap <= 0 or not tr.samples[-1].stop:
             return False, f"did not stop for the {what}"
-        if (on := tr.end_m - first.x_m) > 0:  # the stop was released for a moment
-            return False, f"stopped, then moved on {on:.2f} m, to {gap:.2f} m before the {what}"
-        return True, f"stopped {gap:.2f} m before the {what}"
+        # a release is the core letting go of the stop; rolling on while the brakes take hold is
+        # not one (#118)
+        off = next((s for s in tr.samples if s.t > first.t and not s.stop), None)
+        if off is not None:
+            return (
+                False,
+                f"stopped, then let the stop go at {off.t:.1f} s, {gap:.2f} m before the {what}",
+            )
+        rolled = f", after rolling {on:.2f} m" if (on := tr.end_m - first.x_m) >= 0.005 else ""
+        return True, f"stopped {gap:.2f} m before the {what}{rolled}"
 
     return Mark(f"Stops before the {what}", test)
 
