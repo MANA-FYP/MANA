@@ -98,7 +98,8 @@ python -m demo.field recordings/road-1 --distance 120 --steps 160 --place "campu
 `--loop`: the walk ended where it started, so the gap between the track's end and start is its
 error. `--distance`: the real length (a tape, or a route measured on a map). `--steps`: the steps
 you counted. It prints the steps and the distance against those, the gap, and a row for the table
-in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS).
+in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS). The six walks
+that give the field numbers, with what to note on the spot, are in `docs/field-walks.md`.
 
 ## The phone screen
 
