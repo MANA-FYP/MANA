@@ -67,6 +67,7 @@ python -m demo.replay recordings/stairs-1 --speed 4     # four times as fast
 
 The folder has `session.jsonl`, one line per message from the phone with its time, and each
 camera frame as a JPEG in `frames/`. The microphone's raw sound is not kept; the words heard are.
+A folder that already holds a recording is refused, so a restart cannot overwrite one.
 Steps are counted on the phone's own clock, so a faster replay walks the same path. A recorded
 40 s walk (1,324 messages, 207 frames, 4.8 MB) played back into a fresh server ended on the same
 step count and GPS position as when it was live. The frames show faces: `recordings/` is not in

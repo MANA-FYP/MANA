@@ -47,6 +47,28 @@ def test_the_recorder_keeps_messages_and_frames_but_not_audio(tmp_path):
     assert (tmp_path / "walk/frames/000001.jpg").read_bytes() == jpeg()
 
 
+def test_a_second_recording_into_the_same_folder_is_refused(tmp_path):
+    from demo.recording import Recorder, read
+
+    first = Recorder(tmp_path / "walk")
+    first.binary(b"\x01" + jpeg((10, 10, 10)))
+    first.close()
+    with pytest.raises(FileExistsError):
+        Recorder(tmp_path / "walk")
+    assert read(tmp_path / "walk") == [{"t": 0.0, "frame": "frames/000001.jpg"}]
+    assert (tmp_path / "walk/frames/000001.jpg").read_bytes() == jpeg((10, 10, 10))
+
+
+def test_the_server_refuses_a_folder_that_has_a_recording(tmp_path, capsys):
+    from demo import server
+    from demo.recording import Recorder
+
+    Recorder(tmp_path / "walk").close()
+    with pytest.raises(SystemExit):
+        server.main(["--record", str(tmp_path / "walk"), "--no-detector"])
+    assert "already has a recording" in capsys.readouterr().err
+
+
 def test_a_walk_recorded_by_the_server_plays_back_the_same_into_a_fresh_one(tmp_path):
     from aiohttp.test_utils import TestClient, TestServer
 

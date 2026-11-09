@@ -15,19 +15,22 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 FRAME_TAG = 1  # the binary tag of a camera frame, as in phone.js
 
 
 class Recorder:
-    """Writes what the phone sends into a recording folder."""
+    """Writes what the phone sends into a new recording folder. A folder that already holds a
+    recording is refused (FileExistsError): a second session would overwrite its frames."""
 
     def __init__(self, folder: Path | str, clock=time.monotonic):
         self.folder = Path(folder)
         (self.folder / "frames").mkdir(parents=True, exist_ok=True)
         self.clock, self.t0, self.frames = clock, None, 0
-        self.lines = (self.folder / "session.jsonl").open("a", encoding="utf-8", newline="\n")
+        self.lines = (self.folder / "session.jsonl").open("x", encoding="utf-8", newline="\n")
+        self.disk = ThreadPoolExecutor(1)  # frames are written off the message loop, in order
 
     def _t(self) -> float:
         now = self.clock()
@@ -48,7 +51,7 @@ class Recorder:
             return
         self.frames += 1
         name = f"frames/{self.frames:06d}.jpg"
-        (self.folder / name).write_bytes(data[1:])
+        self.disk.submit((self.folder / name).write_bytes, data[1:])
         self._write({"t": self._t(), "frame": name})
 
     def _write(self, line: dict) -> None:
@@ -56,6 +59,7 @@ class Recorder:
         self.lines.flush()
 
     def close(self) -> None:
+        self.disk.shutdown(wait=True)  # every frame on disk
         self.lines.close()
 
 

@@ -581,6 +581,10 @@ def main(argv=None) -> None:
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
 
+    try:  # before the models, which take a while to load
+        recorder = recording.Recorder(a.record) if a.record else None
+    except FileExistsError:
+        p.error(f"{a.record} already has a recording: give a new folder")
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
@@ -594,7 +598,7 @@ def main(argv=None) -> None:
         depth,
         mount,
         depth_ground=a.depth_ground,
-        recorder=recording.Recorder(a.record) if a.record else None,
+        recorder=recorder,
     )
     if a.record:
         print(f"recording the phone into {a.record}")
