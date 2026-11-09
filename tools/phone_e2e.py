@@ -22,6 +22,7 @@ import base64
 import json
 import math
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -82,8 +83,25 @@ class Tab:
         return {}
 
 
-async def chrome(session, port: int, *flags: str):
-    """A headless Chrome on this debugging port, and its first page."""
+def free_port() -> int:
+    """A port no one listens on. A fixed one could reach a Chrome left from an earlier run, which
+    has that run's flags, not this one's."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def stop(proc) -> None:
+    """Chrome and the processes it started."""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        proc.kill()
+
+
+async def chrome(session, *flags: str):
+    """A headless Chrome on a debugging port of its own, and its first page."""
+    port = free_port()
     proc = subprocess.Popen(
         [find_chrome(), "--headless=new", f"--remote-debugging-port={port}",
          f"--user-data-dir={tempfile.mkdtemp()}", *flags, "about:blank"],
@@ -96,7 +114,7 @@ async def chrome(session, port: int, *flags: str):
         except Exception:  # not up yet
             await asyncio.sleep(0.2)
     else:
-        proc.kill()
+        stop(proc)
         raise SystemExit("Chrome did not start")
     page = next(t for t in tabs if t["type"] == "page")
     return proc, await session.ws_connect(page["webSocketDebuggerUrl"], max_msg_size=0)
@@ -134,10 +152,11 @@ async def run(a) -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     async with aiohttp.ClientSession() as s:
-        p1, w1 = await chrome(s, 9334, "--use-fake-ui-for-media-stream",
+        p1, w1 = await chrome(s, "--use-fake-ui-for-media-stream",
                               "--use-fake-device-for-media-stream",
                               f"--use-file-for-fake-video-capture={video}")  # fmt: skip
-        p2, w2 = await chrome(s, 9336)
+        # --offline: the dashboard reaches nothing but localhost, which skips the proxy
+        p2, w2 = await chrome(s, *(["--proxy-server=http://127.0.0.1:9"] if a.offline else []))
         try:
             phone, dash = Tab(w1), Tab(w2)
             await phone.call("Emulation.setDeviceMetricsOverride", width=412, height=915,
@@ -190,8 +209,8 @@ async def run(a) -> int:
         finally:
             await w1.close()
             await w2.close()
-            p1.kill()
-            p2.kill()
+            stop(p1)
+            stop(p2)
     print(f"screenshots in {out}")
     return 0
 
@@ -206,6 +225,7 @@ def main(argv=None) -> int:
     p.add_argument("--lat", type=float, default=33.6425, help="where the walk starts")
     p.add_argument("--lon", type=float, default=72.9930)
     p.add_argument("--out", default="e2e", help="folder for the screenshots")
+    p.add_argument("--offline", action="store_true", help="the dashboard has no internet")
     a = p.parse_args(argv)
     if find_chrome() is None:
         print("Google Chrome is needed", file=sys.stderr)

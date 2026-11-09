@@ -165,6 +165,12 @@ the USB cable, and GPS works without a network.
   steps, and the path turns from blue (GPS) to orange (steps). The first good fix ties the path to
   latitude and longitude.
 
+**Street map.** Tick *Street map*, and once a GPS fix has tied the path to the earth and the
+laptop has internet, the path is drawn on the OpenStreetMap streets around it, at the same scale
+(#130). It is off at first because each map tile is fetched from openstreetmap.org, which then
+learns roughly where the person is. Without internet the tiles do not load and the plain grid
+stays; the box works the same either way, and a missing tile is tried again every 30 s.
+
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
 place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA says how far
 it is and which way as a clock face, 12 o'clock straight ahead, as orientation and mobility
@@ -271,4 +277,5 @@ screenshots:
 ```bash
 python -m demo.server --depth --weights yoloe-26s-mana.pt --imgsz 480 --on-foot
 python tools/phone_e2e.py --video stairs.mp4 --seconds 60 --out e2e
+python tools/phone_e2e.py --video stairs.mp4 --offline     # the dashboard with no internet
 ```
