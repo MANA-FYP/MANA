@@ -1003,7 +1003,9 @@ def started(*reports, sensors=2):
 def test_the_first_sensor_up_alone_does_not_set_full_speed():
     # the 3D camera's level ground came first; the camera has not reported yet
     d = started(ground(DEPTH, Ground.FLAT)).decision
-    assert (d.speed_limit, d.reason, d.mode) == (LIM.slow, WAITING, Mode.WHEELS)
+    assert (d.speed_limit, d.mode) == (LIM.slow, Mode.WHEELS)
+    # it says which sensors are up, so a helper knows what to check (Waqas, #152)
+    assert d.reason == f"{WAITING} (1 of 2 up: the 3D camera), slowing down"
 
 
 def test_once_both_have_reported_it_drives_on_at_full_speed():
@@ -1019,7 +1021,8 @@ def test_a_sensor_that_has_reported_counts_even_when_its_report_is_old_or_untrus
 
 def test_the_classifier_and_the_detector_are_the_camera_not_a_second_sensor():
     reports = (ground(Source.CLASSIFIER, Ground.FLAT), ground(Source.DETECTOR, Ground.FLAT))
-    assert started(*reports).decision.reason == WAITING
+    reason = started(*reports).decision.reason
+    assert reason == f"{WAITING} (1 of 2 up: the camera), slowing down"
 
 
 def test_a_more_telling_reason_to_slow_down_comes_first():

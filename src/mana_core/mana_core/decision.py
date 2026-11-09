@@ -83,7 +83,12 @@ class Priority(IntEnum):
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 NO_GROUND = "Ground sensors not available, slowing down"
-WAITING = "Waiting for the ground sensors, slowing down"
+WAITING = "Waiting for the ground sensors"  # then which are up, as _waiting_reason says
+SENSOR_NAMES = {
+    Source.CAMERA: "the camera",
+    Source.DEPTH_CAMERA: "the 3D camera",
+    Source.LIDAR: "the lidar",
+}
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
@@ -486,8 +491,20 @@ class DecisionCore:
         """Fewer of the host's ground sensors have ever reported than it has: at start-up the 3D
         camera's level ground can come before the camera's stairs. The classifier and the
         detector are the camera, as in _confirmed_step."""
-        seen = {SENSOR_OF.get(source, source) for source in self.ground}
-        return len(seen) < self.mount.ground_sensors
+        return len(self._ground_sensors_up()) < self.mount.ground_sensors
+
+    def _ground_sensors_up(self) -> set:
+        return {SENSOR_OF.get(source, source) for source in self.ground}
+
+    def _waiting_reason(self) -> str:
+        """Which sensors are up, so the person or a helper knows what to check when one never
+        comes (Waqas, #152): "Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing
+        down". The core knows how many to expect, not which, so it names those that are up."""
+        up = sorted(SENSOR_NAMES.get(s, s.name.lower()) for s in self._ground_sensors_up())
+        return (
+            f"{WAITING} ({len(up)} of {self.mount.ground_sensors} up: {', '.join(up)}),"
+            " slowing down"
+        )
 
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
@@ -626,7 +643,9 @@ class DecisionCore:
                 branch(
                     "waiting",
                     self._waiting_for_ground,
-                    lambda: self._set(Mode.WHEELS, False, lim.slow, WAITING, Priority.WARNING),
+                    lambda: self._set(
+                        Mode.WHEELS, False, lim.slow, self._waiting_reason(), Priority.WARNING
+                    ),
                 ),
                 branch(
                     "no alert link",
