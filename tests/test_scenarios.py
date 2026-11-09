@@ -63,6 +63,14 @@ def test_the_gazebo_world_names_only_the_scenarios_that_play_there(capsys):
     assert "not in Gazebo: entry" in capsys.readouterr().out
 
 
+def test_the_options_of_one_world_are_refused_with_the_other(capsys):
+    assert main(["--rerun"]) == 2 and main(["--traces", "here"]) == 2
+    assert "cannot be used with --world scripted" in capsys.readouterr().out
+    assert main(["--world=gazebo", "--compare"]) == 2
+    assert "--compare cannot be used with --world gazebo" in capsys.readouterr().out
+    assert main(["--world=mars"]) == 2
+
+
 def test_a_gazebo_run_that_could_not_be_played_fails_and_the_next_one_is_played(
     monkeypatch, tmp_path, capsys
 ):

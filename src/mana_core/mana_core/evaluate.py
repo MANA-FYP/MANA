@@ -147,17 +147,18 @@ def gazebo(names: list[str], traces: str, rerun: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    world, traces = "scripted", "gazebo_traces"
-    for option in ("--world", "--traces"):
+    given = sys.argv[1:] if argv is None else argv
+    args = [p for a in given for p in (a.split("=", 1) if a.startswith("--") else [a])]
+    values = {"--world": "scripted", "--traces": None}
+    for option in values:
         if option in args:
             i = args.index(option)
             if i + 1 >= len(args):
                 print(f"{option} needs a value")
                 return 2
-            value = args[i + 1]
+            values[option] = args[i + 1]
             del args[i : i + 2]
-            world, traces = (value, traces) if option == "--world" else (world, value)
+    world, traces = values["--world"], values["--traces"]
     if world not in ("scripted", "gazebo"):
         print(f"unknown world {world}; use scripted or gazebo")
         return 2
@@ -165,9 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     if bad := [o for o in options if o not in ("--baseline", "--compare", "--rerun")]:
         print(f"unknown option {', '.join(bad)}; use --baseline, --compare, --world or --traces")
         return 2
+    only = {"gazebo": ("--baseline", "--compare"), "scripted": ("--rerun", "--traces")}
+    if wrong := [o for o in only[world] if o in options or (o == "--traces" and traces)]:
+        print(f"{', '.join(wrong)} cannot be used with --world {world}")
+        return 2
     names = [a for a in args if not a.startswith("--")]
     if world == "gazebo":
-        return gazebo(names, traces, "--rerun" in args)
+        return gazebo(names, traces or "gazebo_traces", "--rerun" in args)
     names = names or list(SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
