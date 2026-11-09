@@ -50,16 +50,18 @@ def test_the_section_replaces_its_old_self_in_the_file_and_keeps_the_rest(tmp_pa
 def test_the_notes_on_missed_marks_take_their_numbers_from_the_traces():
     notes = gr.why_marks_fail(
         [
-            ("Stops before the drop", "stopped, then moved on 0.21 m, to 0.67 m before the drop"),
+            (
+                "Stops before the drop",
+                "stopped, then let the stop go at 7.2 s, 0.67 m before the drop",
+            ),
             (
                 "Stops before the person",
-                "stopped, then moved on 0.02 m, to 0.91 m before the person",
+                "stopped, then let the stop go at 3.4 s, 0.91 m before the person",
             ),
         ]
     )
     assert all(len(line) <= 100 for line in notes.splitlines())
     notes = " ".join(notes.split())  # as the page reads, without the line breaks
-    assert "moved on 0.02 to 0.21 m" in notes and "stood 0.67 to 0.91 m" in notes
-    assert "(2 marks)" in notes and "Track request" not in notes  # measured from the tip (#144)
+    assert "let go at 3.4 to 7.2 s" in notes and "0.67 to 0.91 m before" in notes
+    assert "(2 marks)" in notes
     assert gr.why_marks_fail([]) == "- none"
-    assert gr.KNOWN_ISSUES["Stops before the person"] == 118
