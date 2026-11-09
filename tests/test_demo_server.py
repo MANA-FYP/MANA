@@ -301,3 +301,32 @@ def test_the_dashboard_says_how_the_phone_is_carried():
         await snapshot_where(dash, lambda s: s["on_foot"] is False)
 
     run(with_clients(go))
+
+
+class SlowDetector:
+    """A detector that takes 1.5 s a frame, as on a busy laptop."""
+
+    def detect(self, jpeg):
+        import time
+
+        time.sleep(1.5)
+        return [], 64, 48
+
+
+def test_a_stop_from_the_phone_does_not_wait_for_the_detector():
+    async def go(client, phone, dash):
+        mw = client.app["mw"]
+        await phone.send_bytes(b"\x01" + jpeg())  # the detector is busy from here for 1.5 s
+        await asyncio.sleep(0.1)
+        assert client.app["live"]["busy"]
+        sent = asyncio.get_running_loop().time()
+        await phone.send_json({"type": "button", "name": "stop"})
+        for _ in range(100):
+            if mw.core.tick(mw.clock()).stop:
+                break
+            await asyncio.sleep(0.01)
+        waited = asyncio.get_running_loop().time() - sent
+        assert mw.core.tick(mw.clock()).stop and waited < 0.5  # not 1.4 s behind the detector
+        assert client.app["live"]["busy"]  # the detector was still running
+
+    run(with_clients(go, detector=SlowDetector()))
