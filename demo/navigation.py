@@ -182,6 +182,8 @@ class Track:
         self.distance_m = 0.0  # the length of the path
         self.path: deque = deque([(0.0, 0.0, self.NONE, None)], maxlen=path_points)  # x, y, src, t
         self.marks: dict[str, tuple[float, float]] = {}  # places the person marked, by name
+        self.added = 0  # path points added since the start, the first one not counted
+        self.marked_at: dict[str, int] = {}  # each mark's place in the path, as self.added then
         self.source = self.NONE
         self.last_gps_t: float | None = None
         self.last_step_t: float | None = None
@@ -293,8 +295,33 @@ class Track:
     # -- marked places, and the way back to them
 
     def mark(self, name: str = "mark") -> None:
-        """Remember where the person is now."""
+        """Remember where the person is now, and where that is in the path."""
         self.marks[name] = (self.x, self.y)
+        self.marked_at[name] = self.added
+
+    def route_back(self, name: str = "mark", near_m: float = 1.5, tolerance_m: float = 1.0):
+        """The way back to a marked place along the path walked, as legs (metres, bearing in
+        degrees), from where the person is now. Indoors the straight line goes through walls; the
+        path walked is known to be passable. Loops are cut where the path came back within near_m
+        of itself (into a room and out again), then the path is simplified into straight legs.
+        None when not marked, or when the path from the mark is no longer kept."""
+        if name not in self.marks:
+            return None
+        first = self.added + 1 - len(self.path)  # the place in the path of self.path[0]
+        since = self.marked_at[name] - first + 1
+        if since < 0:
+            return None
+        walked = [self.marks[name]] + [(x, y) for x, y, _, _ in list(self.path)[since:]]
+        back = _cut_loops([(self.x, self.y)] + walked[::-1], near_m)
+        points = _simplify(back, tolerance_m)
+        moves = []  # (east, north) of each leg; a bend of under 25 degrees is not a turn
+        for (x1, y1), (x2, y2) in zip(points, points[1:], strict=False):
+            east, north = x2 - x1, y2 - y1
+            if moves and _bend(moves[-1], (east, north)) < 25.0:
+                moves[-1] = (moves[-1][0] + east, moves[-1][1] + north)
+            elif east or north:
+                moves.append((east, north))
+        return [(math.hypot(e, n), math.degrees(math.atan2(e, n)) % 360.0) for e, n in moves]
 
     def way_to(self, name: str = "mark") -> tuple[float, float | None, str] | None:
         """How far the marked place is, its direction relative to where the person faces (degrees,
@@ -348,12 +375,95 @@ class Track:
         if moved >= self.path_every_m:
             self.distance_m += moved if walked else 0.0
             self.path.append((self.x, self.y, self.source, now))
+            self.added += 1
             self._recent.append((now, self.distance_m))
 
     def _shift(self, lat: float, lon: float, e: float, n: float) -> tuple[float, float]:
         lat2 = lat + math.degrees(n / EARTH_R)
         lon2 = lon + math.degrees(e / (EARTH_R * math.cos(math.radians(lat))))
         return lat2, lon2
+
+
+def _cut_loops(points: list, near_m: float) -> list:
+    """A stretch that left a point and came back within near_m of it (a room, a dead end) is
+    skipped. It counts as a loop only when the way round was more than three times near_m, so
+    the next points along, or the two sides of a corner, are not cut."""
+    along = [0.0]
+    for a, b in zip(points, points[1:], strict=False):
+        along.append(along[-1] + math.dist(a, b))
+    # a grid of near_m cells: a point within near_m is in the same cell or one of the 8 around,
+    # so each point looks at a few others, not all (the server waits for this; Waqas, #158)
+    cells: dict[tuple[int, int], list[int]] = {}
+    for k, (x, y) in enumerate(points):
+        cells.setdefault((math.floor(x / near_m), math.floor(y / near_m)), []).append(k)
+    out, i = [], 0
+    while i < len(points):
+        out.append(points[i])
+        cx, cy = math.floor(points[i][0] / near_m), math.floor(points[i][1] / near_m)
+        back = [
+            k
+            for dx in (-1, 0, 1)
+            for dy in (-1, 0, 1)
+            for k in cells.get((cx + dx, cy + dy), ())
+            if k > i
+            and math.dist(points[k], points[i]) <= near_m
+            and along[k] - along[i] > 3 * near_m
+        ]
+        i = max(back) if back else i + 1  # always forward: later points come after i
+    return out
+
+
+def _simplify(points: list, tolerance_m: float) -> list:
+    """Douglas-Peucker: the fewest points that keep the line within tolerance_m of all of them."""
+    if len(points) < 3:
+        return list(points)
+    (x1, y1), (x2, y2) = points[0], points[-1]
+    length = math.hypot(x2 - x1, y2 - y1)
+
+    def off(p):
+        if length == 0.0:
+            return math.dist(p, points[0])
+        return abs((x2 - x1) * (y1 - p[1]) - (x1 - p[0]) * (y2 - y1)) / length
+
+    far = max(range(1, len(points) - 1), key=lambda k: off(points[k]))
+    if off(points[far]) <= tolerance_m:
+        return [points[0], points[-1]]
+    return _simplify(points[: far + 1], tolerance_m)[:-1] + _simplify(points[far:], tolerance_m)
+
+
+def _bend(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """The angle in degrees between two moves (east, north)."""
+    turn = math.degrees(math.atan2(b[0], b[1]) - math.atan2(a[0], a[1])) % 360.0
+    return min(turn, 360.0 - turn)
+
+
+def _hour(degrees: float) -> int:
+    return round(degrees / 30.0) % 12 or 12
+
+
+def route_text(legs: list | None, heading: float | None, name: str = "mark") -> str | None:
+    """The way back along the path, as the user hears it: the first leg from where the person
+    faces, then the next turn from the way the first leg goes, as clock faces; compass directions
+    without a compass. None when there is no route or it is one straight leg: the straight line
+    says the same, more shortly."""
+    total = sum(d for d, _ in legs or ())
+    if not legs or len(legs) < 2 or total < 2.0:  # the straight line, or "You are at the mark"
+        return None
+    (d0, b0), rest = legs[0], legs[1:]
+    if heading is None:
+        first = f"{d0:.0f} metres to the {COMPASS[round(b0 / 45.0) % 8]}"
+    else:
+        first = f"{d0:.0f} metres at {_hour((b0 - heading) % 360.0)} o'clock"
+    text = f"Back along your path, the {name} is {total:.0f} metres: {first}"
+    if rest:
+        d1, b1 = rest[0]
+        if heading is None:
+            text += f", then {d1:.0f} metres to the {COMPASS[round(b1 / 45.0) % 8]}"
+        else:
+            text += f", then turn to {_hour((b1 - b0) % 360.0)} o'clock for {d1:.0f} metres"
+    if len(rest) > 1:
+        text += f", then {len(rest) - 1} more turn{'s' if len(rest) > 2 else ''}"
+    return text + "."
 
 
 def way_text(way: tuple[float, float | None, str] | None, name: str = "mark") -> str:
