@@ -227,7 +227,8 @@ runs). The first run downloads it (about 100 MB) from Hugging Face; after that i
 With the detector it gives the camera what it could not measure before (#131):
 
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
-  box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+  box, or the box height's estimate when that is nearer: under 2 m the depth read people 1.5
+  times too far on real walks, `docs/decisions.md` D12), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
   Stairs up rise into that from their second or third step, so while the detector sees stairs up,
   something from where they start to 1.5 m past it is taken to be the stairs, not an obstacle
   (#159). The stairs rule handles them, and the dashboard says "the stairs rise at ...".
