@@ -3,6 +3,8 @@
     python3 tools/fetch_sanpo.py --root datasets/sanpo                 # 40 train, 10 test sessions
     python3 tools/fetch_sanpo.py --root datasets/sanpo --train 5 --test 2 --every 20   # quick look
     python3 tools/fetch_sanpo.py --root /tmp/sanpo-masks --masks-only --count   # what is in it
+    python3 tools/fetch_sanpo.py --root /tmp/sanpo-masks --train -1 --test -1 --every 10 \\
+        --masks-only --sessions stairs --workers 16    # which sessions show stairs, how often
 
 The whole dataset is about 6 TB, mostly stereo video and depth. MANA trains a 2D detector on the
 left camera image, so for each chosen session this keeps only the left frames that have a
@@ -20,6 +22,11 @@ taken as complete and the next run fills the gaps.
 --count prints, for each "thing" class, how many objects and frames the masks on disk hold. Masks
 are RGB: red is the class id; green and blue hold the instance id (green looks like the high byte).
 With --masks-only the counts cost about 20 MB instead of 3 GB.
+
+--sessions CLASS prints, for each session whose masks show that class, the frames and objects of
+it, split by split. It is how #49 finds the sessions with stairs before fetching their images; one
+frame in 10 is enough for that, since a staircase stays in view for many frames.
+--workers sets how many files are fetched at once (the masks are many small files).
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 BUCKET = "gresearch"
@@ -131,28 +139,55 @@ def download(url: str, dest: Path, fetch=get) -> bool:
     return True
 
 
-def count_things(root: Path) -> tuple[Counter, Counter, int]:
-    """Objects and frames per "thing" class in the masks on disk, and the number of masks."""
+def things_in(path: Path, names: dict[int, str], things: set[int]) -> Counter:
+    """Objects per "thing" class in one mask, leaving out specks under MIN_PIXELS."""
     import numpy as np
     from PIL import Image
 
+    rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.int64)
+    ids = rgb[..., 0] * 65536 + rgb[..., 1] * 256 + rgb[..., 2]
+    values, sizes = np.unique(ids, return_counts=True)
+    found = Counter()
+    for value, size in zip(values.tolist(), sizes.tolist(), strict=True):
+        cls = value // 65536
+        if cls in things and size >= MIN_PIXELS:
+            found[names[cls]] += 1
+    return found
+
+
+def masks_on_disk(root: Path):
+    """(split, session, mask path) for every mask under root, in order, with the class tables."""
     names = {v: k for k, v in json.loads((root / "labelmap.json").read_text()).items()}
     kinds = json.loads((root / "labeltype.json").read_text())
     things = {i for i, n in names.items() if kinds.get(n) == "panoptic"}
-    objects, frames, masks = Counter(), Counter(), 0
-    for path in sorted(root.glob("*/*/*/segmentation_masks/*.png")):
-        rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.int64)
-        ids = rgb[..., 0] * 65536 + rgb[..., 1] * 256 + rgb[..., 2]
-        values, sizes = np.unique(ids, return_counts=True)
-        seen = set()
-        for value, size in zip(values.tolist(), sizes.tolist(), strict=True):
-            cls = value // 65536
-            if cls in things and size >= MIN_PIXELS:
-                objects[names[cls]] += 1
-                seen.add(names[cls])
-        frames.update(seen)
-        masks += 1
-    return objects, frames, masks
+    paths = sorted(root.glob("*/*/*/segmentation_masks/*.png"))
+    return names, things, [(p.parts[-5], p.parts[-4], p) for p in paths]
+
+
+def count_things(root: Path) -> tuple[Counter, Counter, int]:
+    """Objects and frames per "thing" class in the masks on disk, and the number of masks."""
+    names, things, masks = masks_on_disk(root)
+    objects, frames = Counter(), Counter()
+    for _split, _session, path in masks:
+        found = things_in(path, names, things)
+        objects.update(found)
+        frames.update(found.keys())
+    return objects, frames, len(masks)
+
+
+def sessions_with(root: Path, cls: str) -> dict[tuple[str, str], tuple[int, int, int]]:
+    """(split, session) -> (frames showing cls, objects of cls, masks) for each session with cls."""
+    names, things, masks = masks_on_disk(root)
+    if cls not in names.values():
+        raise SystemExit(f"no class {cls!r} in labelmap.json")
+    seen: dict[tuple[str, str], list[int]] = {}
+    for split, session, path in masks:
+        row = seen.setdefault((split, session), [0, 0, 0])
+        k = things_in(path, names, things)[cls]
+        row[0] += k > 0
+        row[1] += k
+        row[2] += 1
+    return {key: tuple(row) for key, row in seen.items() if row[0]}
 
 
 def main(argv: list[str] | None = None, fetch=get) -> int:
@@ -164,6 +199,8 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
     ap.add_argument("--camera", choices=(*CAMERAS, "both"), default="both")
     ap.add_argument("--masks-only", action="store_true", help="no images, for --count")
     ap.add_argument("--count", action="store_true", help="count objects per class in the masks")
+    ap.add_argument("--sessions", metavar="CLASS", help="list the sessions whose masks show CLASS")
+    ap.add_argument("--workers", type=int, default=8, help="files fetched at once")
     args = ap.parse_args(argv)
 
     args.root.mkdir(parents=True, exist_ok=True)
@@ -177,6 +214,7 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
         skipped += 1
         print(f"  skipped {what}: {e}", file=sys.stderr, flush=True)
 
+    pool = ThreadPoolExecutor(max_workers=max(1, args.workers))
     for name in META:  # without these and the split lists nothing else can be done
         download(file_url(f"{PREFIX}/{name}"), args.root / name, fetch)
     for split, list_file in SPLITS.items():
@@ -192,18 +230,34 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
                 except Missing as e:
                     skip(f"{session} {camera}", e)
                     continue
-                for name in session_files(session, camera, frame_ids(masks, args.every), kinds):
+                wanted = session_files(session, camera, frame_ids(masks, args.every), kinds)
+
+                def one(name: str, split: str = split) -> bool:
+                    return download(file_url(name), local_path(args.root, split, name), fetch)
+
+                futures = [(name, pool.submit(one, name)) for name in wanted]
+                for name, future in futures:  # read in order, so skips print in order
                     try:
-                        got += download(file_url(name), local_path(args.root, split, name), fetch)
+                        got += future.result()
                     except Missing as e:
                         skip(name.split("sanpo-real/")[-1], e)
             print(f"{split} {i}/{len(sessions)} {session}: {got} new files", flush=True)
+    pool.shutdown()
 
     if args.count:
         objects, frames, n = count_things(args.root)
         print(f"\n{n} masks; objects of {MIN_PIXELS} pixels or more, and the frames showing them:")
         for cls, k in objects.most_common():
             print(f"  {cls:22s} {k:6d} objects in {frames[cls]:5d} frames")
+    if args.sessions:
+        rows = sessions_with(args.root, args.sessions)
+        print(f"\nSessions showing {args.sessions}: frames with it / masks, and objects")
+        for split in SPLITS:
+            mine = sorted((k[1], v) for k, v in rows.items() if k[0] == split)
+            frames = sum(v[0] for _, v in mine)
+            print(f"{split}: {len(mine)} sessions, {frames} frames")
+            for session, (f, objects, masks) in mine:
+                print(f"  {session}  {f:4d} / {masks:4d}  {objects:5d}")
     if skipped:
         print(f"{skipped} skipped; run again to fill the gaps", file=sys.stderr)
         return 1

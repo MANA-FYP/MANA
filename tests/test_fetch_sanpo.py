@@ -187,3 +187,42 @@ def test_count_finds_each_thing_once_and_ignores_stuff_and_specks(tmp_path):
     objects, frames, n = fs.count_things(tmp_path)
     assert n == 1
     assert objects == {"stairs": 2} and frames == {"stairs": 1}
+
+
+def stairs_mask(folder, frame, stairs):
+    """A mask with road everywhere and `stairs` separate stairs objects."""
+    np = pytest.importorskip("numpy")
+    image = pytest.importorskip("PIL.Image")
+    mask = np.zeros((40, 40, 3), dtype=np.uint8)
+    mask[:, :, 0] = 1
+    for k in range(stairs):
+        mask[k * 10 : k * 10 + 10, 0:20] = (15, 0, k + 1)
+    folder.mkdir(parents=True, exist_ok=True)
+    image.fromarray(mask).save(folder / f"{frame:06d}.png")
+
+
+def test_sessions_with_lists_only_the_sessions_showing_the_class(tmp_path):
+    (tmp_path / "labelmap.json").write_text(json.dumps({"road": 1, "stairs": 15}))
+    (tmp_path / "labeltype.json").write_text(json.dumps({"road": "semantic", "stairs": "panoptic"}))
+    chest = "camera_chest/segmentation_masks"
+    stairs_mask(tmp_path / "train" / "t1" / chest, 0, 2)
+    stairs_mask(tmp_path / "train" / "t1" / chest, 1, 0)
+    stairs_mask(tmp_path / "train" / "t1" / "camera_head/segmentation_masks", 0, 1)
+    stairs_mask(tmp_path / "train" / "t2" / chest, 0, 0)  # no stairs: not listed
+    stairs_mask(tmp_path / "test" / "e1" / chest, 0, 1)
+    assert fs.sessions_with(tmp_path, "stairs") == {
+        ("train", "t1"): (2, 3, 3),  # 2 of its 3 masks show stairs, 3 objects in all
+        ("test", "e1"): (1, 1, 1),
+    }
+    with pytest.raises(SystemExit, match="no class"):
+        fs.sessions_with(tmp_path, "escalator")
+
+
+def test_many_workers_fetch_the_same_files_as_one(tmp_path):
+    sessions = {"train": ["t1", "t2"], "test": ["e1"]}
+    for workers, root in ((1, tmp_path / "one"), (6, tmp_path / "six")):
+        args = ["--root", str(root), "--train", "-1", "--test", "-1", "--every", "1"]
+        assert fs.main([*args, "--workers", str(workers)], fetch=bucket_with(sessions)) == 0
+    one = sorted(p.relative_to(tmp_path / "one") for p in (tmp_path / "one").rglob("*.png"))
+    six = sorted(p.relative_to(tmp_path / "six") for p in (tmp_path / "six").rglob("*.png"))
+    assert one == six and len(one) == 24
