@@ -169,7 +169,7 @@ Not tested in this world: the switch from GPS to the lidar map, which needs the 
 - **Leaving GPS:** 1.4 to 1.6 s after each loss. That is the position node's 1.5 s, timed from the last good fix.
 - **Coming back:** 5.2 to 5.3 s after each outage ended, its `back_s` of 5 s.
 - **The failure in run 1:** the extra two changes were not in the outage. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
-- **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Run 1 ran while another CPU-heavy job did, and a stalled simulation is the first thing to check if it comes up again.
+- **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Runs 1, 3 and 4 all ran alongside other CPU-heavy jobs on the laptop, so load alone does not explain it.
 
 ## Lidar localisation indoors (#43)
 
