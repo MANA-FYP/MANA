@@ -151,7 +151,9 @@ function showDepth(d) {
     text = "Depth: " + GROUND_TEXT[d.ground] + (d.distance_m === null ? "" : " at " + d.distance_m.toFixed(1) + " m") +
       (d.step_m === null ? "" : ", " + Math.round(d.step_m * 100) + " cm") +
       (d.sent ? "." : " (shown only).");
-    text += d.ahead_m === null ? " Path clear." : " Something in the path at " + d.ahead_m.toFixed(1) + " m.";
+    text += d.ahead_m === null ? " Path clear." : d.ahead_is_stairs
+      ? " The stairs rise at " + d.ahead_m.toFixed(1) + " m (stairs, not an obstacle)."
+      : " Something in the path at " + d.ahead_m.toFixed(1) + " m.";
   }
   setText($("depthText"), text + " Camera tilted " + (d.pitch_deg === null ? "?" : d.pitch_deg) + "°, " + Math.round(d.ms) + " ms a frame.");
 }
@@ -165,7 +167,8 @@ let lastTrack = null;
 // With internet, the street map under the path: OpenStreetMap tiles, placed from where the track's
 // x = y = 0 is (its origin, from the first GPS fix). Offline the tiles fail and the grid stays.
 // Off until asked for: each tile request tells openstreetmap.org roughly where the person is.
-const TILE = "https://tile.openstreetmap.org/";
+// The server keeps the tiles it fetched, so a place seen online has its map offline (#161).
+const TILE = "/tiles/";
 const tiles = new Map();   // "z/x/y" -> its Image
 function tile(key) {
   if (!tiles.has(key)) {

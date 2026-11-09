@@ -181,8 +181,11 @@ the USB cable, and GPS works without a network.
 **Street map.** Tick *Street map*, and once a GPS fix has tied the path to the earth and the
 laptop has internet, the path is drawn on the OpenStreetMap streets around it, at the same scale
 (#130). It is off at first because each map tile is fetched from openstreetmap.org, which then
-learns roughly where the person is. Without internet the tiles do not load and the plain grid
-stays; the box works the same either way, and a missing tile is tried again every 30 s.
+learns roughly where the person is. The laptop keeps each tile it fetched (`--tile-cache`,
+default `tile-cache/`, not in git; a tile older than a week is fetched again when online), so a
+place seen once with internet has its street map without it too (#161). A tile never seen stays
+the plain grid without internet; the box works the same either way, and a missing tile is tried
+again every 30 s.
 
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
 place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA leads back
@@ -211,6 +214,9 @@ With the detector it gives the camera what it could not measure before (#131):
 
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
   box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+  Stairs up rise into that from their second or third step, so while the detector sees stairs up,
+  something from where they start to 1.5 m past it is taken to be the stairs, not an obstacle
+  (#159). The stairs rule handles them, and the dashboard says "the stairs rise at ...".
 - **Stairs, where and which way**: when the detector (the open-vocabulary YOLOE model from
   `demo/build_detector.py`) boxes stairs, the stairs are where the box's bottom edge meets the
   floor (camera height and tilt), and up or down by whether the depth in the box is above or
