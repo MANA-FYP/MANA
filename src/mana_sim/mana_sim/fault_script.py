@@ -38,9 +38,8 @@ class FaultScript(Node):
             self.client.call_async(req)
             self.done += 1
             state = "on" if step.active else "off"
-            self.get_logger().info(
-                f"at {now - self.start_s:.1f} s: {step.sensor} {step.kind} {state}"
-            )
+            at = f"at {now - self.start_s:.1f} s (clock {now:.2f})"
+            self.get_logger().info(f"{at}: {step.sensor} {step.kind} {state}")
         if self.done == len(self.scenario.steps):
             raise SystemExit
 
