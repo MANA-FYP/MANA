@@ -74,6 +74,10 @@ class StepCounter:
         m = math.sqrt(ax * ax + ay * ay + az * az)
         if self.t is None or t <= self.t or t - self.t > 1.0:  # first reading, or a gap
             # start over: a swing half before the gap is not a step
+            if self.t is not None and t < self.t:
+                # the phone's clock started again (the page was reloaded): the last rise and
+                # step are on the old clock, and would hold back every step until it caught up
+                self.last_rise_t = self.last_step_t = -math.inf
             self.t, self.smooth, self.pending = t, 0.0, None
             self.above, self.peak, self.valley = False, -math.inf, math.inf
             return None
@@ -228,12 +232,18 @@ class Track:
             agreed = self._agreed()
             if agreed is None:
                 return False
-            self.x, self.y, self.var = agreed  # several fixes agree: the person did move
-        else:
-            gain = self.var / (self.var + r)
-            self.x += gain * (e - self.x)
-            self.y += gain * (n - self.y)
-            self.var *= 1.0 - gain
+            # several fixes agree: the person is there. After a stretch on steps alone (out of a
+            # building) the jump puts right where the steps had drifted to: not walked, so no
+            # distance. Otherwise it is how the track follows a device rolling with no steps,
+            # whose fixes leave the gate as they come: that is travel (Waqas, #150)
+            corrects_steps = self.source == self.STEPS
+            self.x, self.y, self.var = agreed
+            self._used(fix, walked=not corrects_steps)
+            return True
+        gain = self.var / (self.var + r)
+        self.x += gain * (e - self.x)
+        self.y += gain * (n - self.y)
+        self.var *= 1.0 - gain
         self._used(fix)
         return True
 
@@ -324,18 +334,19 @@ class Track:
         var = max(a for _, _, a in self.refused) ** 2
         return me, mn, var
 
-    def _used(self, fix: Fix) -> None:
+    def _used(self, fix: Fix, walked: bool = True) -> None:
         self.refused.clear()
         self.last_gps_t = fix.t
         self.source = self.GPS
-        self._extend(fix.t)
+        self._extend(fix.t, walked)
 
-    def _extend(self, now: float) -> None:
-        """Add the position to the path when it has moved far enough from the last point."""
+    def _extend(self, now: float, walked: bool = True) -> None:
+        """Add the position to the path when it has moved far enough from the last point, and
+        what it moved to the distance walked unless the track was put right by GPS."""
         lx, ly, _, _ = self.path[-1]
         moved = math.hypot(self.x - lx, self.y - ly)
         if moved >= self.path_every_m:
-            self.distance_m += moved
+            self.distance_m += moved if walked else 0.0
             self.path.append((self.x, self.y, self.source, now))
             self._recent.append((now, self.distance_m))
 

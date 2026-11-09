@@ -57,6 +57,14 @@ def test_a_gap_in_the_readings_does_not_make_a_step():
     assert count(still(5.0, t0=20.0), counter) == []  # 15 s with nothing, then still again
 
 
+def test_steps_count_again_at_once_when_the_phone_page_is_reloaded():
+    # a reloaded page's clock starts again at 0; the walk before it went on to 60 s
+    counter = StepCounter()
+    count(walk(60.0), counter)
+    again = count(walk(10.0, seed=3), counter)
+    assert abs(len(again) - 18) <= 1
+
+
 def test_step_length_is_longer_for_a_stronger_swing_and_stays_in_bounds():
     soft = count(walk(10.0, swing=2.4))
     hard = count(walk(10.0, swing=6.0))
@@ -181,6 +189,32 @@ def test_one_fix_far_off_is_refused_but_several_that_agree_move_the_track():
     assert not track.on_gps(fix_at(track, 80, 0, 2.0, 3.0))
     assert track.on_gps(fix_at(track, 80, 0, 3.0, 3.0))  # the third in a row: it moved
     assert track.x == pytest.approx(80.0, abs=0.01)
+
+
+def test_a_track_put_right_by_gps_adds_no_distance_but_the_walk_on_does():
+    # steps indoors drift 60 m from where the person is; outside, GPS puts the track right
+    nav = Navigator()
+    nav.on_gps(Fix(0.0, 31.5204, 74.3587, 4.0))
+    walk_legs(nav, [(90, 20)], t0=1.0)  # 20 steps east, 14 m
+    walked, x = nav.track.distance_m, nav.track.x
+    t = 20.0
+    for i in range(3):
+        nav.on_gps(fix_at(nav.track, x, 60.0, t + i, 3.0))
+    assert nav.track.y == pytest.approx(60.0, abs=0.5)  # the track is where GPS says
+    assert nav.track.distance_m == pytest.approx(walked, abs=0.75)  # the jump was not walked
+    walk_legs(nav, [(90, 10)], t0=t + 4.0)
+    assert nav.track.distance_m == pytest.approx(walked + 7.0, abs=1.0)
+
+
+@pytest.mark.parametrize("accuracy", [5.0, 10.0])
+def test_a_device_rolling_with_no_steps_counts_its_travel(accuracy):
+    # Waqas's case on #150: a chair rolls north at 1.1 m/s for 2 minutes, one fix a second; its
+    # fixes leave the gate and the track follows by the agreeing-fixes jump. That is travel.
+    track = Track()
+    for i in range(121):
+        track.on_gps(fix_at(track, 0.0, 1.1 * i, float(i), accuracy))
+    assert track.y > 110.0
+    assert track.distance_m == pytest.approx(track.y, abs=1.0)
 
 
 def test_far_fixes_scattered_in_different_directions_do_not_move_the_track():
