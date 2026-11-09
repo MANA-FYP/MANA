@@ -351,3 +351,68 @@ ros2 run mana_core evaluate --world gazebo --rerun       # play again, also thos
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+## Zero-shot detectors on the SANPO test split (#51, #49)
+
+Measured on 10 November 2026 with `tools/eval_detector.py`, on every SANPO test walk that has
+masks (48 of the authors' 141 test sessions), one annotated frame in 10: **2,331 frames**. No
+model was trained on SANPO; this is the baseline that the fine-tuned YOLO26s and YOLOv8s (#49)
+have to beat. Each frame goes through `Detector.detect_image`, the call the ROS node and the phone
+demo make. A box counts as found at IoU 0.5 with a SANPO box of the same class; the model's names
+map to SANPO's by a fixed table (person to pedestrian, car, bus and truck to vehicle, door to
+opening-door, pillar to pole). Precision and recall are at confidence 0.3, the node's threshold.
+Times are the median per frame on an AMD Ryzen 7 7730U laptop CPU (16 GB), with PyTorch 2.15 and
+Ultralytics 8.4.208.
+
+SANPO's boxes come from its masks, so they include objects far down the street a few pixels
+high. MANA reacts to what is near, so **near** keeps only boxes at least 10 % of the frame's
+height (predictions on smaller boxes are left out, as COCO scores its size bands).
+
+| Model (image size, ms per frame) | Class | Objects, near | AP50, near | Precision, near | Recall, near | Recall, all |
+|---|---|---:|---:|---:|---:|---:|
+| YOLO26n, COCO (416, 35 ms) | pedestrian | 2,993 | 0.74 | 0.85 | 0.67 | 0.41 |
+| | vehicle | 1,438 | 0.67 | 0.83 | 0.55 | 0.27 |
+| | stairs, door, pole | | not in COCO | | | |
+| YOLOE-26n, the demo's 42 names (480, 55 ms) | pedestrian | 2,993 | 0.73 | 0.85 | 0.67 | 0.43 |
+| | vehicle | 1,438 | 0.62 | 0.82 | 0.51 | 0.24 |
+| | stairs | 37 | 0.01 | 0.20 | 0.03 | 0.01 |
+| | opening-door | 175 | 0.01 | 0.00 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.03 | 0.73 | 0.01 | 0.01 |
+| YOLOE-26s, the demo's 42 names (480, 81 ms) | pedestrian | 2,993 | 0.78 | 0.80 | 0.78 | 0.54 |
+| | vehicle | 1,438 | 0.69 | 0.80 | 0.54 | 0.30 |
+| | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.01 |
+| | opening-door | 175 | 0.01 | 0.20 | 0.01 | 0.01 |
+| | pole | 1,942 | 0.02 | 0.62 | 0.01 | 0.00 |
+
+**Stairs per walk.** The test split has stairs in only 6 walks (65 frames, 76 staircases; see
+`docs/datasets.md`). Both YOLOE models found stairs in 1 frame of the 65 at the node's threshold,
+in 1 walk of the 6. Run at confidence 0.01, YOLOE-26s gave no stairs box at all in 58 of the 65
+frames; where it did, near the foot of a staircase that fills the frame, the box was right (IoU
+0.77 to 0.98) but its confidence was 0.02 to 0.67. Many of SANPO's stairs are porch steps far
+off or a single step at the edge of the frame, which MANA does not need, but clear stairs beside
+the path were missed too.
+
+What follows:
+
+- **People and vehicles near the chair are found zero-shot**, two in three people and about half
+  the vehicles, at 80 to 85 % precision. YOLOE-26s finds the most people (0.78) at 81 ms a frame,
+  about 12 frames a second on this CPU.
+- **Stairs, doors and poles are not found zero-shot on SANPO.** The 6 of 12 stairs YOLOE-26s
+  found on the iPhone frames in #131 were chosen with the stairs straight ahead; SANPO's walks are
+  the harder, everyday case. Stairs must come from fine-tuning (#49, 45 training walks with
+  stairs) and from the 3D camera, as the two-source rule already requires. SANPO's
+  "opening-door" boxes are ordinary doors, closed ones too (checked by eye on four frames: shop
+  doors, a glass door), so the door misses are real misses: doors set into a shop front at the side
+  of the path, where the model sees a wall or a window.
+- **Six walks are too few for a stairs figure against the 0.85 target**, before or after
+  fine-tuning. Stairs from our own recordings (#89) are needed for that.
+
+Run it:
+
+```
+python3 tools/fetch_sanpo.py --root datasets/sanpo-eval --train 6 --test -1 --every 10 --workers 16
+python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-eval-yolo --val 0.5
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --weights yolo26n.pt --imgsz 416
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --imgsz 480 \
+    --weights yoloe-26n-mana.pt yoloe-26s-mana.pt   # built with demo/build_detector.py
+```
