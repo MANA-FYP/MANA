@@ -4,7 +4,7 @@ Each decision records what we chose, what else we looked at, and why. A decision
 
 ## D1. Lidar localisation indoors (#43)
 
-**Proposed, to be confirmed in Gazebo (#13, #14):** slam_toolbox. Map a building once with its mapping mode, then run its localisation mode against the saved map. Its pose is the `LIDAR_MAP` position source.
+**Chosen, and measured in Gazebo (#43, docs/results.md *Lidar localisation indoors*):** slam_toolbox. Map a building once with its mapping mode, then run its localisation mode against the saved map. Its pose is the `LIDAR_MAP` position source.
 
 MANA needs to know where the user is inside a building when GPS is gone, so a helper can be told where to come. That needs a position **on a map of the building**. A track of how far the device has moved since it came in drifts and does not name a place.
 
@@ -41,7 +41,7 @@ FAST-LIO2 and KISS-ICP are odometry. Either could later feed the EKF below as a 
 
 What would change this:
 - the Gazebo lidar is 3D and its scans are poor for 2D mapping;
-- slam_toolbox's position error against Gazebo ground truth is too large for a helper to find the user. This is measured in #43.
+- slam_toolbox's position error against Gazebo ground truth is too large for a helper to find the user. Measured in #43: a mean of 0.15 to 0.21 m over two laps, but jumps of up to 1.2 m along a bare corridor, which the EKF of D2 is to refuse.
 
 ## D2. Fusing IMU, wheel encoders and GPS (#43)
 
