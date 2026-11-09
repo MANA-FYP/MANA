@@ -242,6 +242,8 @@ WORD_COMMANDS = {
     "down": Command.SLOW_DOWN,
 }
 
+MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
+
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
 # how urgent each kind of line is, when the core does not give a priority of its own
 KIND_PRIORITY = {
@@ -385,6 +387,7 @@ class Middleware:
         self.brightness = 1.0
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
+        self.gravity: tuple[float, float, float] | None = None
         self._last_decision = None
         self._t0: float | None = (
             None  # the first time seen, so the dashboard shows seconds since start
@@ -601,6 +604,7 @@ class Middleware:
         now = self.clock() if now is None else now
         self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
         pitch, roll = tilt(ax, ay, az)
+        self.gravity = (ax, ay, az)  # the last reading, for the camera's tilt
         self._accel.append((now, math.sqrt(ax * ax + ay * ay + az * az)))
         recent = [m for t, m in self._accel if now - t <= 1.0]
         spread = (max(recent) - min(recent)) if len(recent) > 3 else 0.0
@@ -760,14 +764,16 @@ class Middleware:
         if not text:
             return
         found = [COMMAND_TEXT[WORD_COMMANDS[w]] for w in text.split() if w in WORD_COMMANDS]
-        words = set(text.split())
-        if "mark" in words:  # "mark this place", then "where is the mark" / "way back to the mark"
-            if words & {"where", "way", "back", "find"}:
-                self.way_back(now)
-                found.append("Way back")
-            else:
-                self.mark_place(now)
-                found.append("Mark")
+        # recognisers add punctuation ("Where is the mark?"), so words are letters only; marking is
+        # checked as a phrase first, so "mark this place, I will come back" is not a question
+        words = re.findall(r"[a-z']+", text)
+        said = " ".join(words)
+        if said == "mark" or any(p in said for p in MARK_PHRASES):
+            self.mark_place(now)
+            found.append("Mark")
+        elif "mark" in words and set(words) & {"where", "way", "back", "find"}:
+            self.way_back(now)
+            found.append("Way back")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )
@@ -813,10 +819,11 @@ class Middleware:
         confidence: float,
         bearing_rad: float = 0.0,
         now: float | None = None,
+        source: Source = Source.DETECTOR,
     ) -> None:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
-        self.core.on_obstacle(ObstacleReport(now, trust, Source.DETECTOR, distance_m, label))
+        self.core.on_obstacle(ObstacleReport(now, trust, source, distance_m, label))
         # not written to the decision log: a detection is shown as a box on the camera, and the
         # log says "Obstacle ahead, slowing down" or "stopping" once the core acts on it
         self._say(now, "detector", "obstacle", f"{label} {distance_m:.1f} m", trust)
@@ -871,10 +878,11 @@ class Middleware:
         confidence: float,
         distance_m: float = math.nan,
         now: float | None = None,
+        step_height_m: float = math.nan,
     ) -> None:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
-        self.core.on_ground(GroundReport(now, trust, source, ground, distance_m))
+        self.core.on_ground(GroundReport(now, trust, source, ground, distance_m, step_height_m))
         self._say(now, source.name.lower(), "ground", ground.name.lower(), trust)
 
     # -- one decision and a snapshot of everything

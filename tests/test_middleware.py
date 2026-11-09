@@ -760,3 +760,22 @@ def test_saying_mark_this_place_then_where_is_the_mark():
     texts = [e["text"] for e in m.decisions]
     assert texts == ["Place marked.", "The mark is 5 metres to the south."]
     assert [i["command"] for i in m.inputs] == ["Mark", "Way back"]
+
+
+@pytest.mark.parametrize(
+    "heard, done",
+    [
+        ("where is the mark", "Way back"),
+        ("Where is the mark?", "Way back"),
+        ("Way back to the mark.", "Way back"),
+        ("Mark this place.", "Mark"),
+        ("Mark this place, I will come back", "Mark"),
+        ("mark", "Mark"),
+        ("I left my mark there", ""),
+    ],
+)
+def test_marks_are_understood_with_the_recognisers_punctuation(heard, done):
+    # Waqas's table on #140: Safari and Chrome add punctuation to what they hear
+    m = Middleware()
+    m.on_heard(heard, now=1.0)
+    assert m.inputs[-1]["command"] == done
