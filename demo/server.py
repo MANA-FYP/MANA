@@ -47,7 +47,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E402
 
-from demo import caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
+from demo import access, caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -89,8 +89,11 @@ def build_app(
     depth_ground=False,
     recorder=None,
     tile_cache=None,
+    key=None,
 ) -> web.Application:
-    app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
+    """key: what a request must carry (demo.access); None for none, as in the tests."""
+    checks = [no_cache] if key is None else [access.middleware(key), no_cache]
+    app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=checks)
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     # depth from the camera image (#131): the model, how the camera is held, the last result
@@ -169,6 +172,8 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
                 await on_binary(app, msg.data)
     finally:
         app["phones"].discard(ws)
+        if not app["phones"]:  # no round trip is measured now: not shown as if it were live
+            app["mw"].on_phone_gone()
     return ws
 
 
@@ -214,7 +219,9 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.on_heartbeat(None, now)
         await ws.send_json({"type": "pong", "t": d.get("t")})
     elif kind == "rtt":
-        mw.on_heartbeat(float(d["ms"]), now)
+        ms = number(d.get("ms"))  # as the phone says it: never below 0, never not a number
+        if ms is not None:
+            mw.on_heartbeat(max(0.0, ms), now)
     elif kind == "sensor":
         mw.on_sensor_switch(str(d.get("id", "")), bool(d.get("on")), now)
     elif kind == "mic":
@@ -394,9 +401,11 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
 
 
 def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
-    """The detector's obstacles, nearest first. Their distance is measured in the depth image when
-    one from the last 1.5 s is there and was scaled to the floor, and estimated from the box
-    height otherwise."""
+    """The detector's obstacles, nearest first. Each distance is the box height's estimate, or the
+    depth image's (one from the last 1.5 s, scaled to the floor) when that is nearer: on 413 boxes
+    of real SANPO walks the depth was better from 2 m out, but read 1.5 times too far under 2 m,
+    where box height did better; the nearer of the two read over 20 percent too far on 6 percent
+    of the boxes (#88, docs/decisions.md D12)."""
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     found = []
@@ -406,7 +415,7 @@ def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> l
             continue
         ob = estimate[0]
         measured = None if seen is None else dz.box_distance(seen, det, w, h)
-        if measured is not None:
+        if measured is not None and measured < ob.distance_m:
             ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
         found.append(ob)
     return sorted(found, key=lambda o: o.distance_m)
@@ -648,6 +657,7 @@ def main(argv=None) -> None:
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
     mount = dz.Mount(a.camera_height, a.camera_fov)
+    key = access.load_or_make()  # the server can drive the device: no answer without it
     app = build_app(
         Middleware(directions=a.directions, on_foot=a.on_foot),
         detector,
@@ -658,6 +668,7 @@ def main(argv=None) -> None:
         depth_ground=a.depth_ground,
         recorder=recorder,
         tile_cache=tiles.TileCache(a.tile_cache),
+        key=key,
     )
     if a.record:
         print(f"recording the phone into {a.record}")
@@ -669,14 +680,19 @@ def main(argv=None) -> None:
         host = "0.0.0.0" if a.host == "127.0.0.1" else a.host
         ips = certs.addresses()
         if ips:
-            print(f"phone:     https://{ips[0]}:{a.port}/phone   (same Wi-Fi; accept the warning)")
+            url = access.with_key(f"https://{ips[0]}:{a.port}/phone", key)
+            print(f"phone:     {url}   (same Wi-Fi; accept the warning)")
         for ip in ips[1:]:
-            print(f"           https://{ip}:{a.port}/phone   (another network of this laptop)")
+            url = access.with_key(f"https://{ip}:{a.port}/phone", key)
+            print(f"           {url}   (another network of this laptop)")
     scheme = "https" if a.https else "http"
-    print(f"dashboard: {scheme}://localhost:{a.port}/dashboard")
+    print(f"dashboard: {access.with_key(f'{scheme}://localhost:{a.port}/dashboard', key)}")
     if not a.https:
-        print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
-    print(f"caregiver: {scheme}://localhost:{a.port}/caregiver   (read-only)")
+        url = access.with_key(f"http://localhost:{a.port}/phone", key)
+        print(f"phone:     {url}   (after: python -m demo.usb)")
+    url = access.with_key(f"{scheme}://localhost:{a.port}/caregiver", key)
+    print(f"caregiver: {url}   (read-only)")
+    print("The key (k) lets anyone with it drive the device: share it with no one.")
     for name, on in models_status(app).items():
         print(f"model {name}: {'loaded' if on else 'not available'}")
     web.run_app(app, host=host, port=a.port, ssl_context=ssl_context, print=None)

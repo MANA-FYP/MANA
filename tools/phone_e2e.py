@@ -29,6 +29,7 @@ import tempfile
 from pathlib import Path
 
 G = 9.81
+KEY_FILE = Path(__file__).resolve().parent.parent / "certs" / "access-key.txt"  # demo.access
 CHROMES = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     "/usr/bin/google-chrome",
@@ -163,7 +164,7 @@ async def run(a) -> int:
                              deviceScaleFactor=1, mobile=True)  # fmt: skip
             allowed = ["geolocation", "videoCapture", "audioCapture", "sensors"]
             await phone.call("Browser.grantPermissions", origin=a.server, permissions=allowed)
-            await phone.call("Page.navigate", url=a.server + "/phone")
+            await phone.call("Page.navigate", url=a.server + "/phone" + a.key)
             await asyncio.sleep(3)
             # after the page has loaded: set before it, they did not reach it
             await phone.call("Emulation.setGeolocationOverride", latitude=a.lat, longitude=a.lon,
@@ -185,7 +186,7 @@ async def run(a) -> int:
             walker = asyncio.create_task(walk(phone, pitch, a.lat, a.lon))
             await dash.call("Emulation.setDeviceMetricsOverride", width=1600, height=900,
                             deviceScaleFactor=1, mobile=False)  # fmt: skip
-            await dash.call("Page.navigate", url=a.server + "/dashboard")
+            await dash.call("Page.navigate", url=a.server + "/dashboard" + a.key)
             shown = ("[document.getElementById('depthText').textContent,"
                      " document.getElementById('posText').textContent,"
                      " (document.querySelector('#mode p.main') || {}).textContent]")  # fmt: skip
@@ -219,6 +220,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--video", required=True, help="the camera: a video file, or an .mjpeg")
     p.add_argument("--server", default="http://localhost:8000", help="the running demo server")
+    p.add_argument("--key", default=None, help="the server's key (default: certs/access-key.txt)")
     p.add_argument("--seconds", type=float, default=60.0)
     p.add_argument("--every", type=float, default=6.0, help="seconds between screenshots")
     p.add_argument("--pitch", type=float, default=12.0, help="degrees the phone looks down")
@@ -227,6 +229,8 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="e2e", help="folder for the screenshots")
     p.add_argument("--offline", action="store_true", help="the dashboard has no internet")
     a = p.parse_args(argv)
+    key = a.key or (KEY_FILE.read_text().strip() if KEY_FILE.exists() else "")
+    a.key = f"?k={key}" if key else ""
     if find_chrome() is None:
         print("Google Chrome is needed", file=sys.stderr)
         return 2
