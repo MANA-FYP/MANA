@@ -117,11 +117,25 @@ def test_no_reading_until_the_scale_is_learned_from_level_floor():
     assert r.read(scene(syn.flat, scale=1.2), PITCH).reading.ground == FLAT
 
 
-def test_frames_with_an_edge_do_not_teach_the_scale():
+def test_an_edge_at_the_bottom_of_the_picture_does_not_teach_the_scale():
     r = dz.Reader(MOUNT)
     for _ in range(5):
-        r.read(scene(syn.step(2.0, -1.0)), PITCH)
+        r.read(scene(syn.step(0.9, -0.3)), PITCH)  # the bottom rows straddle the edge
     assert r.held is None
+
+
+def test_a_drop_farther_off_still_teaches_it_the_bottom_rows_are_floor():
+    r = dz.Reader(MOUNT)
+    for _ in range(3):
+        r.read(scene(syn.step(2.0, -1.0), scale=1.2), PITCH)
+    assert r.held == pytest.approx(1 / 1.2, abs=0.02)
+
+
+def test_the_floor_plane_must_have_the_cameras_own_tilt():
+    cam = MOUNT.camera(COLS, ROWS, PITCH)
+    assert dz.floor_plane(scene(syn.flat, scale=1.3, noise=0.01), cam)
+    wrong = MOUNT.camera(COLS, ROWS, math.radians(45))  # the phone says 45, the picture is 30 down
+    assert not dz.floor_plane(scene(syn.flat), wrong)
 
 
 # Waqas's rows on #138: an edge closer than the bottom of the picture. Scaling each frame to its

@@ -152,7 +152,7 @@ class Reader:
     would be scaled up to the person's level and read as flat (Waqas, #138). The model's scale is
     a property of the model on the scene and changes slowly, so it is held:
 
-    - it is learned from `learn` frames in a row that read level floor with nothing close ahead,
+    - it is learned from `learn` frames in a row whose bottom rows are level floor (floor_plane),
       and then follows such frames slowly; until then there is no reading;
     - each frame is read with the held scale, so the ground reader's own check of the blind zone
       works: nearest ground off the person's level is an edge at 0 m;
@@ -184,7 +184,7 @@ class Reader:
         differs = own is not None and abs(own / self.held - 1.0) > self.differ
         if not differs:
             self._differs_since = None
-            if own is not None and level(reading, ahead):
+            if own is not None and floor_plane(depth, cam):
                 self.held += (own - self.held) * self.follow
         else:
             if self._differs_since is None:
@@ -205,8 +205,7 @@ class Reader:
             low = not floor_in_view(cam, depth.shape[0])
             why = "tilt the camera down to the floor" if low else "no floor in view"
             return Seen(depth, None, None, why=why)
-        scaled = depth * own
-        if level(dp.read_ground(scaled, cam), nearest_ahead(scaled, cam)):
+        if floor_plane(depth, cam):
             self._learning.append(own)
         else:
             self._learning = []  # in a row: one frame of an edge starts over
@@ -215,9 +214,28 @@ class Reader:
         return Seen(depth, None, None, cam=cam, why="learning the scale: point at level floor")
 
 
-def level(reading: dp.Reading, ahead_m: float | None, clear_m: float = 1.5) -> bool:
-    """Level floor with nothing standing close ahead: a frame the scale can be learned from."""
-    return reading.ground == dp.FLAT and (ahead_m is None or ahead_m > clear_m)
+def floor_plane(depth: np.ndarray, cam: dp.Camera, rows_share=0.15, strip=0.3,
+                tilt_deg=7.0, residual=0.03) -> bool:  # fmt: skip
+    """The bottom of the picture is level floor: a frame the scale can be learned from.
+
+    On a plane, 1/depth is a straight line in the image row: 1/z = A*yn + B, with the plane's tilt
+    atan2(B, A), whatever the model's scale. So the bottom rows are level floor when they fit a line
+    to within `residual` and the line's tilt is the camera's own (from the phone) to within
+    `tilt_deg`. Close steps or a kerb at the bottom fail it: on real phone frames their fitted tilt
+    was 28 to 62 degrees for a camera 9 to 21 degrees down (docs/results.md). It does not ask the
+    reader whether the whole frame is level, which on real frames it rarely said."""
+    rows, cols = depth.shape
+    v = np.arange(rows - max(3, int(rows * rows_share)), rows)
+    u = slice(int(cols * (0.5 - strip / 2)), int(cols * (0.5 + strip / 2)))
+    z = np.median(depth[v, u], axis=1)
+    ok = np.isfinite(z) & (z > 0)
+    if ok.sum() < 3:
+        return False
+    yn, inv = (v[ok] - cam.cy) / cam.fy, 1.0 / z[ok]
+    a, b = np.polyfit(yn, inv, 1)
+    fit = np.sqrt(np.mean((inv - (a * yn + b)) ** 2)) / np.mean(inv)
+    tilt = math.atan2(b, a)
+    return bool(fit <= residual and abs(math.degrees(tilt - cam.pitch_rad)) <= tilt_deg)
 
 
 def nearest_ahead(

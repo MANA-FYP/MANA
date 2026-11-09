@@ -158,8 +158,10 @@ The model's own metres can be 10 to 20 percent off, so the depth is scaled first
 motion sensors give the camera's tilt, the person holds it at a known height (`--camera-height`,
 default 1.2 m), and level floor at the bottom of the picture must lie that far below the camera.
 
-- **Start on level floor.** The scale is learned from the first three frames that show level
-  floor with nothing close ahead ("learning the scale: point at level floor"), and then held. The
+- **Start on level floor.** The scale is learned from the first three frames whose bottom rows
+  are level floor ("learning the scale: point at level floor"), and then held. Level floor means
+  the bottom rows lie on a plane at the phone's own tilt: on a plane 1/depth is a straight line in
+  the image row, whatever the model's scale, so its slope gives the floor's tilt. The
   floor must show at the bottom of the picture within 4 m: a phone at chest height held level or
   tilted down does; tilted up, the dashboard says "tilt the camera down to the floor".
 - **Why it is held, not measured on every frame:** an edge closer than the bottom of the picture
