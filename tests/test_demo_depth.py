@@ -472,3 +472,66 @@ def test_stairs_the_detector_sees_reach_the_core_with_their_distance():
         assert held.distance_m == pytest.approx(expected, abs=0.6)  # less the sensor's offset
 
     run(with_clients(go, detector=StairsDetector(), mount=MOUNT))
+
+
+# ---- stairs up are not also an obstacle in the depth (#159)
+
+
+def test_something_from_where_the_stairs_start_to_1_5_m_past_them_is_the_stairs():
+    from mana_core.decision import Ground, GroundReport, Source
+
+    from demo.server import the_stairs
+
+    seen = GroundReport(10.0, 0.6, Source.DETECTOR, Ground.STAIRS_UP, 2.0)
+    assert the_stairs(seen, 2.8, now=10.5)  # the second or third riser
+    assert not the_stairs(seen, 1.5, now=10.5)  # nearer than the stairs: in front of them
+    assert not the_stairs(seen, 3.8, now=10.5)  # well past: at the top, or beyond
+    assert not the_stairs(seen, 2.8, now=11.5)  # the stairs were seen too long ago
+    down = GroundReport(10.0, 0.6, Source.DETECTOR, Ground.STAIRS_DOWN, 2.0)
+    unplaced = GroundReport(10.0, 0.6, Source.DETECTOR, Ground.STAIRS_UP, math.nan)
+    assert not the_stairs(down, 2.8, now=10.5) and not the_stairs(unplaced, 2.8, now=10.5)
+    assert not the_stairs(None, 2.8, now=10.5)
+
+
+class RenderedStairs(RenderedDepth):
+    """Stairs up whose first edge is where StairsDetector's box meets the floor."""
+
+    def __init__(self):
+        super().__init__(syn.stairs(dz.floor_at(MOUNT.camera(480, 360, PITCH), 300), 0.17))
+
+
+@pytest.mark.parametrize("detector", [True, False])
+def test_stairs_the_detector_sees_are_not_sent_as_something_in_the_path(detector):
+    pytest.importorskip("aiohttp")
+    from mana_core.decision import Source
+    from test_demo_server import jpeg, run, with_clients
+
+    async def go(client, phone, dash):
+        async def drain(ws):  # the phone reads what it is sent, or the server's sends back up
+            async for _ in ws:
+                pass
+
+        reader = asyncio.create_task(drain(phone))
+        mw = client.app["mw"]
+        await tilted_30(phone)
+
+        def done():
+            view = client.app["depth"].get("view") or {}
+            if view.get("ahead_m") is None:
+                return False
+            return not detector or (Source.DETECTOR in mw.core.ground and view["ahead_is_stairs"])
+
+        for _ in range(200):
+            await phone.send_bytes(b"" + jpeg())
+            await asyncio.sleep(0.05)
+            if done():
+                break
+        view = client.app["depth"]["view"]
+        assert view["ahead_m"] is not None  # the depth does see the risers rise
+        assert view["ahead_is_stairs"] is detector
+        # with the stairs seen, not an obstacle; without the detector it still is one
+        assert (Source.CAMERA in mw.core.obstacles) is not detector
+        reader.cancel()
+
+    kw = {"detector": StairsDetector()} if detector else {}
+    run(with_clients(go, depth=RenderedStairs(), mount=MOUNT, **kw))
