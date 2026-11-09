@@ -165,7 +165,8 @@ let lastTrack = null;
 // With internet, the street map under the path: OpenStreetMap tiles, placed from where the track's
 // x = y = 0 is (its origin, from the first GPS fix). Offline the tiles fail and the grid stays.
 // Off until asked for: each tile request tells openstreetmap.org roughly where the person is.
-const TILE = "https://tile.openstreetmap.org/";
+// The server keeps the tiles it fetched, so a place seen online has its map offline (#161).
+const TILE = "/tiles/";
 const tiles = new Map();   // "z/x/y" -> its Image
 function tile(key) {
   if (!tiles.has(key)) {

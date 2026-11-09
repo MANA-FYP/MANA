@@ -46,7 +46,7 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, Source  # noqa: E402
 
-from demo import caregiver, navigation, recording, speech, vision  # noqa: E402
+from demo import caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -87,6 +87,7 @@ def build_app(
     mount=None,
     depth_ground=False,
     recorder=None,
+    tile_cache=None,
 ) -> web.Application:
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
@@ -103,6 +104,7 @@ def build_app(
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
+    app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
 
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard_page)
@@ -117,6 +119,7 @@ def build_app(
     app.router.add_get("/api/evidence", evidence)
     app.router.add_get("/api/walk.gpx", walk_gpx)
     app.router.add_get("/api/walk.geojson", walk_geojson)
+    app.router.add_get(r"/tiles/{z:\d+}/{x:\d+}/{y:\d+}.png", tile)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
     app.on_cleanup.append(stop_loop)
@@ -316,6 +319,21 @@ async def walk_gpx(request: web.Request) -> web.Response:
     disposition = 'attachment; filename="mana-walk.gpx"'
     return web.Response(text=gpx, content_type="application/gpx+xml",
                         headers={"Content-Disposition": disposition})  # fmt: skip
+
+
+async def tile(request: web.Request) -> web.Response:
+    """A street map tile: from the laptop's copy, or from OpenStreetMap when online (#161)."""
+    cache = request.app["tiles"]
+    if cache is None:
+        raise web.HTTPNotFound()
+    try:
+        z, x, y = (int(request.match_info[k]) for k in "zxy")
+        data = await cache.get(z, x, y)
+    except ValueError as e:
+        raise web.HTTPBadRequest() from e
+    if data is None:  # offline and never seen: the dashboard keeps its grid
+        raise web.HTTPNotFound()
+    return web.Response(body=data, content_type="image/png")
 
 
 async def walk_geojson(request: web.Request) -> web.Response:
@@ -573,6 +591,8 @@ def main(argv=None) -> None:
                    help="metres from the floor to the camera, as it is held")  # fmt: skip
     p.add_argument("--camera-fov", type=float, default=66.0,
                    help="degrees across the long side of the picture")  # fmt: skip
+    p.add_argument("--tile-cache", metavar="FOLDER", default="tile-cache",
+                   help="where the street map tiles are kept, for the map offline")  # fmt: skip
     p.add_argument("--record", metavar="FOLDER",
                    help="keep what the phone sends, to play with demo.replay")  # fmt: skip
     p.add_argument("--on-foot", action="store_true",
@@ -599,6 +619,7 @@ def main(argv=None) -> None:
         mount,
         depth_ground=a.depth_ground,
         recorder=recorder,
+        tile_cache=tiles.TileCache(a.tile_cache),
     )
     if a.record:
         print(f"recording the phone into {a.record}")
