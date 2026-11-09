@@ -40,6 +40,28 @@ the data, so you can show the alert link changing.
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
 
+### Connect the phone: Wi-Fi, no cable (Android 11 and later)
+
+The same tunnel, over Wi-Fi: the page is still on `localhost`, so it keeps the camera and the
+sensors. The phone and the laptop must be on the same network; the laptop's own hotspot works,
+with no internet.
+
+1. On the phone: Developer options, *Wireless debugging*, turn it on.
+2. The first time on a laptop, tap *Pair device with pairing code* and give the pairing address
+   and the code it shows, with the address shown on the Wireless debugging page itself:
+
+   ```bash
+   python -m demo.usb --pair 192.168.1.23:37011 482915 --wifi 192.168.1.23:41235
+   ```
+
+   After that, `python -m demo.usb --wifi 192.168.1.23:41235` is enough. Android may change that
+   port when wireless debugging is turned off and on again.
+3. On the phone open **http://localhost:8000/phone** in Chrome.
+
+The dashboard shows the round trip to the phone under *Inputs from the phone*. Compare it with the
+cable before a demo. The phone's Wi-Fi then carries the data, so use the cable to show the alert
+link changing (switching Wi-Fi off would cut the demo).
+
 ### Or any other camera
 
 The vision part can be tested without the phone (#132). `demo.camera` sends frames from the
@@ -228,7 +250,8 @@ runs). The first run downloads it (about 100 MB) from Hugging Face; after that i
 With the detector it gives the camera what it could not measure before (#131):
 
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
-  box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+  box, or the box height's estimate when that is nearer: under 2 m the depth read people 1.5
+  times too far on real walks, `docs/decisions.md` D12), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
   Stairs up rise into that from their second or third step, so while the detector sees stairs up,
   something from where they start to 1.5 m past it is taken to be the stairs, not an obstacle
   (#159). The stairs rule handles them, and the dashboard says "the stairs rise at ...".
