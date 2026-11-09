@@ -1,7 +1,9 @@
 """ROS 2 node: the simulated sensors, as the frames and the reports the rest of MANA reads.
 
 - Transforms: map > odom (identity), odom > base_link (from the ground truth of the simulation) and
-  base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry).
+  base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry). With
+  `odom_from: wheels` odom > base_link comes from the wheels and the gyro instead, and drifts as on
+  a real chair; map > odom is then left to a localiser (slam_toolbox, #43).
 - `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode:
   the speed of the wheels against the chair's speed, and their turn against the gyro).
 - `obstacle` from the nearest echo of the lidar in front of the chair. (`position` is made by
@@ -58,8 +60,9 @@ class SensorsNode(Node):
 
     def send_static(self) -> None:
         now = self.get_clock().now().to_msg()
-        out = [self.transform(now, MAP, ODOM, (0.0,) * 6)]
-        out += [self.transform(now, BASE, name, pose) for name, pose in SENSORS.items()]
+        out = [self.transform(now, BASE, name, pose) for name, pose in SENSORS.items()]
+        if self.odom_from == "ground_truth":  # exact odom: the map is odom
+            out.append(self.transform(now, MAP, ODOM, (0.0,) * 6))  # else a localiser gives it
         self.static_tf.sendTransform(out)
 
     @staticmethod
