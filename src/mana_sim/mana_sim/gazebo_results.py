@@ -12,7 +12,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-from mana_core.decision import Mode
 from mana_core.evaluate import run as play_scripted
 from mana_core.scenarios import SCENARIOS, check
 
@@ -69,14 +68,6 @@ def why_marks_fail(failing: list[tuple[str, str]]) -> str:
             f" as a released stop. In these runs it moved on {min(on):.2f} to {max(on):.2f} m"
             f", and stood {min(before):.2f} to"
             f" {max(before):.2f} m before the hazard ({len(moved)} marks)."
-        )
-    if n := sum(text.startswith("Track request") for text, _ in failing):
-        later = gs.FRONT_M[Mode.TRACKS] - gs.FRONT_M[Mode.WHEELS]
-        lines.append(
-            f"- **Track request:** the distance is from the tracks' tip. On wheels the core"
-            f" measures a step from the front wheels (`front_wheels_m`); the tracks' front counts"
-            f" once they are asked for. So the request comes {later:.2f} m later from the tracks'"
-            f" tip than from the wheels ({n} marks)."
         )
     wrapped = [textwrap.fill(line, 100, subsequent_indent="  ") for line in lines]
     return "\n".join(wrapped) or "- none"

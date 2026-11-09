@@ -9,6 +9,7 @@ from mana_core.decision import (
     Ground,
     GroundReport,
     MotionReport,
+    Mount,
     ObstacleReport,
     Priority,
     Source,
@@ -391,6 +392,16 @@ def test_steps_up_ahead():
         DIRECTION,
         True,
     )
+
+
+def test_a_step_is_told_as_soon_as_the_core_asks_for_tracks_for_it():
+    # on wheels the core counts step_m from the tracks' tip, 0.65 m ahead of the front wheels
+    core = DecisionCore(mount=Mount(front_wheels_m=0.45, front_tracks_m=1.1))
+    core.now = 1.0
+    for g in step(Ground.STAIRS_UP, 2.9):  # 2.45 m from the front wheels, 1.8 m from the tip
+        core.on_ground(g)
+    assert core._confirmed_step() is not None
+    assert direction(core, 1.0).text == "Steps up ahead, 2 metres."
 
 
 def test_steps_down_say_stop_and_are_urgent_at_the_edge():
