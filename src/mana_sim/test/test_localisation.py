@@ -27,6 +27,19 @@ def test_errors_are_against_the_ground_truth_from_the_start_pose():
     assert loc.driven_m(rows) == pytest.approx(3.0)
 
 
+def test_a_chair_that_moved_before_the_first_row_is_measured_from_where_it_was_spawned():
+    # map and odom begin at the spawn pose; the first row came 0.2 m later
+    rows = [
+        row(1, (1.2, 1.375, 0.0), m=(0.2, 0.0, 0.0)),
+        row(2, (3.0, 1.475, 0.0), m=(2.0, 0.1, 0.0)),
+    ]
+    e = loc.errors(rows, "mx", "my", loc.INDOOR_START)
+    assert (e.mean_m, e.max_m) == (pytest.approx(0.0), pytest.approx(0.0))
+    # from the first row instead, a perfect localiser reads off by the move before it
+    e = loc.errors(rows, "mx", "my")
+    assert (e.mean_m, e.max_m, e.last_m) == (pytest.approx(0.2),) * 3
+
+
 def test_rows_without_the_frame_are_left_out_and_none_means_none():
     rows = [row(0, (1, 1, 0)), row(1, (2, 1, 0), m=(1.1, 0, 0))]
     e = loc.errors(rows, "mx", "my")

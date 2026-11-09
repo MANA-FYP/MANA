@@ -5,8 +5,9 @@
 A stand-in for a path planner: it steers by the chair's ground-truth pose, as the autopilot (through
 driver_select, so MANA's drive request still caps it), and asks the host for normal driving. Once a
 second it writes the ground truth, the map > base_link pose and the odom > base_link pose (NaN while
-a frame is missing); mana_sim.localisation compares them. Ends when the route is done or after
---timeout seconds of wall time, and prints the errors.
+a frame is missing), the poses looked up at the ground truth's own time; mana_sim.localisation
+compares them from the first row, which it writes before the chair moves, where map and odom
+begin. Ends when the route is done or after --timeout seconds of wall time, and prints the errors.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import csv
 import math
 import sys
 import time
+from collections import deque
 
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
@@ -38,6 +40,7 @@ class LoopDriver(Node):
         super().__init__("loop_driver", parameter_overrides=[Parameter("use_sim_time", value=True)])
         self.route = INDOOR_LOOP * laps
         self.wp, self.gt, self.done = 0, None, False
+        self.history: deque = deque(maxlen=200)  # (time, ground-truth pose), newest last
         self.rows: list[dict] = []
         self.file = open(out, "w", newline="")
         self.log = csv.DictWriter(self.file, COLUMNS)
@@ -53,20 +56,32 @@ class LoopDriver(Node):
     def on_gt(self, m: Odometry) -> None:
         p = m.pose.pose.position
         self.gt = (p.x, p.y, yaw_of(m.pose.pose.orientation))
+        self.history.append((Time.from_msg(m.header.stamp), self.gt))
+        if not self.rows:
+            self.record()  # the first row before the chair moves
 
-    def pose(self, parent: str) -> tuple[float, float, float]:
+    def pose(self, parent: str, at: Time) -> tuple[float, float, float]:
         try:
-            t = self.tf.lookup_transform(parent, "base_link", Time())
+            t = self.tf.lookup_transform(parent, "base_link", at)
         except Exception:  # the frame is not there (yet)
             return (math.nan,) * 3
         tr = t.transform
         return tr.translation.x, tr.translation.y, yaw_of(tr.rotation)
 
-    def record(self) -> None:
-        if self.gt is None:
+    def record(self, lag_s: float = 0.25) -> None:
+        """One row: a ground-truth pose about lag_s old, so that the transforms have reached that
+        time, and map and odom looked up at that time (at 0.4 m/s each 0.1 s apart is 4 cm)."""
+        if not self.history:
             return
-        t = self.get_clock().now().nanoseconds / 1e9
-        row = dict(zip(COLUMNS, (t, *self.gt, *self.pose("map"), *self.pose("odom")), strict=True))
+        newest = self.history[-1][0].nanoseconds
+        at, gt = next(
+            ((s, g) for s, g in reversed(self.history) if newest - s.nanoseconds >= lag_s * 1e9),
+            self.history[0],
+        )
+        mp, op = self.pose("map", at), self.pose("odom", at)
+        if not self.rows and math.isnan(mp[0] + op[0]):
+            return  # the first row needs map and odom, or the start is not compared
+        row = dict(zip(COLUMNS, (at.nanoseconds / 1e9, *gt, *mp, *op), strict=True))
         self.rows.append(row)
         self.log.writerow({k: round(v, 3) for k, v in row.items()})
         self.file.flush()
@@ -76,7 +91,7 @@ class LoopDriver(Node):
         r.header.stamp = self.get_clock().now().to_msg()
         r.mode, r.stop, r.speed_limit, r.reason = 0, False, 1.0, "loop driver"
         self.req.publish(r)
-        if self.gt is None or self.done:
+        if not self.rows or self.done:  # not before the first row is written
             self.cmd.publish(Twist())
             return
         target = self.route[self.wp]
@@ -103,7 +118,7 @@ def main(argv=None) -> int:
     done = f"waypoint {node.wp} of {len(node.route)}; driven {driven_m(node.rows):.1f} m"
     print(done, flush=True)
     for name, x, y in (("map (localiser)", "mx", "my"), ("odom (wheels)", "ox", "oy")):
-        e = errors(node.rows, x, y)
+        e = errors(node.rows, x, y)  # from row 0, written at rest
         print(
             f"{name}: no pose"
             if e is None
