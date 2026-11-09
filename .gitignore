@@ -34,3 +34,5 @@ gazebo_traces/
 
 # phone sessions recorded with demo.server --record: camera frames show faces, keep them private
 recordings/
+# street map tiles kept by demo.server (#161): they show where the person has been
+tile-cache/
