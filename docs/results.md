@@ -191,6 +191,41 @@ What follows for the demo:
   were not measured.
 - Each frame took 1.27 s on the laptop's CPU for depth and the reader together.
 
+## Does the detector's confidence mean what the core's trust assumes? (#87)
+
+Measured on 9 November 2026 with `tools/calibrate_detector.py`: `yolo26n.pt` at 416, as the ROS
+node runs it, on SANPO-Real frames with masks (`tools/fetch_sanpo.py`, 30 train and 30 test
+sessions, one annotated frame in 30). That is 197 train frames and 194 test frames, with 2705 and
+1803 detections of an obstacle class at confidence 0.05 or more. A detection is right when its box
+meets an object of that kind in the mask with IoU 0.5 or more, each object once. Boxes under 40
+pixels high are left out. SANPO's masks can still miss objects, so "right" is a lower bound.
+
+| Confidence | Train: n | Train: right | Test: n | Test: right |
+|---|---|---|---|---|
+| 0.0 to 0.1 | 1175 | 7% | 780 | 6% |
+| 0.1 to 0.2 | 761 | 17% | 409 | 19% |
+| 0.2 to 0.3 | 231 | 33% | 151 | 25% |
+| 0.3 to 0.4 | 133 | 54% | 101 | 41% |
+| 0.4 to 0.5 | 94 | 80% | 78 | 71% |
+| 0.5 to 0.6 | 92 | 87% | 66 | 73% |
+| 0.6 to 0.7 | 87 | 92% | 71 | 89% |
+| 0.7 to 0.8 | 79 | 91% | 80 | 84% |
+| 0.8 to 1.0 | 53 | 91% | 67 | 94% |
+| **Expected calibration error** | | 0.066 | | 0.052 |
+
+- **The confidence is close to calibrated.** The error is 0.05 to 0.07: on average, a bin's
+  confidence and its share right are 5 to 7 points apart.
+- **Between 0.3 and 0.6 the detector is under-confident.** A confidence of 0.4 to 0.5 was right 71
+  to 80 percent of the time.
+- **A map fitted on the train split did not carry over.** Platt scaling (a logistic map of the
+  confidence's logit) and isotonic regression both lowered the test error only to 0.038. Both put
+  a trust of 0.5 at a confidence of about 0.3. But on the test split their trusts of 0.5 to 0.6
+  were right only 41 and 42 percent of the time: worse than the confidence itself, at the trust
+  where the core decides.
+- So the detector's trust stays its confidence, times the light factor (D14). The ground
+  classifier's calibration needs the trained model (#38), and the light factor needs dark frames
+  (#89); both are still open.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).

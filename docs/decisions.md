@@ -258,3 +258,24 @@ Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): `
 
 A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On a level chair where a ramp starts under them, it takes the ramp's plane for the floor and reads the ramp ahead as level until the chair is on it. On synthetic depth, a 0.1 slope starting 0 to 0.3 m ahead of the camera was read as flat (fitted pitch about 6°), and one starting 1 m or more ahead was still read as a ramp. This happens only with the IMU lost, and a ramp is the benign case: the steps down that matter are kept by the height bound above.
 
+## D14. The detector's trust stays its confidence (#87)
+
+**Chosen:** the object detector keeps sending its confidence, times the light factor, as the trust of
+its reports. It is not mapped through a calibration.
+
+**Why.** On SANPO-Real (`results.md`, #87) the confidence was close to calibrated. The expected
+calibration error was 0.066 on the train split and 0.052 on the test split. Two maps fitted on the
+train split lowered the test error only to 0.038. Both were worse than the confidence where the core
+decides: their trusts of 0.5 to 0.6 were right 41 to 42 percent of the time on the test split.
+
+| Option | Problem |
+|---|---|
+| **The confidence as the trust** | Under-confident between 0.3 and 0.6: a confidence of 0.4 to 0.5 is right 71 to 80 percent of the time, and the core ignores it (min_trust 0.5) |
+| Platt scaling of the confidence | ECE 0.038 on test, but its trusts of 0.5 to 0.6 are right 41 percent of the time |
+| Isotonic regression | The same: ECE 0.038, and trusts of 0.5 to 0.6 right 42 percent of the time |
+
+**Limits.** The test split has 1803 detections, so the bins near 0.5 hold only 66 to 101 each.
+SANPO's frames come from cameras worn by people walking, not the chair's camera. A larger set
+(more sessions with masks) could carry a map over better. The ground classifier's calibration and
+the light factor on dark frames are still open (#38, #89).
+
