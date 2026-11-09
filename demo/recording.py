@@ -13,6 +13,7 @@ in git) and blur faces before anything from them is published.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,9 @@ class Recorder:
         self.clock, self.t0, self.frames = clock, None, 0
         self.lines = (self.folder / "session.jsonl").open("x", encoding="utf-8", newline="\n")
         self.disk = ThreadPoolExecutor(1)  # frames are written off the message loop, in order
+        # when the walk began, for its record: a copied folder's files show the day of the copy
+        started = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+        (self.folder / "meta.json").write_text(json.dumps({"started": started}) + "\n")
 
     def _t(self) -> float:
         now = self.clock()
@@ -61,6 +65,15 @@ class Recorder:
     def close(self) -> None:
         self.disk.shutdown(wait=True)  # every frame on disk
         self.lines.close()
+
+
+def started(folder: Path | str) -> str | None:
+    """The day the recording began (UTC, YYYY-MM-DD), from its meta.json; None for a recording
+    made before there was one."""
+    try:
+        return json.loads((Path(folder) / "meta.json").read_text())["started"][:10]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def read(folder: Path | str) -> list[dict]:
