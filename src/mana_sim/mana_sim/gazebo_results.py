@@ -7,23 +7,22 @@ Reads the traces that `mana_core.evaluate --world gazebo` keeps. --update replac
 between its two marker lines in the file, or adds it at the end. Pure Python, no ROS.
 """
 
+import re
 import sys
 from pathlib import Path
 
+from mana_core.decision import Mode
 from mana_core.evaluate import run as play_scripted
 from mana_core.scenarios import SCENARIOS, check
 
 from mana_sim import gazebo_scenarios as gs
 
-# the issue of every scenario that misses a mark in Gazebo: a failing mark has an issue of its own
+# the issue of a mark that is missed in Gazebo for a known reason
 KNOWN_ISSUES = {
-    "stairs": 117,
-    "curb": 117,
-    "imu_lost": 117,
-    "drop": 118,
-    "manual_drop": 118,
-    "dark": 118,
+    "Stops before the drop": 118,
+    "Stops before the person": 118,
 }
+MOVED_ON = re.compile(r"moved on ([\d.]+) m, to ([\d.]+) m before")
 
 
 def mark_results(scenario, trace) -> dict[str, tuple[bool, str]]:
@@ -31,7 +30,7 @@ def mark_results(scenario, trace) -> dict[str, tuple[bool, str]]:
 
 
 def results_markdown(traces: Path) -> str:
-    rows, met, total = [], 0, 0
+    rows, met, total, failing = [], 0, 0, []
     for name, run in gs.RUNS.items():
         path = traces / f"{name}.json"
         if not path.exists():
@@ -41,14 +40,44 @@ def results_markdown(traces: Path) -> str:
         gazebo = mark_results(run.scenario(), gs.trace_from_json(path.read_text()))
         for text, (ok, said) in gazebo.items():
             met, total = met + ok, total + 1
+            failing += [] if ok else [(text, said)]
             was = scripted.get(text)
             scripted_cell = "-" if was is None else ("PASS" if was[0] else "FAIL")
             issue = (
-                "" if ok else f"#{KNOWN_ISSUES[name]}" if name in KNOWN_ISSUES else "**none yet**"
+                "" if ok else f"#{KNOWN_ISSUES[text]}" if text in KNOWN_ISSUES else "**none yet**"
             )
             verdict = "PASS" if ok else "FAIL"
             rows.append(f"| `{name}` | {text} | {scripted_cell} | {verdict} | {said} | {issue} |")
-    return PAGE.format(met=met, total=total, rows="\n".join(rows), routes=routes_table())
+    return PAGE.format(
+        met=met,
+        total=total,
+        rows="\n".join(rows),
+        why=why_marks_fail(failing),
+        routes=routes_table(),
+    )
+
+
+def why_marks_fail(failing: list[tuple[str, str]]) -> str:
+    """What is known about the marks missed in these traces, with the numbers of the traces."""
+    lines = []
+    moved = [tuple(map(float, m.groups())) for _, said in failing if (m := MOVED_ON.search(said))]
+    if moved:
+        on, before = [v for v, _ in moved], [v for _, v in moved]
+        lines.append(
+            f'- **#118:** "Stops before the ..." counts the chair moving on after the first stop'
+            f" as a released stop. In these runs it moved on {min(on):.2f} to {max(on):.2f} m"
+            f" while braking (the stop stayed set to the end), and stood {min(before):.2f} to"
+            f" {max(before):.2f} m before the hazard ({len(moved)} marks)."
+        )
+    if n := sum(text.startswith("Track request") for text, _ in failing):
+        later = gs.FRONT_M[Mode.TRACKS] - gs.FRONT_M[Mode.WHEELS]
+        lines.append(
+            f"- **Track request:** the distance is from the tracks' tip. On wheels the core"
+            f" measures a step from the front wheels (`front_wheels_m`); the tracks' front counts"
+            f" once they are asked for. So the request comes {later:.2f} m later from the tracks'"
+            f" tip than from the wheels ({n} marks)."
+        )
+    return "\n".join(lines) or "- none"
 
 
 def routes_table() -> str:
@@ -80,17 +109,26 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 
 - A fresh simulation for each scenario: the route's world with the chair at the start of the run and
   the objects of the scenario (a box for the person). The chair settles first; the core is started
-  then, and the run begins with its first drive request.
+  then, with `config/core.yaml`, and the run begins with its first drive request (before every
+  sensor has reported: a run can start with "Ground sensors not available, slowing down").
 - The real sensors and nodes: the 3D camera (`depth_node`), the lidar, the IMU, the position and
   link nodes, the core. **The camera's ground classifier (#38) is not trained yet**, so a stand-in
   (`scenario_runner`) says what the scripted camera says (it names the ground, no distance) and is
-  trusted less as the camera image gets dark. The picture of stairs exists only in what the stand-in
-  says.
+  trusted less as the camera image gets dark: in proportion to the image's mean pixel value under
+  60, a value chosen, not measured. It looks ahead from the camera (0.35 m ahead of the chair's
+  centre) and knows the route's stretches, so it is right about the ground every time. The picture
+  of stairs exists only in what the stand-in says.
 - Faults are switched with the `set_fault` service (the camera is darkened for `dark`, the IMU stops
   for `imu_lost`); the user's commands are `UserCommand` messages at the times of the scenario.
-- A mishap is the chair centre on a step on wheels (stairs 22 to 22.7 m, curb 31 to 31.3 m), over
-  the drop (38 m, or the chassis lower than -0.3 m), or at a box. It is judged from the ground
-  truth.
+- Distances are from the chair's front, as in the scripted world: the front wheels (0.47 m ahead
+  of the centre) on wheels, the tracks' tip (1.1 m) on tracks, as the core is told in
+  `config/core.yaml`. The ground truth gives the centre. On wheels the raised tracks reach 0.63 m
+  further than the front wheels, so a box is that much closer to the tracks' tip than the table says.
+- A mishap is the front on a step on wheels (stairs 22 to 22.7 m, curb 31 to 31.3 m), over the drop
+  (38 m, or the chassis lower than -0.3 m), or the tracks' tip at a box's face. The tracks' tip
+  counts on wheels too: raised, the tracks still reach 1.1 m ahead, about 0.4 m above the ground.
+- A run that could not be played (the chair did not settle, the core did not answer, the time ran
+  out) fails every mark and says why.
 
 ### Results
 
@@ -98,13 +136,9 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 |---|---|---|---|---|---|
 {rows}
 
-The two issues behind the failing marks:
+What is known about the missed marks:
 
-- **#117:** the 3D camera reader reports a drop at 0 m while the chair climbs the stairs or the curb
-  (pitched up to 0.47 rad), and the chair stops. This keeps `stairs`, `curb` and `imu_lost` from
-  finishing the climb (6 marks).
-- **#118:** the mark "Stops before the ..." counts the chair's braking distance (0.02 to 0.2 m) as a
-  released stop (3 marks). The chair stops 0.3 to 1.3 m before the hazard.
+{why}
 
 ### The routes
 
@@ -118,7 +152,7 @@ stairs down (26 m) and the drop (38 m) are never driven over. A drop is 1 m deep
 
 ```bash
 colcon build && source install/setup.bash
-ros2 run mana_core evaluate --world gazebo               # all ten (about 10 minutes)
+ros2 run mana_core evaluate --world gazebo               # all ten (about 15 minutes)
 ros2 run mana_core evaluate --world gazebo stairs curb   # some of them
 ros2 run mana_core evaluate --world gazebo --rerun       # play again, also those with a trace
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md

@@ -45,3 +45,20 @@ def test_the_section_replaces_its_old_self_in_the_file_and_keeps_the_rest(tmp_pa
     text = page.read_text()
     assert text.startswith("# Results\n\nthe noisy runs\n")
     assert "second" in text and "first" not in text and text.count(gr.START) == 1
+
+
+def test_the_notes_on_missed_marks_take_their_numbers_from_the_traces():
+    notes = gr.why_marks_fail(
+        [
+            ("Stops before the drop", "stopped, then moved on 0.21 m, to 0.67 m before the drop"),
+            (
+                "Stops before the person",
+                "stopped, then moved on 0.02 m, to 0.91 m before the person",
+            ),
+            ("Track request at least 1.5 m before the first step", "tracks requested 1.27 m"),
+        ]
+    )
+    assert "moved on 0.02 to 0.21 m" in notes and "stood 0.67 to 0.91 m" in notes
+    assert "(2 marks)" in notes and "0.63 m later from the tracks' tip" in notes
+    assert gr.why_marks_fail([]) == "- none"
+    assert gr.KNOWN_ISSUES["Stops before the person"] == 118

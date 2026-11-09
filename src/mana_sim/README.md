@@ -126,7 +126,7 @@ The ten original scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, 
 `picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
 
 ```bash
-ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 10 minutes)
+ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 15 minutes)
 ros2 run mana_core evaluate --world gazebo stairs curb    # some of them
 ros2 run mana_core evaluate --world gazebo --rerun        # play again; traces are kept in gazebo_traces/
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
@@ -134,10 +134,15 @@ python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 
 For each scenario `gazebo_run.py` writes the world of the run (the chair at its start, a box for the
 person), starts the simulation headless, waits for `scenario_runner` to say the chair has settled,
-starts the core, and the runner plays the scenario: it says the user's commands, switches the faults,
-stands in for the camera's ground classifier (still to be trained) and records the chair's place, the
-drive requests and the messages as a trace. `evaluate` scores it with `check()`, as it scores a
-scripted run. The scenarios, their start and end on the route, and what differs from the scripted
+starts the core (with `config/core.yaml`), and the runner plays the scenario: it says the user's
+commands, switches the faults, stands in for the camera's ground classifier (still to be trained) and
+records the chair's place, the drive requests and the messages as a trace. The chair's place is its
+front, as in the scripted world: the front wheels (0.47 m ahead of the centre) on wheels, the tracks'
+tip (1.1 m) on tracks. A box is hit when the tracks' tip reaches its face, on wheels too, because the
+raised tracks reach as far. `evaluate` scores the trace with `check()`, as it scores a scripted run.
+If the chair does not settle, the core does not answer or the run takes too long, no trace is written
+and every mark of that scenario fails; the next scenario is still played. The logs of a run are in
+`gazebo_traces/<scenario>_logs/`. The scenarios, their start and end on the route, and what differs from the scripted
 route are in `gazebo_scenarios.py`; the results are in the Gazebo section of
 [docs/results.md](../../docs/results.md).
 
