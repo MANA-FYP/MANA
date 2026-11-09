@@ -151,6 +151,7 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
+    down_drop_m: float = 0.6  # after that yes, a drop no deeper than this is those stairs (#52)
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
@@ -401,7 +402,20 @@ class DecisionCore:
         )
 
     def _grounds(self) -> list[GroundReport]:
-        return [r for r in self.ground.values() if self._ok(r)]
+        """The usable ground reports. After a yes to stairs down, a drop no deeper than
+        down_drop_m counts as those stairs: once the 3D camera is past the top edge, the steps
+        are in its blind zone and it sees one step down, to the floor at their foot, which it
+        reads as a drop (in Gazebo, 0.52 m for three steps of 17 cm). Without that the chair
+        stopped at the edge for good (#52). A deeper drop, or one of unknown depth, still stops."""
+        found = [r for r in self.ground.values() if self._ok(r)]
+        if not self.down_ok:
+            return found
+        return [
+            replace(r, ground=Ground.STAIRS_DOWN)
+            if r.ground == Ground.DROP and r.step_height_m <= self.limits.down_drop_m
+            else r
+            for r in found
+        ]
 
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)

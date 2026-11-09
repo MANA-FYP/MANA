@@ -80,3 +80,12 @@ def nearest_ahead(
         if best is None or r < best[0]:
             best = (r, bearing)
     return best
+
+
+def scan_is_level(pitch_rad: float | None, roll_rad: float | None, max_rad: float) -> bool:
+    """Whether the lidar's scan plane is level enough for its echoes to be obstacles. A 2D lidar on
+    a chair pitched nose down on stairs sweeps a plane that runs into the steps or the floor ahead,
+    and every echo then looks like an obstacle: going down the stairs in Gazebo, the chair stopped
+    for one for good (#52). True while the tilt is not known yet."""
+    tilt = max(abs(pitch_rad or 0.0), abs(roll_rad or 0.0))
+    return tilt <= max_rad

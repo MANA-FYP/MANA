@@ -773,6 +773,38 @@ def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
     assert fed(c, stairs_down(), NOW + 4.0).reason == ASK_DOWN
 
 
+def test_after_the_yes_the_floor_at_the_foot_of_the_stairs_is_not_a_drop():
+    # past the top edge the 3D camera sees one step down, to the floor at the stairs' foot, and
+    # reads it as a drop: 0.52 m in Gazebo for three steps (#52)
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    at_the_edge = (
+        GroundReport(NOW + 0.2, 0.9, CAM, Ground.STAIRS_DOWN),
+        GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=0.52),
+    )
+    for r in at_the_edge:
+        c.on_ground(r)
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
+
+
+@pytest.mark.parametrize("height", [1.0, math.nan], ids=["deep", "unknown"])
+def test_after_the_yes_a_deep_drop_or_one_of_unknown_depth_still_stops(height):
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    fed(c, stairs_down(), NOW + 0.1)
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CAM, Ground.STAIRS_DOWN))
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=height))
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+def test_without_a_yes_a_shallow_drop_still_stops():
+    d = core(ground(CAM, Ground.FLAT), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.3, 0.52))
+    assert (d.decision.stop, d.decision.reason) == (True, "Drop ahead, stopping")
+
+
 def test_stairs_up_still_change_to_tracks_without_asking():
     assert core(*stairs()).decision.reason == "Stairs ahead, changing to tracks"
 
