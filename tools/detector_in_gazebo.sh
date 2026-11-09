@@ -13,11 +13,14 @@ WEIGHTS=${1:?weights, e.g. yolo26n.pt}
 shift
 SRC=$(ros2 pkg prefix mana_sim)/share/mana_sim/worlds/mana_route.sdf
 PERSON="https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person"
+START="<pose>1 0 0.38 0 0 0</pose>"  # the chair's start in mana_route.sdf, moved to -1 m below
+# if the world's start changes, sed would move nothing and every distance would be 2 m short
+grep -qF "$START" "$SRC" || { echo "the chair's start $START is not in $SRC"; exit 1; }
 for D in "$@"; do
   if pgrep -f "gz sim" >/dev/null; then echo "another gz sim runs"; exit 1; fi
   X=$(python3 -c "print(-1 + 0.35 + $D)")  # the chair at -1 m, its camera 0.35 m ahead
   WORLD=$(mktemp --suffix .sdf)
-  sed "s#<pose>1 0 0.38 0 0 0</pose>#<pose>-1 0 0.38 0 0 0</pose>#" "$SRC" |
+  sed "s#$START#<pose>-1 0 0.38 0 0 0</pose>#" "$SRC" |
     sed "s#  </world>#    <include><uri>$PERSON</uri><name>person</name><pose>$X 0 0 0 0 3.1416</pose></include>\n  </world>#" >"$WORLD"
   setsid ros2 launch mana_sim world.launch.py world:="$WORLD" headless:=true detector:=true \
     weights:="$WEIGHTS" >"$WORLD.log" 2>&1 &
