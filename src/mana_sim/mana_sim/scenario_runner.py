@@ -11,8 +11,8 @@ runs begin with the first tick. The runner is the user and the test bench for th
 - it switches the faults of the scenario (SetFault) at their times or places,
 - it stands in for the camera's ground classifier (GroundReport, source CAMERA), because the real
   one is still to be trained, with the trust falling with the light of the camera image,
-- it records the chair's place (ground truth), what the core asks of the host (DriveRequest) and
-  what the user hears (UserMessage) as a mana_core Trace, and writes it as JSON.
+- it records the chair's place (its front, from the ground truth), what the core asks of the host
+  (DriveRequest) and what the user hears (UserMessage) as a mana_core Trace, and writes it as JSON.
 
 The run ends at the end of the route, at a mishap, or at the time limit. See gazebo_scenarios.py.
 """
@@ -47,7 +47,7 @@ class ScenarioRunner(Node):
         self.rec = gs.Recording()
         self.says = sorted(run.says, key=lambda s: s.at_s)
         self.faults = list(run.faults)
-        self.x: float | None = None  # metres from the start, from the ground truth
+        self.centre: float | None = None  # the chair's centre, metres from the start
         self.z = 0.38
         self.request: DriveRequest | None = None
         self.mean_pixel = gs.LIT_MEAN
@@ -68,9 +68,9 @@ class ScenarioRunner(Node):
         return self.get_clock().now().nanoseconds / 1e9
 
     def on_truth(self, m: Odometry) -> None:
-        self.x = m.pose.pose.position.x - self.run_.start_x
+        self.centre = m.pose.pose.position.x - self.run_.start_x
         self.z = m.pose.pose.position.z
-        self.settling.append((self.now_s(), self.x, self.z))
+        self.settling.append((self.now_s(), self.centre, self.z))
         self.settling = [s for s in self.settling if s[0] > self.now_s() - 1.0]
 
     def on_request(self, m: DriveRequest) -> None:
@@ -90,7 +90,7 @@ class ScenarioRunner(Node):
 
     def settled(self) -> bool:
         """The simulation has run a while and the chair has stopped moving about."""
-        if self.x is None or self.now_s() < SETTLE_AFTER_S or len(self.settling) < 5:
+        if self.centre is None or self.now_s() < SETTLE_AFTER_S or len(self.settling) < 5:
             return False
         xs = [s[1] for s in self.settling]
         zs = [s[2] for s in self.settling]
@@ -100,8 +100,8 @@ class ScenarioRunner(Node):
         if self.finished:
             return
         now = self.now_s()
-        if self.x is not None:
-            self.report_ground(self.x)  # the core finds the camera's reports waiting
+        if self.centre is not None:  # the core finds the camera's reports waiting
+            self.report_ground(self.centre + gs.CAMERA_M)
         if self.ready_at is None:
             if self.settled():
                 self.ready_at = now
@@ -116,7 +116,9 @@ class ScenarioRunner(Node):
                 self.finish("the core did not answer")
             return
         t = now - self.t0
-        x, r = self.x, self.request
+        r = self.request
+        mode = Mode(int(r.mode))
+        x = gs.front_m(self.centre, mode)
         while self.says and self.says[0].at_s <= t:
             say = self.says.pop(0)
             self.command.publish(
@@ -124,7 +126,6 @@ class ScenarioRunner(Node):
             )
             self.rec.trace.said.append((t, say.command))
         self.switch_faults(t, x)
-        mode = Mode(int(r.mode))
         speed = round(float(r.speed_limit), 4)  # a float32 0.3 is not 0.3
         self.rec.trace.samples.append(Sample(t, x, mode, r.stop, speed, r.reason))
         self.rec.add_mishaps(gs.mishaps_at(x, self.z, mode, self.run_.start_x, self.run_.boxes))

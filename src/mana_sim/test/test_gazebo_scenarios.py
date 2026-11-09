@@ -1,5 +1,7 @@
 """The scenarios on the Gazebo route: marks, world files, traces. No ROS, no Gazebo."""
 
+import math
+import re
 from pathlib import Path
 
 import pytest
@@ -75,9 +77,50 @@ def test_mishaps_on_a_step_on_wheels_over_the_drop_and_at_an_obstacle():
     assert gs.mishaps_at(5.0, 0.7, Mode.WHEELS, start, ()) == []  # at the top
     assert "went over the drop" in gs.mishaps_at(0.0, -1.0, Mode.WHEELS, 30.0, ())[0]
     assert "went over the drop" in gs.mishaps_at(8.0, 0.4, Mode.WHEELS, 30.0, ())[0]
+
+
+def test_the_chairs_place_is_its_front_as_the_core_is_told():
+    yaml = (Path(__file__).parents[1] / "config" / "core.yaml").read_text()
+    core = dict(re.findall(r"^\s+(\w+_m): ([0-9.]+)", yaml, re.M))
+    assert gs.FRONT_M == {
+        Mode.WHEELS: float(core["front_wheels_m"]),
+        Mode.TRACKS: float(core["front_tracks_m"]),
+    }
+    assert gs.CAMERA_M == float(core["camera_m"])
+    assert gs.front_m(1.0, Mode.WHEELS) == pytest.approx(1.47)
+    assert gs.front_m(1.0, Mode.TRACKS) == pytest.approx(2.1)
+
+
+def test_the_tracks_tip_is_their_incline_s_far_end_in_the_model():
+    model = (Path(__file__).parents[1] / "models" / "mana_chair" / "model.sdf").read_text()
+    pose = re.search(r'<collision name="front_incline">\s*<pose>([^<]+)</pose>', model).group(1)
+    x, _, _, _, pitch, _ = (float(v) for v in pose.split())
+    size = re.search(r'name="front_incline">.*?<size>([^<]+)</size>', model, re.S).group(1)
+    long, _, thick = (float(v) for v in size.split())
+    tip = x + long / 2 * math.cos(pitch) + thick / 2 * abs(math.sin(pitch))
+    assert tip == pytest.approx(gs.FRONT_M[Mode.TRACKS], abs=0.01)
+
+
+def test_a_drop_or_a_step_is_reached_by_the_front_not_the_centre():
+    # the centre 0.33 m before the drop puts the front wheels 0.14 m past it
+    centre = gs.DROP_X - 0.33 - 34.5
+    over = gs.mishaps_at(gs.front_m(centre, Mode.WHEELS), 0.38, Mode.WHEELS, 34.5, ())
+    assert "went over the drop" in over[0]
+    # on wheels the front wheels are on the stairs with the centre 0.4 m before them
+    centre = 22.0 - 0.4 - 18.2
+    on = gs.mishaps_at(gs.front_m(centre, Mode.WHEELS), 0.38, Mode.WHEELS, 18.2, ())
+    assert "on the stairs on wheels" in on[0]
+
+
+def test_a_box_is_hit_at_its_face_by_the_tracks_tip_on_wheels_too():
     box = gs.RUNS["dark"].boxes
-    assert "hit the person" in gs.mishaps_at(8.1, 0.4, Mode.WHEELS, -1.0, box)[0]
-    assert gs.mishaps_at(7.0, 0.4, Mode.WHEELS, -1.0, box) == []
+    assert gs.PERSON.face_x == pytest.approx(6.8) and gs.PERSON_AT == pytest.approx(7.8)
+    # the dark run of the review: the centre at 5.69 m, the tracks' tip 1 cm from the face
+    centre = 5.69 + 1.0
+    for mode in Mode:
+        assert gs.mishaps_at(gs.front_m(centre, mode), 0.38, mode, -1.0, box) == []
+        hit = gs.mishaps_at(gs.front_m(centre + 0.02, mode), 0.38, mode, -1.0, box)
+        assert hit == ["hit the person at 7.8 m"]
 
 
 def test_the_recording_keeps_each_kind_of_mishap_once():

@@ -4,8 +4,9 @@ mana_core.scenarios has 1-D routes and marks. Here each of the ten original scen
 start and an end on the route of worlds/mana_route.sdf, the objects it needs, and what is
 switched when. Every mark is the same function with the same limit as in the scripted scenario
 (`no_tracks`, `tracks_before`, `slower_on`, `stops_before` ...); only the distances in them are the
-ones of this route, in metres from the start of the run. `check(scenario, trace)` then scores a
-trace recorded in Gazebo exactly as it scores a scripted one.
+ones of this route, in metres from the start of the run. As in the scripted world, the chair's place
+is its front: the front wheels on wheels, the tracks' tip on tracks (front_m). `check(scenario,
+trace)` then scores a trace recorded in Gazebo exactly as it scores a scripted one.
 
 Pure Python, no ROS. scenario_runner.py records the traces, gazebo_run.py plays a scenario.
 """
@@ -26,6 +27,18 @@ STEP_ZONES = (("stairs", 22.0, 22.7), ("curb", 31.0, 31.3))  # on wheels here is
 DROP_X = 38.0
 FELL_Z = -0.3  # the chassis this low: it went over the drop
 
+# metres ahead of the chair's centre (the model's origin, which the ground truth gives), as
+# config/core.yaml tells the core (models/mana_chair/model.sdf): the front wheels' tread, and the
+# tracks' tip (2.2 m long, centred on the chassis). The tracks reach that far up or down: raised,
+# their tip is about 0.4 m above the ground, so it is what meets a box first on wheels too.
+FRONT_M = {Mode.WHEELS: 0.47, Mode.TRACKS: 1.1}
+CAMERA_M = 0.35  # the camera (frames.SENSORS camera_link)
+
+
+def front_m(centre_m: float, mode: Mode) -> float:
+    """Where the chair's front is, for the chair's centre at centre_m, asking for this mode."""
+    return centre_m + FRONT_M[mode]
+
 
 @dataclass(frozen=True)
 class Box:
@@ -40,6 +53,11 @@ class Box:
     @property
     def z(self) -> float:
         return self.size[2] / 2
+
+    @property
+    def face_x(self) -> float:
+        """The face the chair comes to."""
+        return self.x - self.size[0] / 2
 
 
 @dataclass(frozen=True)
@@ -104,14 +122,11 @@ class GazeboRun:
             self.marks,
         )
 
-    def obstacles(self) -> list[tuple[float, str]]:
-        """(metres from the start, label) of the boxes that count as something to hit."""
-        return [(b.x - self.start_x, b.name) for b in self.boxes]
-
 
 # ---- the ten scenarios on the route
 
 PERSON = Box("person", 7.0, (0.4, 0.6, 1.7))
+PERSON_AT = PERSON.face_x + 1.0  # its face, from a start at -1 m
 STAIRS_AT = 3.8  # the stairs, 22 m along the route, from a start at 18.2 m (the ramp ends at 18 m)
 STAIRS_TOP = 4.5  # the top of the third step
 CAM_STAIRS = Stretch(STAIRS_AT, STAIRS_TOP, Ground.STAIRS_UP, pitch_rad=0.55, height_m=0.17)
@@ -220,12 +235,12 @@ RUNS = {
             "dark",
             start_x=-1.0,
             end_x=7.0,
-            camera=Route(8.0, obstacles=(Obstacle(8.0, "person"),)),
+            camera=Route(8.0, obstacles=(Obstacle(PERSON_AT, "person"),)),
             duration_s=20.0,
             boxes=(PERSON,),
             faults=(FaultStep("camera", "dark", True, 0.05, at_s=0.0),),
-            marks=(sc.stops_before(8.0, "person"), sc.tells("Obstacle ahead, stopping")),
-            note="the person is a box 1.7 m high at 7 m; the camera is darkened by a fault",
+            marks=(sc.stops_before(PERSON_AT, "person"), sc.tells("Obstacle ahead, stopping")),
+            note="the person is a box 1.7 m high, its face at 6.8 m; the camera is darkened",
         ),
         GazeboRun(
             "imu_lost",
@@ -248,9 +263,11 @@ RUNS = {
 
 
 def mishaps_at(x_m: float, z_m: float, mode: Mode, start_x: float, boxes) -> list[str]:
-    """What is wrong with a chair at x_m metres from start_x and z_m high, asking for this mode:
-    on a step on wheels, over the drop, or at an obstacle. Same rules as World.move."""
+    """What is wrong with a chair whose front is x_m metres from start_x, its centre z_m high,
+    asking for this mode: on a step on wheels, over the drop, or at a box's face. Same rules as
+    World.move. A box is met by the tracks' tip, on wheels too."""
     x = start_x + x_m
+    tip = x - FRONT_M[mode] + FRONT_M[Mode.TRACKS]
     found = []
     for what, begin, end in STEP_ZONES:
         if begin <= x < end and mode == Mode.WHEELS:
@@ -258,8 +275,8 @@ def mishaps_at(x_m: float, z_m: float, mode: Mode, start_x: float, boxes) -> lis
     if x >= DROP_X or z_m < FELL_Z:
         found.append(f"went over the drop at {DROP_X - start_x:.1f} m")
     for box in boxes:
-        if x >= box.x:
-            found.append(f"hit the {box.name} at {box.x - start_x:.1f} m")
+        if tip >= box.face_x:
+            found.append(f"hit the {box.name} at {box.face_x - start_x:.1f} m")
     return found
 
 
@@ -354,8 +371,8 @@ LIT_MEAN = 60.0  # mean pixel value of a lit scene; the camera is trusted less i
 
 
 def camera_ground(route: Route, x_m: float) -> Ground:
-    """What the camera stand-in says about the ground ahead, as the scripted camera does: it names
-    the ground but gives no distance. The ground classifier of the real camera is still to be
+    """What the camera stand-in at x_m says about the ground ahead, as the scripted camera does: it
+    names the ground but gives no distance. The ground classifier of the real camera is still to be
     trained; until then the stand-in lets a scenario test the rules that need two sensors."""
     ahead = [
         s
