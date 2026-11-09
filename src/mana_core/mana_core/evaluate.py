@@ -137,12 +137,9 @@ def gazebo(names: list[str], traces: str, rerun: bool) -> int:
         return 2
     failed = 0
     for n in names:
-        path = Path(traces) / f"{n}.json"
-        if rerun or not path.exists():
-            print(f"{n}: playing in Gazebo ...", flush=True)
-            path = gr.play(n, Path(traces))
+        scored = gr.results(n, Path(traces), rerun)  # a run that could not be played fails
         print(f"\n{gs.RUNS[n].scenario().title} [{n}]: {gs.RUNS[n].scenario().shows}")
-        for text, ok, measured in gr.score(n, path):
+        for text, ok, measured in scored:
             failed += not ok
             print(f"  {'PASS' if ok else 'FAIL'}  {text:<70} {measured}")
     print("\nAll pass marks met." if not failed else f"\n{failed} pass mark(s) failed.")

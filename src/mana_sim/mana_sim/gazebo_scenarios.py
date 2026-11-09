@@ -26,6 +26,7 @@ from mana_core import scenarios as sc
 STEP_ZONES = (("stairs", 22.0, 22.7), ("curb", 31.0, 31.3))  # on wheels here is a mishap
 DROP_X = 38.0
 FELL_Z = -0.3  # the chassis this low: it went over the drop
+NOT_PLAYED = "run not played: "  # what the runner logs when there is no run to score
 
 # metres ahead of the chair's centre (the model's origin, which the ground truth gives), as
 # config/core.yaml tells the core (models/mana_chair/model.sdf): the front wheels' tread, and the

@@ -5,18 +5,19 @@
 For every scenario it writes the world of the run (the chair at the start, the boxes), starts the
 simulation headless, the core and the scenario runner, waits for the runner to write its trace,
 and stops everything. A fresh simulation for each run keeps the runs apart: the chair is on
-wheels, the slides are down and no fault is on. mana_core.evaluate --world gazebo calls this.
+wheels, the slides are down and no fault is on. A run that could not be played (the chair did not settle, the core did not answer, the time
+ran out) leaves no trace and is scored as failing every mark, and the next scenario is played.
+mana_core.evaluate --world gazebo calls this.
 """
 
 import os
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-from mana_core.scenarios import check
+from mana_core.scenarios import NO_MISHAP, check
 
 from mana_sim import gazebo_scenarios as gs
 
@@ -30,10 +31,25 @@ def share_dir() -> Path:
     return Path(get_package_share_directory("mana_sim"))
 
 
+class RunFailed(RuntimeError):
+    """The scenario could not be played to the end, so there is no trace to score."""
+
+
 def _start(cmd: list[str], log: Path) -> subprocess.Popen:
-    return subprocess.Popen(
-        cmd, stdout=open(log, "w"), stderr=subprocess.STDOUT, start_new_session=True
-    )
+    with open(log, "w") as out:  # the child has its own copy of the file
+        return subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def why_not_played(runner_log: str, returncode: int | None) -> str:
+    """Why the runner left no trace: what it said, or that it was stopped."""
+    said = [
+        line.split(gs.NOT_PLAYED, 1)[1] for line in runner_log.splitlines() if gs.NOT_PLAYED in line
+    ]
+    if said:
+        return said[-1].strip()
+    if returncode is None or returncode < 0:
+        return "the runner did not finish in time"
+    return f"the runner exited with {returncode} and wrote no trace"
 
 
 def _stop(procs: list[subprocess.Popen]) -> None:
@@ -55,7 +71,7 @@ def _stop(procs: list[subprocess.Popen]) -> None:
 
 
 def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
-    """Run one scenario; returns the path of its trace. Raises if no trace was written."""
+    """Run one scenario; returns the path of its trace. Raises RunFailed if it wrote none."""
     run = gs.RUNS[name]
     out_dir.mkdir(parents=True, exist_ok=True)
     trace = out_dir / f"{name}.json"
@@ -64,7 +80,8 @@ def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
     ready.unlink(missing_ok=True)
     world = out_dir / f"{name}.sdf"
     world.write_text(gs.world_for((share_dir() / "worlds" / "mana_route.sdf").read_text(), run))
-    logs = Path(tempfile.mkdtemp(prefix=f"mana_{name}_"))
+    logs = out_dir / f"{name}_logs"
+    logs.mkdir(exist_ok=True)
     clock = ["--ros-args", "-p", "use_sim_time:=true"]
     procs = [
         _start(
@@ -100,16 +117,37 @@ def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
             runner.wait(timeout=run.duration_s * 4 + extra_s)
         except subprocess.TimeoutExpired:
             pass
+        returncode = runner.poll()
     finally:
         _stop(procs)
-    if not trace.exists():
-        raise RuntimeError(f"{name}: no trace was written; logs are in {logs}")
+    if returncode != 0 or not trace.exists():
+        trace.unlink(missing_ok=True)
+        why = why_not_played((logs / "runner.log").read_text(errors="replace"), returncode)
+        raise RunFailed(f"{why}; logs are in {logs}")
     return trace
 
 
 def score(name: str, trace_path: Path) -> list[tuple[str, bool, str]]:
     trace = gs.trace_from_json(trace_path.read_text())
     return [(m.text, ok, said) for m, ok, said in check(gs.RUNS[name].scenario(), trace)]
+
+
+def not_played(name: str, why: str) -> list[tuple[str, bool, str]]:
+    """Every mark of a run that could not be played, failed."""
+    marks = (*gs.RUNS[name].scenario().marks, NO_MISHAP)
+    return [(m.text, False, f"not played: {why}") for m in marks]
+
+
+def results(name: str, traces: Path, rerun: bool = True) -> list[tuple[str, bool, str]]:
+    """Play the scenario (or take its trace, unless rerun) and score it."""
+    path = traces / f"{name}.json"
+    if rerun or not path.exists():
+        print(f"{name}: playing in Gazebo ...", flush=True)
+        try:
+            path = play(name, traces)
+        except RunFailed as e:
+            return not_played(name, str(e))
+    return score(name, path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -121,10 +159,9 @@ def main(argv: list[str] | None = None) -> int:
     out = Path("gazebo_traces")
     failed = 0
     for name in names:
-        print(f"\n{name}: playing in Gazebo ...", flush=True)
-        results = score(name, play(name, out))
-        print(f"{gs.RUNS[name].scenario().title} [{name}]")
-        for text, ok, said in results:
+        scored = results(name, out)
+        print(f"\n{gs.RUNS[name].scenario().title} [{name}]")
+        for text, ok, said in scored:
             failed += not ok
             print(f"  {'PASS' if ok else 'FAIL'}  {text:<70} {said}")
     print("\nAll pass marks met." if not failed else f"\n{failed} pass mark(s) failed.")

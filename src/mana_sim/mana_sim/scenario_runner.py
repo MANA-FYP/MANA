@@ -14,7 +14,9 @@ runs begin with the first tick. The runner is the user and the test bench for th
 - it records the chair's place (its front, from the ground truth), what the core asks of the host
   (DriveRequest) and what the user hears (UserMessage) as a mana_core Trace, and writes it as JSON.
 
-The run ends at the end of the route, at a mishap, or at the time limit. See gazebo_scenarios.py.
+The run ends at the end of the route, at a mishap, or at the time limit. If the chair does not
+settle or the core does not answer, no trace is written and the runner exits with 1: that is not a
+run to score. See gazebo_scenarios.py.
 """
 
 import argparse
@@ -54,6 +56,7 @@ class ScenarioRunner(Node):
         self.t0: float | None = None
         self.started_wall = self.now_s()
         self.finished = False
+        self.failed = False
 
         self.create_subscription(Odometry, "/model/mana_chair/ground_truth", self.on_truth, 10)
         self.create_subscription(DriveRequest, "drive_request", self.on_request, 10)
@@ -107,13 +110,13 @@ class ScenarioRunner(Node):
                 self.ready_at = now
                 open(self.ready_file, "w").write("ready\n")  # now the core can be started
             elif now - self.started_wall > READY_TIMEOUT_S:
-                self.finish("the chair did not settle")
+                self.finish("the chair did not settle", failed=True)
             return
         if self.t0 is None:
             if self.request is not None:
                 self.t0 = now  # the run begins with the core's first drive request
             elif now - self.ready_at > READY_TIMEOUT_S:
-                self.finish("the core did not answer")
+                self.finish("the core did not answer", failed=True)
             return
         t = now - self.t0
         r = self.request
@@ -163,11 +166,14 @@ class ScenarioRunner(Node):
             )
             self.get_logger().info(f"at {t:.1f} s, {x:.1f} m: {f.sensor} {f.kind} {f.active}")
 
-    def finish(self, why: str) -> None:
-        self.finished = True
-        self.get_logger().info(f"run over: {why}")
-        with open(self.out, "w") as f:
-            f.write(gs.trace_to_json(self.rec.trace))
+    def finish(self, why: str, failed: bool = False) -> None:
+        self.finished, self.failed = True, failed
+        if failed:
+            self.get_logger().error(gs.NOT_PLAYED + why)
+        else:
+            self.get_logger().info(f"run over: {why}")
+            with open(self.out, "w") as f:
+                f.write(gs.trace_to_json(self.rec.trace))
         raise SystemExit
 
 
@@ -187,3 +193,4 @@ def main() -> None:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+    sys.exit(1 if node.failed else 0)
