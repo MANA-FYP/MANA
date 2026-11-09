@@ -40,6 +40,21 @@ the data, so you can show the alert link changing.
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
 
+### Or any other camera
+
+The vision part can be tested without the phone (#132). `demo.camera` sends frames from the
+laptop's webcam, a USB or IP camera, or a video file to the server, the way the phone page does:
+
+```bash
+python -m demo.camera                             # the laptop's webcam
+python -m demo.camera --source 1                  # a USB camera
+python -m demo.camera --source rtsp://192.168.1.20/stream   # an IP camera
+python -m demo.camera --source walk.mp4 --loop    # a video file
+```
+
+Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
+and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
+
 ## The phone screen
 
 Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an
