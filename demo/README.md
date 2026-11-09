@@ -55,6 +55,24 @@ python -m demo.camera --source walk.mp4 --loop    # a video file
 Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
 and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
 
+### Record a walk and play it again
+
+A walk can be kept and run through MANA again, the same messages at the same pace (#89):
+
+```bash
+python -m demo.server --record recordings/stairs-1      # use the phone as usual
+python -m demo.replay recordings/stairs-1               # later, into a running server
+python -m demo.replay recordings/stairs-1 --speed 4     # four times as fast
+```
+
+The folder has `session.jsonl`, one line per message from the phone with its time, and each
+camera frame as a JPEG in `frames/`. The microphone's raw sound is not kept; the words heard are.
+A folder that already holds a recording is refused, so a restart cannot overwrite one.
+Steps are counted on the phone's own clock, so a faster replay walks the same path. A recorded
+40 s walk (1,324 messages, 207 frames, 4.8 MB) played back into a fresh server ended on the same
+step count and GPS position as when it was live. The frames show faces: `recordings/` is not in
+git, and a recording is kept private unless the faces are blurred first.
+
 ## The phone screen
 
 Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an

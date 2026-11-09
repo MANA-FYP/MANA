@@ -83,3 +83,7 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Licence:** CC BY-NC 4.0, as listed on the Zenodo record: free for research and teaching, **not for commercial use**. A model fine-tuned on it inherits that limit, which is fine for this project but must be noted if MANA is ever sold.
 - **Contents:** 8,732 labelled clips of up to 4 seconds in 10 classes (6.0 GB). MANA uses `siren` and `car_horn` against the other eight.
 - **Split:** the 10 official folds. The authors ask that results are reported with 10-fold cross-validation on these folds and never with a random split (clips from the same recording sit in the same fold). We report the mean over the 10 folds.
+
+## Our own phone recordings
+
+Walks recorded with `python -m demo.server --record` (#89, see [`demo/README.md`](../demo/README.md#record-a-walk-and-play-it-again)) are kept out of git in `recordings/`. They hold camera frames of real places and the people in them, and GPS positions, so they stay with the team. Before a frame from one goes into a report or a slide, the faces must be blurred, the GPS left out, and anyone recorded asked first.

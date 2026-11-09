@@ -31,3 +31,6 @@ Thumbs.db
 
 # traces of the scenarios played in Gazebo (mana_core.evaluate --world gazebo)
 gazebo_traces/
+
+# phone sessions recorded with demo.server --record: camera frames show faces, keep them private
+recordings/
