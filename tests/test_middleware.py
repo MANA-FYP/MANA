@@ -822,6 +822,14 @@ def test_on_foot_the_first_second_of_a_walk_is_not_wheel_slip_either():
     assert m.tick(1.0)["decision"]["reason"] != "Wheel slip, changing to tracks"
 
 
+@pytest.mark.parametrize("word", ["stop", "Stop.", "STOP!", " stop, "])
+def test_a_spoken_stop_with_the_recognisers_punctuation_still_stops(word):
+    # Safari on an iPhone, and Chrome at times, add punctuation: "Stop." must stop all the same
+    m = Middleware()
+    assert m.on_word(word, 0.9, now=1.0) == Command.STOP
+    assert m.tick(1.0)["decision"]["stop"]
+
+
 def test_saying_mark_this_place_then_where_is_the_mark():
     m = Middleware()
     m.on_heard("mark this place", now=1.0)
