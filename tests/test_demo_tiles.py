@@ -94,3 +94,57 @@ def test_the_server_serves_tiles_and_the_dashboard_asks_it(tmp_path):
 
     run(go())
     assert 'const TILE = "/tiles/"' in (WEB / "dashboard.js").read_text(encoding="utf-8")
+
+
+def test_a_copy_that_cannot_be_written_whole_is_not_kept_but_the_tile_is_served(
+    tmp_path, monkeypatch
+):
+    # the copy goes to a .part file first and is put in place whole (Waqas, #162)
+    from demo import tiles
+
+    def stopped(*_):
+        raise OSError("the server stopped mid-write")
+
+    monkeypatch.setattr(tiles.os, "replace", stopped)
+    osm = Upstream()
+    cache = TileCache(tmp_path, osm)
+    assert run(cache.get(5, 1, 2)).startswith(PNG)  # served all the same
+    assert not (tmp_path / "5" / "1" / "2.png").exists()  # but no copy, broken or not
+    assert not (tmp_path / "5" / "1" / "2.part").exists()
+    osm.online = False
+    assert run(cache.get(5, 1, 2)) is None  # offline: nothing, so the grid, not a broken tile
+
+
+def test_the_tiles_come_over_one_session_named_for_the_app(tmp_path, monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    from demo import tiles
+
+    agents, peers = [], set()
+
+    async def tile(request):
+        agents.append(request.headers.get("User-Agent"))
+        peers.add(request.transport.get_extra_info("peername"))  # one connection: one port
+        return web.Response(body=PNG, content_type="image/png")
+
+    async def go():
+        app = web.Application()
+        app.router.add_get("/{z}/{x}/{y}.png", tile)
+        server = TestServer(app)
+        await server.start_server()
+        monkeypatch.setattr(tiles, "UPSTREAM", str(server.make_url("/")) + "{z}/{x}/{y}.png")
+        cache = TileCache(tmp_path)
+        try:
+            for x in range(4):
+                assert (await cache.get(3, x, 1)) == PNG
+            session = cache.session
+            assert session is not None and not session.closed
+        finally:
+            await cache.close()
+            await server.close()
+        assert session.closed and cache.session is None
+
+    run(go())
+    assert agents == [tiles.AGENT] * 4
+    assert len(peers) == 1  # the four tiles over one kept connection

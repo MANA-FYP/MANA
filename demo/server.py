@@ -589,6 +589,8 @@ async def stop_loop(app: web.Application) -> None:
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
+    if app["tiles"] is not None:
+        await app["tiles"].close()
     if app["recorder"] is not None:
         app["recorder"].close()
 
