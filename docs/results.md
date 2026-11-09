@@ -155,6 +155,42 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 
 Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
 
+## Camera depth and stairs on real phone frames (#131)
+
+Measured on 9 November 2026 on real iPhone frames from the Hugging Face dataset
+`mateoguaman/iphone_stairs_ramps`: 400 frames read from four row groups of its validation part,
+filmed outdoors and indoors on a university campus with the camera held 4 to 20 degrees down. The
+frames are not copied into this repository (the dataset states no licence). The dataset's own
+labels are path points, not ground types, and its paths have no gravity, so 28 frames were labelled
+by eye: 12 with stairs going up ahead, 14 of level floor, and 2 ramps. Each frame was cut to 480 x 270,
+as the phone sends it. The depth is Depth Anything V2 Metric Indoor Small. The tilt is the first point
+of the frame's own walked path, the camera height 1.0 m, and the field of view from the frame's
+intrinsics.
+
+| What | Frames | Result |
+|---|---|---|
+| Ground from the shape of the depth (`read_ground`, settings loosened for one camera) | 14 level | 3 read level; the rest ramp, drop, curb or steps |
+| | 12 stairs | 3 read steps up, 4 a curb (a step), the rest flat, drop or ramp |
+| | 2 ramps | both read a curb |
+| Stairs from the detector (YOLOE-26s with the demo's classes, confidence 0.3 or more) | 12 stairs | 6 found; the misses were close up, where the steps fill the picture, or far off |
+| | 16 level and ramps | **0 false alarms** |
+| Up or down for those 6, from the depth (the box's middle above or below the floor) | 6 | 6 up, right in every one (0.32 to 0.85 m above the floor) |
+| Distance to those 6, from the floor under the box's bottom edge | 6 | 1.7 to 7.2 m; no tape measure in this dataset, so checked by eye only |
+
+What follows for the demo:
+
+- **The ground read from the shape of the depth is not sent to the decision core** by default
+  (`--depth-ground` sends it). The synthetic tests with the scale 20 percent off all passed, but
+  real frames bend in ways those tests do not model, and it took level floors for drops: the
+  person would be stopped on level ground.
+- **Stairs come from the detector's box**: what it is from the box, where from the floor under
+  the box (camera height and tilt), up or down from the depth. It found half the stair frames
+  with no false alarm; on a walk towards stairs it has several frames to find them in.
+- The depth still measures how far the nearest thing in the path is, and each detected object.
+  On these frames walls read 2.5 to 2.7 m and open corridors 5.7 to 11 m, which look right but
+  were not measured.
+- Each frame took 1.27 s on the laptop's CPU for depth and the reader together.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
