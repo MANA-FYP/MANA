@@ -82,6 +82,7 @@ timeout 20 ros2 lifecycle set /slam_toolbox configure >/dev/null \
 start "$OUT/gate.log" ros2 run mana_position lidar_gate --ros-args -p use_sim_time:=true \
   -r pose:=/pose -r odom:=/odom
 start "$OUT/position.csv" ros2 topic echo /position mana_msgs/msg/PositionReport --csv
+start "$OUT/fix.csv" ros2 topic echo /gps/fix sensor_msgs/msg/NavSatFix --csv  # when each fix came, and how good
 start "$OUT/faults.log" ros2 run mana_sim fault_script gps_two_outages --ros-args -p use_sim_time:=true
 ros2 run mana_sim loop_driver --laps 1 --csv "$OUT/drive.csv"
 python3 -m mana_sim.switching "$OUT/position.csv" "$OUT/faults.log"

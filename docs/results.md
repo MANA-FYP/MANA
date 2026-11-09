@@ -153,7 +153,23 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 | Alerts during the fade | The probe is the helper's phone. It sends an urgent message every 0.5 s of the fade (20 in all), answers the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began, the worst case. Every alert still arrives, and the alert link changes at most once | in 4 runs, all 20 alerts arrived and the link changed once. In the last 2 runs, 17 and 20 of them had gone out on Wi-Fi first and were sent again on Bluetooth |
 | The bridge is killed | The launch file starts it again (#85), and the clock comes back | after 2.9 to 3.9 s of wall time |
 
-Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
+Not tested in this world: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
+
+### GPS to the lidar map (#42)
+
+`tools/gps_lidar_switch.sh` tests that switch in the indoor world, with a GPS added (the NavSat system and a place on the earth, as in `mana_route.sdf`). It uses wheel odometry, slam_toolbox localising on a saved map, and the lidar gate of #43. The chair drives one lap of the corridor loop while `fault_script` drops the GPS twice for 30 s (`gps_two_outages`). `mana_sim.switching` scores the position node's reports. The source must leave GPS within 2 s of each loss and change at most twice per outage (away and back). Measured in WSL on 10 November 2026, with the map from #43:
+
+| Run | Outage 1: left GPS after / changes / GPS back after its end | Outage 2 | Result |
+|---|---|---|---|
+| 1 | 1.5 s / **4** / 5.2 s | 1.5 s / 2 / 5.2 s | fail |
+| 2 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
+| 3 | 1.6 s / 2 / 5.3 s | 1.5 s / 2 / 5.2 s | pass |
+| 4 | 1.4 s / 2 / 5.3 s | 1.4 s / 2 / 5.3 s | pass |
+
+- **Leaving GPS:** 1.4 to 1.6 s after each loss. That is the position node's 1.5 s, timed from the last good fix.
+- **Coming back:** 5.2 to 5.3 s after each outage ended, its `back_s` of 5 s.
+- **The failure in run 1:** the extra two changes were not in the outage. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
+- **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Run 1 ran while another CPU-heavy job did, and a stalled simulation is the first thing to check if it comes up again.
 
 ## Lidar localisation indoors (#43)
 
