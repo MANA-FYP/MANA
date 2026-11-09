@@ -194,10 +194,10 @@ class Track:
         path_every_m: float = 0.5,
         path_points: int = 5000,
         still_mps: float = 0.5,
-        hold_m: float = 15.0,
+        coast_mps: float = 1.0,
     ):
         self.poor_gps_m, self.gate_sigmas = poor_gps_m, gate_sigmas
-        self.still_mps, self.hold_m = still_mps, hold_m
+        self.still_mps, self.coast_mps = still_mps, coast_mps
         self.agree_to_jump = agree_to_jump
         self.heading_sd = math.radians(heading_sd_deg)
         self.step_sd, self.drift = step_sd, drift_m2_per_s
@@ -217,6 +217,7 @@ class Track:
         self.last_gps_t: float | None = None
         self.last_step_t: float | None = None
         self.last_fix: Fix | None = None
+        self.sound: tuple[float, float] | None = None  # time and accuracy of the last sound fix
         self.refused: deque = deque(maxlen=agree_to_jump)  # fixes refused as jumps, in a row
         self.t: float | None = None
         self._recent: deque = deque(maxlen=50)  # (t, distance) for the speed
@@ -247,7 +248,7 @@ class Track:
         """Take a fix into the position. Returns whether it was used."""
         self._grow(fix.t)
         self.last_fix = fix
-        if fix.accuracy_m is None or fix.accuracy_m > self.poor_gps_m:
+        if fix.accuracy_m is None or fix.accuracy_m > self.poor_gps_m or self._coasting(fix):
             return False
         if self.origin is None:
             # the first good fix ties the track to the earth: where the track is now is this fix
@@ -257,19 +258,18 @@ class Track:
             return True
         e, n = self.to_metres(fix.lat, fix.lon)
         r = fix.accuracy_m**2
-        gap = math.hypot(e - self.x, n - self.y)
         standing = self._standing(fix)
-        if standing and self.source == self.GPS and gap <= max(self.hold_m, 2.0 * fix.accuracy_m):
+        if standing and self.source == self.GPS:
             # static hold, as GPS receivers do it: the position stays, and the fix neither moves
-            # it nor makes the filter surer of it (which would narrow the gate below until the
-            # next wander left it and counted as a jump). Indoors our phone's fixes drifted 6 to
-            # 7 m away with an accuracy of 3 to 5 m, so the hold reaches hold_m, as the static
-            # hold of GPS receivers has its own distance. A fix further out ends the hold, and
-            # after a stretch on steps alone (out of a building) GPS puts the position right
+            # it nor makes the filter surer of it. With no limit on the distance: indoors our
+            # phone's fixes wandered 10 to 25 m from a person sitting still, with an accuracy of 3
+            # to 5 m and a speed of 0.03 to 0.3 m/s, and once 6 m against the steps just taken.
+            # Steps move the position themselves. Where the position came from steps alone (out
+            # of a building) the source is steps, and GPS puts it right (below)
             self.last_fix = fix
             self.last_gps_t = fix.t
             return True
-        if gap > self.gate_sigmas * math.sqrt(self.var + r):
+        if math.hypot(e - self.x, n - self.y) > self.gate_sigmas * math.sqrt(self.var + r):
             self.refused.append((e, n, fix.accuracy_m))
             agreed = self._agreed()
             if agreed is None:
@@ -278,9 +278,7 @@ class Track:
             # building) the jump puts right where the steps had drifted to: not walked, so no
             # distance. Otherwise it is how the track follows a device rolling with no steps,
             # whose fixes leave the gate as they come: that is travel (Waqas, #150)
-            # Standing still (static hold below), fixes that wandered past the hold and agree
-            # move the position too, but that was not walked either: indoors our phone's fixes
-            # drifted 10 to 15 m from a person standing still
+            # Standing still, this comes only after steps alone (the hold above): not walked
             corrects_steps = self.source == self.STEPS
             self.x, self.y, self.var = agreed
             self._used(fix, walked=not (corrects_steps or standing))
@@ -291,6 +289,19 @@ class Track:
         self.var *= 1.0 - gain
         self._used(fix, walked=not standing)  # a GPS move while standing is not walked either
         return True
+
+    def _coasting(self, fix: Fix) -> bool:
+        """The phone's location going on along its last velocity rather than measuring: its
+        accuracy grows by more than coast_mps each second (and by a metre at least) from the last
+        sound fix. Sitting indoors, our phone's fixes twice ran off at 2 to 3 m/s for 5 to 8 s,
+        their accuracy growing from 5 to 24 and 28 m, and moved the position 8 m. Map apps keep
+        the marker then and widen the accuracy circle."""
+        if self.sound is not None:
+            t, acc = self.sound
+            if fix.accuracy_m - acc > max(1.0, self.coast_mps * (fix.t - t)):
+                return True
+        self.sound = (fix.t, fix.accuracy_m)
+        return False
 
     def _standing(self, fix: Fix) -> bool:
         """The phone's own GPS speed (from the Doppler shift, not from positions) under still_mps:

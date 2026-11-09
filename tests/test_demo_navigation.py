@@ -510,13 +510,50 @@ def standing_fix(e, n, t, speed, acc=4.0):
     return Fix(f.t, f.lat, f.lon, f.accuracy_m, speed)
 
 
-def test_gps_wandering_round_a_person_standing_is_not_walked():
-    # indoors our phone's fixes drifted 10 to 15 m with a speed of 0.03 to 0.17 m/s
+def test_gps_wandering_round_a_person_standing_neither_moves_nor_is_walked():
+    # indoors our phone's fixes drifted 10 to 25 m with a speed of 0.03 to 0.3 m/s
     track = Track()
     track.on_gps(standing_fix(0, 0, 0.0, 0.1))
     for i in range(1, 60):
-        track.on_gps(standing_fix(15 * math.sin(i / 9), 6 * math.cos(i / 5), float(i), 0.1))
+        track.on_gps(standing_fix(25 * math.sin(i / 9), 6 * math.cos(i / 5), float(i), 0.1))
     assert track.distance_m == 0.0
+    assert (track.x, track.y) == (0.0, 0.0)
+
+
+def test_standing_after_steps_alone_gps_still_puts_the_position_right():
+    # out of a building on steps alone, then standing: the fixes are where the person is
+    track = Track()
+    track.on_gps(standing_fix(0, 0, 0.0, 0.1))
+    track.on_heading(90.0)
+    for i in range(1, 11):
+        track.on_step(Step(10.0 + i, 0.7), 10.0 + i)  # 7 m east, no GPS for 10 s
+    assert track.source == track.STEPS
+    for i in range(3):
+        track.on_gps(standing_fix(0, 20, 21.0 + i, 0.1))  # really 20 m north
+    assert (track.x, track.y) == pytest.approx((0.0, 20.0), abs=0.01)
+    assert track.distance_m == pytest.approx(7.0, abs=0.5)  # the correction is not walked
+
+
+def test_fixes_coasting_on_with_a_growing_accuracy_are_not_used():
+    # sitting indoors our phone's fixes ran off at 2 to 3 m/s, accuracy 5 m growing to 28 m
+    track = Track()
+    for i in range(5):
+        track.on_gps(standing_fix(0, 0, float(i), 0.1, acc=5.0))
+    for i in range(1, 11):
+        f = standing_fix(1.5 * i, 0, 4.0 + 0.5 * i, 2.0, acc=5.0 + 2.0 * i * 0.5 + 0.5)
+        assert not track.on_gps(f)
+    assert (track.x, track.y, track.distance_m) == (0.0, 0.0, 0.0)
+    # a fix whose accuracy has come back is used again
+    assert track.on_gps(standing_fix(0, 0, 20.0, 0.1, acc=5.0))
+
+
+def test_a_slowly_worsening_accuracy_is_not_coasting():
+    # walking into a building: 3 m to 10 m over 30 s
+    track = Track()
+    used = [
+        track.on_gps(fix_at(track, 1.2 * i, 0, float(i), 3.0 + 7.0 * i / 30)) for i in range(31)
+    ]
+    assert all(used)
 
 
 def test_gps_with_a_walking_speed_counts_as_it_did_with_no_speed():
