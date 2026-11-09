@@ -41,6 +41,7 @@ DROP = 5
 UNKNOWN = 255
 
 NAN = math.nan
+MAX_PITCH_RAD = math.radians(45)  # steeper than any stairs a chair climbs (Gazebo's: 39 degrees)
 
 
 @dataclass(frozen=True)
@@ -431,8 +432,11 @@ def floor_pitch(
 
     None unless the bottom rows are one plane (within `residual`) at about the camera's mounting
     height (within `height_tol_m`): a step down already under the bottom rows would otherwise be
-    taken for the floor, and the drop beyond it missed. For true depth only: a monocular model's
-    depth bends the plane (on real phone frames its tilt was up to 17 degrees off)."""
+    taken for the floor, and the drop beyond it missed. None too for a pitch steeper than
+    MAX_PITCH_RAD: on Gazebo's stairs the face of a riser fitted as a plane gave 67 degrees nose
+    down, climbing at 17 nose up (tests/test_gazebo_depth_frames.py). For true depth only: a
+    monocular model's depth bends the plane (on real phone frames its tilt was up to 17 degrees
+    off)."""
     rows, cols = depth.shape
     v = np.arange(rows - max(3, int(rows * rows_share)), rows)
     u = slice(int(cols * (0.5 - strip / 2)), int(cols * (0.5 + strip / 2)))
@@ -446,4 +450,5 @@ def floor_pitch(
         return None
     if abs(1.0 / math.hypot(a, b) - cam.height_m) > height_tol_m:
         return None
-    return math.atan2(b, a) - cam.pitch_rad
+    pitch = math.atan2(b, a) - cam.pitch_rad
+    return pitch if abs(pitch) <= MAX_PITCH_RAD else None

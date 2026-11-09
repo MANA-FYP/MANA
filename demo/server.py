@@ -392,9 +392,11 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
 
 
 def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
-    """The detector's obstacles, nearest first. Their distance is measured in the depth image when
-    one from the last 1.5 s is there and was scaled to the floor, and estimated from the box
-    height otherwise."""
+    """The detector's obstacles, nearest first. Each distance is the box height's estimate, or the
+    depth image's (one from the last 1.5 s, scaled to the floor) when that is nearer: on 413 boxes
+    of real SANPO walks the depth was better from 2 m out, but read 1.5 times too far under 2 m,
+    where box height did better; the nearer of the two read over 20 percent too far on 6 percent
+    of the boxes (#88, docs/decisions.md D12)."""
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     found = []
@@ -404,7 +406,7 @@ def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> l
             continue
         ob = estimate[0]
         measured = None if seen is None else dz.box_distance(seen, det, w, h)
-        if measured is not None:
+        if measured is not None and measured < ob.distance_m:
             ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
         found.append(ob)
     return sorted(found, key=lambda o: o.distance_m)
