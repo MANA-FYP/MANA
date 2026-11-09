@@ -25,4 +25,7 @@ def test_the_tunnels_address_is_found_in_its_log():
     line = "2026-11-09T12:00:00Z INF |  https://quiet-river-maple-lamp.trycloudflare.com  |"
     assert tunnel.find_url(line) == "https://quiet-river-maple-lamp.trycloudflare.com"
     assert tunnel.find_url("INF Starting tunnel") is None
+    assert (
+        tunnel.find_url("INF Requesting new quick Tunnel on https://api.trycloudflare.com") is None
+    )
     assert tunnel.command("cloudflared", 8000)[-2:] == ["--url", "http://localhost:8000"]

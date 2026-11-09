@@ -19,7 +19,8 @@ import shutil
 import subprocess
 import sys
 
-URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+# the tunnel's own address: cloudflared also logs api.trycloudflare.com, where it asks for one
+URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")
 
 
 def command(cloudflared: str, port: int) -> list[str]:
@@ -41,14 +42,17 @@ def main(argv=None) -> int:
         print("cloudflared was not found: install it from Cloudflare, or give --cloudflared PATH")
         return 1
     proc = subprocess.Popen(command(a.cloudflared, a.port), stderr=subprocess.PIPE, text=True)
+    found = False
     try:
-        for line in proc.stderr:
-            url = find_url(line)
+        for line in proc.stderr:  # read to the end: a full pipe would stall cloudflared
+            url = None if found else find_url(line)
             if url:
+                found = True
                 print(f"phone:     {url}/phone")
                 print(f"dashboard: {url}/dashboard   (or http://localhost:{a.port}/dashboard)")
                 print("Ctrl+C ends the tunnel.", flush=True)
-                break
+            elif " ERR " in line:
+                print(line.rstrip(), flush=True)
         return proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
