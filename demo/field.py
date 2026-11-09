@@ -96,7 +96,11 @@ def main(argv=None) -> int:
     for k, v in result.items():
         if v is not None:
             print(f"{k}: {v}")
-    date = dt.date.fromtimestamp((folder / "session.jsonl").stat().st_mtime).isoformat()
+    from demo.recording import started
+
+    # the day of the walk; for a recording older than meta.json, the file's date (a copy's day)
+    mtime = (folder / "session.jsonl").stat().st_mtime
+    date = started(folder) or dt.date.fromtimestamp(mtime).isoformat()
     print("\n" + HEADER + "\n" + row(result, a.place, date))
     return 0
 

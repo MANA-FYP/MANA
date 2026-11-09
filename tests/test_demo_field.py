@@ -59,3 +59,23 @@ def test_no_recording_says_so(tmp_path, capsys):
     from demo.field import main
 
     assert main([str(tmp_path)]) == 2 and "no recording" in capsys.readouterr().err
+
+
+def test_the_date_is_the_day_the_walk_began_not_the_day_it_was_copied(tmp_path, capsys):
+    # a recording copied to another laptop gets new file dates (Waqas, #164)
+    import os
+
+    from demo import field
+    from demo.recording import Recorder, started
+
+    rec = Recorder(tmp_path / "walk")
+    rec.close()
+    kept = json.loads((tmp_path / "walk" / "meta.json").read_text())["started"]
+    assert started(tmp_path / "walk") == kept[:10]
+    (tmp_path / "walk" / "meta.json").write_text(
+        json.dumps({"started": "2026-10-01T09:30:00+00:00"})
+    )
+    os.utime(tmp_path / "walk" / "session.jsonl", (1_900_000_000, 1_900_000_000))  # copied in 2030
+    field.main([str(tmp_path / "walk"), "--speed", "50"])
+    assert "| 2026-10-01 |" in capsys.readouterr().out
+    assert started(tmp_path) is None  # no meta.json: the file's date, as before
