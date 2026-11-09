@@ -103,9 +103,13 @@ async def chrome(session, port: int, *flags: str):
 
 
 async def walk(phone: Tab, pitch: float, lat: float, lon: float, speed: float = 1.1) -> None:
-    """The phone held pitch radians down, walking north at speed m/s, 1.8 steps a second."""
-    t = 0.0
+    """The phone held pitch radians down, walking north at speed m/s, 1.8 steps a second. On the
+    wall clock: the page stamps motion with its own clock, and each override is a round trip to
+    Chrome that takes longer when the laptop is busy, so counting loops would walk slower."""
+    loop = asyncio.get_running_loop()
+    start, gps_at = loop.time(), None
     while True:
+        t = loop.time() - start
         swing = 1.5 * math.sin(2 * math.pi * 1.8 * t)
         up = G + swing
         acc = {"x": 0, "y": up * math.cos(pitch), "z": up * math.sin(pitch)}
@@ -114,11 +118,11 @@ async def walk(phone: Tab, pitch: float, lat: float, lon: float, speed: float = 
                          reading={"xyz": acc})  # fmt: skip
         await phone.call("Emulation.setSensorOverrideReadings", type="linear-acceleration",
                          reading={"xyz": lin})  # fmt: skip
-        if int(t * 25) % 25 == 0:  # GPS once a second
+        if gps_at is None or t - gps_at >= 1.0:  # GPS once a second
+            gps_at = t
             await phone.call("Emulation.setGeolocationOverride", latitude=lat + speed * t / 111_000,
                              longitude=lon, accuracy=6)  # fmt: skip
         await asyncio.sleep(0.04)
-        t += 0.04
 
 
 async def run(a) -> int:
