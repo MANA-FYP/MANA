@@ -165,11 +165,11 @@ RUNS = {
         GazeboRun(
             "curb",
             start_x=27.0,
-            end_x=33.5,
-            camera=Route(6.5, (Stretch(4.0, 4.3, Ground.CURB, pitch_rad=0.3, height_m=0.12),)),
+            end_x=33.2,  # from the front, 0.8 m before the step down, where the core stops
+            camera=Route(6.2, (Stretch(4.0, 4.3, Ground.CURB, pitch_rad=0.3, height_m=0.12),)),
             duration_s=60.0,
-            marks=(sc.tracks_before(4.0), sc.wheels_after(6.0), sc.reaches_end(6.5)),
-            note="the 12 cm curb is the edge of a platform 3 m long, then a step down",
+            marks=(sc.tracks_before(4.0), sc.wheels_after(6.0), sc.reaches_end(6.2)),
+            note="the 12 cm curb is the edge of a 3 m platform; the end is 0.8 m before its end",
         ),
         GazeboRun(
             "stop",
