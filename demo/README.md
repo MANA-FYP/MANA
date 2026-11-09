@@ -55,6 +55,24 @@ python -m demo.camera --source walk.mp4 --loop    # a video file
 Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
 and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
 
+### Record a walk and play it again
+
+A walk can be kept and run through MANA again, the same messages at the same pace (#89):
+
+```bash
+python -m demo.server --record recordings/stairs-1      # use the phone as usual
+python -m demo.replay recordings/stairs-1               # later, into a running server
+python -m demo.replay recordings/stairs-1 --speed 4     # four times as fast
+```
+
+The folder has `session.jsonl`, one line per message from the phone with its time, and each
+camera frame as a JPEG in `frames/`. The microphone's raw sound is not kept; the words heard are.
+A folder that already holds a recording is refused, so a restart cannot overwrite one.
+Steps are counted on the phone's own clock, so a faster replay walks the same path. A recorded
+40 s walk (1,324 messages, 207 frames, 4.8 MB) played back into a fresh server ended on the same
+step count and GPS position as when it was live. The frames show faces: `recordings/` is not in
+git, and a recording is kept private unless the faces are blurred first.
+
 ## The phone screen
 
 Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an
@@ -146,6 +164,12 @@ the USB cable, and GPS works without a network.
 - **Indoors**, or with GPS lost or switched off on the phone, the position carries on from the
   steps, and the path turns from blue (GPS) to orange (steps). The first good fix ties the path to
   latitude and longitude.
+
+**Street map.** Tick *Street map*, and once a GPS fix has tied the path to the earth and the
+laptop has internet, the path is drawn on the OpenStreetMap streets around it, at the same scale
+(#130). It is off at first because each map tile is fetched from openstreetmap.org, which then
+learns roughly where the person is. Without internet the tiles do not load and the plain grid
+stays; the box works the same either way, and a missing tile is tried again every 30 s.
 
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
 place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA says how far
@@ -253,4 +277,5 @@ screenshots:
 ```bash
 python -m demo.server --depth --weights yoloe-26s-mana.pt --imgsz 480 --on-foot
 python tools/phone_e2e.py --video stairs.mp4 --seconds 60 --out e2e
+python tools/phone_e2e.py --video stairs.mp4 --offline     # the dashboard with no internet
 ```

@@ -197,6 +197,15 @@ class Mount:
         }[SENSOR_OF.get(source, source)]
         return at - sensor
 
+    def tip_lead_m(self, mode: Mode, switching: bool) -> float:
+        """How far the tracks' tip is ahead of the front the reports are measured from. On wheels
+        a step is measured from the front wheels, but the tracks are asked for so that their tip
+        meets it, 0.63 m further ahead on the simulated chair (#144). 0 once the tracks' front
+        counts: on tracks, and while the slides move."""
+        if mode == Mode.TRACKS or switching:
+            return 0.0
+        return max(0.0, self.front_tracks_m - self.front_wheels_m)
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -273,13 +282,15 @@ class DecisionCore:
         if self._newer(reports.get(key), report):
             reports[key] = report
 
+    def _switching(self) -> bool:
+        return 0.0 <= self.now - self.mode_changed_at < self.mount.switch_s
+
     def _from_front(self, report):
         """The report with its distance from the device's front instead of from its sensor. A
         hazard the front has already reached is at 0 m; an unknown distance stays unknown."""
         if not math.isfinite(report.distance_m):
             return report
-        switching = 0.0 <= self.now - self.mode_changed_at < self.mount.switch_s
-        ahead = self.mount.ahead_of_sensor(report.source, self.mode, switching)
+        ahead = self.mount.ahead_of_sensor(report.source, self.mode, self._switching())
         return replace(report, distance_m=max(0.0, report.distance_m - ahead)) if ahead else report
 
     def on_ground(self, report: GroundReport) -> None:
@@ -427,12 +438,14 @@ class DecisionCore:
         object detector both use the camera image, so together they are one sensor: on a phone
         without depth a step is never confirmed, and the chair slows down instead. A report with
         an unknown distance can agree, but at least one of the agreeing reports must give a
-        distance within step_m.
+        distance within step_m. On wheels step_m counts from the tracks' tip, which meets the
+        step once they come down (#144).
         """
         agreeing = [r for r in self._grounds() if r.ground in STEPS]
         if len({SENSOR_OF.get(r.source, r.source) for r in agreeing}) < 2:
             return None
         step_m = self.limits.step_m if step_m is None else step_m
+        step_m += self.mount.tip_lead_m(self.mode, self._switching())
         known = [r for r in agreeing if r.distance_m <= step_m]  # NaN is never <=
         return min(known, key=lambda r: r.distance_m, default=None)
 

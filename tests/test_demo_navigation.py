@@ -163,6 +163,16 @@ def test_outdoors_the_track_follows_gps_and_indoors_it_carries_on_from_steps():
     assert v["distance_m"] == pytest.approx(21.0, abs=1.0)
 
 
+def test_the_view_says_where_the_start_is_once_gps_has_said_it():
+    track = Track()
+    track.on_step(Step(0.5, 0.7), 0.5)
+    assert track.view(1.0)["origin"] is None  # steps alone: the map has no anchor
+    track.on_gps(Fix(1.0, 31.5204, 74.3587, 4.0))
+    lat, lon = track.view(1.0)["origin"]
+    # the first fix is where the person is now, so the start is that, less the steps walked
+    assert (lat, lon) == pytest.approx(track._shift(31.5204, 74.3587, -track.x, -track.y))
+
+
 def test_one_fix_far_off_is_refused_but_several_that_agree_move_the_track():
     track = Track()
     track.on_gps(fix_at(track, 0, 0, 0.0, 3.0))

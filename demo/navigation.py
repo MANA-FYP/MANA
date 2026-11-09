@@ -269,6 +269,8 @@ class Track:
             "accuracy_m": round(self.accuracy_m(), 1),
             "lat": None if where is None else round(where[0], 7),
             "lon": None if where is None else round(where[1], 7),
+            # where x = y = 0 is on the earth, once a GPS fix has said: the street map's anchor
+            "origin": None if self.origin is None else [round(v, 7) for v in self.origin],
             "heading": None if self.heading is None else round(self.heading),
             "steps": self.steps,
             "distance_m": round(self.distance_m, 1),

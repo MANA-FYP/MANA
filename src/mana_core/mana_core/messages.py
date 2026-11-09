@@ -199,7 +199,9 @@ def direction(core: DecisionCore, now: float) -> Message | None:
     if step is not None:
         reports.append(step)
     for r in reports:
-        near = not r.distance_m > lim.step_m  # an unknown distance counts as near
+        # an unknown distance counts as near; a confirmed step is near by the core's own test,
+        # which on wheels counts from the tracks' tip (#144)
+        near = r is step or not r.distance_m > lim.step_m
         if not near or r.ground not in STEPS | {Ground.DROP, Ground.RAMP}:
             continue
         known = not math.isnan(r.distance_m)

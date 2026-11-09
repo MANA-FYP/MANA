@@ -525,6 +525,23 @@ def test_an_unknown_distance_stays_unknown_and_a_hazard_under_the_front_is_at_0_
     assert c.ground[DEPTH].distance_m == 0.0
 
 
+def test_on_wheels_tracks_are_asked_for_when_the_step_is_step_m_from_their_tip():
+    # the tracks' tip is 0.65 m ahead of the front wheels: a step 2.5 m from the wheels is
+    # 1.85 m from the tip (#144)
+    c = mounted(*stairs(2.5 + 0.10))  # from the 3D camera, 0.10 m behind the front wheels
+    assert c.ground[DEPTH].distance_m == pytest.approx(2.5)
+    assert c.decision.mode == Mode.TRACKS
+    far = mounted(*stairs(2.7 + 0.10))  # 2.05 m from the tip: not yet
+    assert far.decision.mode == Mode.WHEELS
+
+
+def test_the_tips_lead_is_counted_on_wheels_only():
+    assert CHAIR.tip_lead_m(Mode.WHEELS, switching=False) == pytest.approx(0.65)
+    assert CHAIR.tip_lead_m(Mode.WHEELS, switching=True) == 0.0  # the tracks' front counts
+    assert CHAIR.tip_lead_m(Mode.TRACKS, switching=False) == 0.0
+    assert Mount().tip_lead_m(Mode.WHEELS, switching=False) == 0.0
+
+
 def test_with_no_mount_the_distances_are_as_reported():
     c = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.DROP, 0.55))
     assert c.ground[DEPTH].distance_m == 0.55
