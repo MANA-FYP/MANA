@@ -191,6 +191,44 @@ What follows for the demo:
   were not measured.
 - Each frame took 1.27 s on the laptop's CPU for depth and the reader together.
 
+## Obstacle distance: box height against a depth model, on real walks (#88)
+
+Measured on 9 November 2026 with `tools/depth_vs_box.py` on SANPO-Real's test split: all 141
+test sessions were tried, and the 45 with segmentation masks gave 259 frames with a person, a
+vehicle or an animal. The detector (`yolo26n.pt` at 480) found 413 of those objects (a box matched
+to the object's mask with IoU 0.5 or more, in 153 frames). The true distance is the median of
+SANPO's depth over the object's mask; that depth is itself from stereo, so it is a reference
+(on two frames it agreed with SANPO's other depth, from the ZED camera, to within 4 percent at the
+median). The frames are from a chest camera (241 boxes) and a head camera (172) on people walking,
+outdoors mostly, not from a phone; they are not copied into this repository.
+
+Median error as a share of the true distance (share within 20 percent, share read more than 20
+percent **too far**, the unsafe side):
+
+| Boxes | n | Box height | Depth, indoor model | Depth, outdoor model | Nearer of box and indoor |
+|---|---|---|---|---|---|
+| all | 413 | 29% (32%, 38%) | 17% (56%, 15%) | 136% (2%, 94%) | 19% (52%, 6%) |
+| 0 to 2 m | 15 | 27% (13%, 20%) | 53% (7%, 93%) | 253% (0%, 100%) | 27% (20%, 13%) |
+| 2 to 4 m | 49 | 23% (43%, 18%) | 17% (55%, 43%) | 155% (0%, 100%) | 17% (51%, 8%) |
+| 4 to 8 m | 114 | 19% (54%, 34%) | 10% (82%, 14%) | 151% (0%, 100%) | 13% (78%, 6%) |
+| 8 m and more | 235 | 38% (20%, 44%) | 21% (47%, 5%) | 96% (4%, 90%) | 24% (41%, 5%) |
+| person | 248 | 30% (28%, 38%) | 17% (55%, 23%) | 173% (2%, 94%) | 19% (52%, 7%) |
+| car | 148 | 27% (36%, 37%) | 17% (55%, 5%) | 91% (3%, 95%) | 20% (51%, 5%) |
+| cut by the frame | 70 | 36% (16%, 39%) | 17% (53%, 37%) | 153% (0%, 100%) | 24% (41%, 4%) |
+
+- **The indoor model is better than box height from 2 m out**, for people and cars, and for boxes
+  cut by the frame (17 against 36 percent).
+- **Under 2 m it reads 1.5 times too far** (median), on 14 of the 15 boxes; box height does
+  better there. Only 15 boxes, but that is the range where the chair stops.
+- **The outdoor model reads 2 to 3.5 times too far** at every distance, outdoors. Over the bottom
+  half of the picture it read 2.3 to 2.7 times SANPO's depth on three frames, at 266 and at 518
+  pixels alike: it is not used.
+- **Keeping the nearer of the two** loses little against the indoor model (19 against 17 percent)
+  and reads more than 20 percent too far on 6 percent of the boxes, against 38 for box height
+  alone and 15 for the depth alone. The demo now keeps the nearer (D12).
+- The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
+  that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
