@@ -184,10 +184,15 @@ learns roughly where the person is. Without internet the tiles do not load and t
 stays; the box works the same either way, and a missing tile is tried again every 30 s.
 
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
-place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA says how far
-it is and which way as a clock face, 12 o'clock straight ahead, as orientation and mobility
-training gives directions: "The mark is 14 metres away, at 6 o'clock." Without a compass it gives
-the compass direction instead. The mark shows as a flag on the path.
+place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA leads back
+along the path walked, since indoors the straight line goes through walls (#157). It gives the
+first leg as a clock face, 12 o'clock straight ahead, as orientation and mobility training gives
+directions, then the turn after it: "Back along your path, the mark is 26 metres: 12 metres at
+6 o'clock, then turn to 9 o'clock for 15 metres." Asking again on the way gives the next leg from
+there. Loops in the walk (into a room and out again) are left out, and a bend under 25 degrees is
+not a turn. Without a compass it gives compass directions. If the path back to the mark is no
+longer kept (a very long walk), it gives the straight line instead: "The mark is 14 metres away,
+at 6 o'clock." The mark shows as a flag on the path.
 
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a

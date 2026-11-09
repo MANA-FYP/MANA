@@ -308,6 +308,101 @@ def test_the_way_back_without_a_compass_or_a_mark():
     assert way_text(track.way_to()) == "The mark is 14 metres to the south-west."
 
 
+# ---- the way back along the path walked (#157)
+
+
+def test_after_an_l_shaped_corridor_the_way_back_follows_it_not_the_straight_line():
+    from demo.navigation import route_text
+
+    nav = Navigator()
+    nav.track.mark()
+    walk_legs(nav, [(0, 20), (90, 15)])  # 14 m north, then 10.5 m east down a corridor
+    legs = nav.track.route_back()
+    assert [round(d) for d, _ in legs] == [10, 14]
+    assert [round(b) for _, b in legs] == [270, 180]  # west, then south
+    # facing east: the first leg is behind; then, walking west, south is a turn to the left
+    assert route_text(legs, nav.track.heading) == (
+        "Back along your path, the mark is 24 metres: 10 metres at 6 o'clock,"
+        " then turn to 9 o'clock for 14 metres."
+    )
+
+
+def test_asking_again_on_the_way_gives_the_next_leg_from_there():
+    from demo.navigation import route_text, way_text
+
+    nav = Navigator()
+    nav.track.mark()
+    walk_legs(nav, [(0, 20), (90, 15), (270, 15)])  # back west to the corner, facing west
+    legs = nav.track.route_back()
+    assert len(legs) == 1 and round(legs[0][1]) == 180  # the corridor east and back is cut
+    # one straight leg: the straight line says it, as before
+    assert route_text(legs, nav.track.heading) is None
+    assert way_text(nav.track.way_to()) == "The mark is 14 metres away, at 9 o'clock."
+
+
+def test_a_detour_into_a_room_is_left_out_of_the_way_back():
+    nav = Navigator()
+    nav.track.mark()
+    # north 7 m, into a room 5 m east and out again along the same line, north 7 m more
+    walk_legs(nav, [(0, 10), (90, 7), (270, 7), (0, 10)])
+    legs = nav.track.route_back()
+    assert len(legs) == 1
+    assert legs[0][0] == pytest.approx(14.0, abs=0.5) and round(legs[0][1]) == 180
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_a_wobbly_compass_still_gives_two_legs_for_an_l_shaped_walk(seed):
+    # each step's heading off by a random 10 degrees (sd), each step 0.7 m give or take 5 cm
+    rnd = random.Random(seed)
+    nav, t = Navigator(), 0.0
+    nav.track.mark()
+    for heading, n in ((0, 30), (90, 25)):
+        for _ in range(n):
+            nav.on_orientation(None, None, None, compass=(heading + rnd.gauss(0, 10)) % 360)
+            t += 0.55
+            nav.track.on_step(Step(t, rnd.gauss(0.7, 0.05)), t)
+    legs = nav.track.route_back()
+    assert len(legs) == 2
+    assert abs(legs[0][1] - 270) < 10 and abs(legs[1][1] - 180) < 15
+
+
+def test_more_turns_are_counted_and_no_compass_gives_compass_directions():
+    from demo.navigation import route_text
+
+    track = Track()
+    track.mark()
+    for x, y in [(0, 5), (0, 10), (5, 10), (10, 10), (10, 15), (10, 20), (15, 20), (20, 20)]:
+        track.x, track.y = float(x), float(y)  # a staircase walk north and east, no compass
+        track._extend(0.0)
+    legs = track.route_back()
+    assert len(legs) == 4
+    assert route_text(legs, None) == (
+        "Back along your path, the mark is 40 metres: 10 metres to the west,"
+        " then 10 metres to the south, then 2 more turns."
+    )
+
+
+def test_with_the_path_from_the_mark_no_longer_kept_it_is_the_straight_line():
+    from demo.navigation import route_text
+
+    nav = Navigator(track=Track(path_points=10))
+    nav.track.mark()
+    walk_legs(nav, [(0, 20)])  # 14 m: more than 10 points of 0.5 m
+    assert nav.track.route_back() is None
+    assert route_text(nav.track.route_back(), nav.track.heading) is None
+    assert Track().route_back() is None  # nothing marked
+    assert route_text([(0.8, 0.0), (0.7, 90.0)], 0.0) is None  # back at the mark: way_text says so
+
+
+def test_the_middleware_says_the_way_back_along_the_path():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.track.mark()
+    walk_legs(mw.nav, [(0, 20), (90, 15)])
+    assert mw.way_back(now=30.0).startswith("Back along your path, the mark is 24 metres")
+
+
 def test_a_walk_with_gps_is_saved_as_gpx_and_geojson():
     import json
     import xml.etree.ElementTree as ET

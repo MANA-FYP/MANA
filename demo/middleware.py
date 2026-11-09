@@ -33,7 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
-from demo.navigation import Fix, Navigator, way_text
+from demo.navigation import Fix, Navigator, route_text, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -708,9 +708,11 @@ class Middleware:
         self._decide(now, "way", "Place marked.", Priority.INFO)
 
     def way_back(self, now: float | None = None) -> str:
-        """Say how far the marked place is and which way, as a clock face."""
+        """Say the way back to the marked place along the path walked, leg by leg, as clock faces
+        (#157); the straight line when the path from the mark is no longer kept."""
         now = self.clock() if now is None else now
-        text = way_text(self.nav.track.way_to())
+        track = self.nav.track
+        text = route_text(track.route_back(), track.heading) or way_text(track.way_to())
         self._decide(now, "way", text, Priority.INFO)
         return text
 
