@@ -79,7 +79,13 @@ async def no_cache(request, handler):
 
 
 def build_app(
-    mw=None, detector=None, classifier=None, recognizer=None, depth=None, mount=None
+    mw=None,
+    detector=None,
+    classifier=None,
+    recognizer=None,
+    depth=None,
+    mount=None,
+    depth_ground=False,
 ) -> web.Application:
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
@@ -87,6 +93,9 @@ def build_app(
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
+    # the ground read from the depth's shape goes to the core only when asked: on real phone
+    # frames it took level floors for ramps and drops (docs/results.md, #131)
+    app["depth_ground"] = depth_ground
     app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
     app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
@@ -259,6 +268,7 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         for ob in reversed(found):
             mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
         mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
+        stairs_seen(app, detections, w, h, now)
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
              "x2": d.x2, "y2": d.y2} for d in detections
@@ -267,6 +277,25 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         label, conf = app["classifier"].classify(jpeg)
         ground = Ground.STAIRS_UP if vision.stair_ground(label) == "stairs" else Ground.FLAT
         mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
+
+
+STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
+
+
+def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) -> None:
+    """The nearest stairs the detector sees, as the camera's ground report: what it is from the
+    box, where from the floor under its bottom edge (the camera's height and tilt), and up or
+    down from the depth when it is there."""
+    stairs = [d for d in detections if d.label == "stairs" and d.confidence >= STAIRS_CONFIDENCE]
+    if not stairs:
+        return
+    mw: Middleware = app["mw"]
+    box = max(stairs, key=lambda d: d.y2)  # the lowest bottom edge is the nearest
+    pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
+    d = app["depth"]
+    seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
+    ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
+    mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, mw.clock())
 
 
 def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
@@ -308,7 +337,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     now = mw.clock()
     mw.latency["depth_ms"] = round((now - started) * 1000, 1)
     r = seen.reading
-    if r is not None and r.ground != Ground.UNKNOWN:
+    if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
     if seen.ahead_m is not None:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
@@ -324,6 +353,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
         "step_m": None if r is None or math.isnan(r.step_height_m) else round(r.step_height_m, 2),
         "ahead_m": None if seen.ahead_m is None else round(seen.ahead_m, 2),
         "why": seen.why,
+        "sent": app["depth_ground"],  # the ground goes to the core only with --depth-ground
     }
 
 
@@ -484,6 +514,9 @@ def main(argv=None) -> None:
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
     p.add_argument("--depth-size", type=int, default=266, help="depth model input; 518 is finer")
+    p.add_argument("--depth-ground", action="store_true",
+                   help="also send the ground read from the depth's shape (unreliable on "
+                        "real frames, see docs/results.md)")  # fmt: skip
     p.add_argument("--camera-height", type=float, default=1.2,
                    help="metres from the floor to the camera, as it is held")  # fmt: skip
     p.add_argument("--camera-fov", type=float, default=66.0,
@@ -506,6 +539,7 @@ def main(argv=None) -> None:
         recognizer,
         depth,
         mount,
+        depth_ground=a.depth_ground,
     )
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")

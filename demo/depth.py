@@ -35,7 +35,7 @@ if str(ROOT / "src" / "mana_perception") not in sys.path:
 from mana_perception import depth as dp  # noqa: E402
 
 MODEL = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
-MIN_PITCH = math.radians(15)  # less than this, the bottom of the image may not be the floor
+MAX_FLOOR_M = 4.0  # the bottom of the picture must show the floor closer than this
 FLOOR_SPREAD = 0.15  # the floor rows must agree on the scale to within this share
 
 
@@ -60,13 +60,64 @@ def camera_pitch(ax: float, ay: float, az: float) -> float | None:
     return None if g < 5.0 else math.asin(max(-1.0, min(1.0, az / g)))
 
 
+def floor_at(cam: dp.Camera, row: float) -> float | None:
+    """How far ahead, along the floor, the floor seen at this image row is: from the camera's
+    height and tilt alone, no depth needed. None at or above the horizon."""
+    yn = (row - cam.cy) / cam.fy
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    down = yn * c + s  # metres down per metre along the ray
+    if down <= 0.02:
+        return None
+    return cam.height_m * (c - yn * s) / down
+
+
+def floor_in_view(cam: dp.Camera, rows: int) -> bool:
+    """The bottom of the picture shows the floor within MAX_FLOOR_M."""
+    ahead = floor_at(cam, rows - 1)
+    return ahead is not None and ahead <= MAX_FLOOR_M
+
+
+def stairs_ground(box, frame_w: int, frame_h: int, mount: Mount, pitch_rad, seen=None):
+    """A detector's stairs box as ground: (code, distance). The distance is where the box's
+    bottom edge meets the floor, from the camera's height and tilt (NaN without a tilt). Up or
+    down comes from the depth when a scaled one is there: the middle of the box above the floor
+    is steps up, below it steps down; without depth, steps up. A box says what is there; the
+    floor and the depth say where and which way."""
+    distance = math.nan
+    if pitch_rad is not None:
+        at = floor_at(mount.camera(frame_w, frame_h, pitch_rad), box.y2)
+        distance = math.nan if at is None else at
+    ground = dp.STAIRS_UP
+    if seen is not None and seen.scale is not None and seen.cam is not None:
+        height = box_height(seen, box, frame_w, frame_h)
+        if height is not None and height < -0.1:
+            ground = dp.STAIRS_DOWN
+    return ground, distance
+
+
+def box_height(seen, box, frame_w: int, frame_h: int) -> float | None:
+    """The median height above the person's floor of what is in the middle of a box."""
+    depth, cam = seen.depth, seen.cam
+    rows, cols = depth.shape
+    sx, sy = cols / frame_w, rows / frame_h
+    w, h = box.x2 - box.x1, box.y2 - box.y1
+    x1, x2 = int((box.x1 + w / 4) * sx), int(math.ceil((box.x2 - w / 4) * sx))
+    y1, y2 = int((box.y1 + h / 4) * sy), int(math.ceil((box.y2 - h / 4) * sy))
+    y1, y2 = max(0, y1), min(rows, max(y2, y1 + 1))
+    z = depth[y1:y2, max(0, x1) : min(cols, max(x2, x1 + 1))]
+    yn = ((np.arange(y1, y2) - cam.cy) / cam.fy)[:, None]
+    height = cam.height_m - z * (yn * math.cos(cam.pitch_rad) + math.sin(cam.pitch_rad))
+    height = height[np.isfinite(height) & (z > 0)]
+    return float(np.median(height)) if height.size else None
+
+
 def floor_scale(depth: np.ndarray, cam: dp.Camera, rows_share=0.15, strip=0.3) -> float | None:
     """The factor that puts the floor at the bottom of the middle strip at cam.height_m below the
     camera. None when the camera looks too level to see the floor, or the rows do not agree (not
     a floor: a person, a table)."""
-    if cam.pitch_rad < MIN_PITCH:
-        return None
     rows, cols = depth.shape
+    if not floor_in_view(cam, rows):
+        return None
     v = np.arange(rows - max(3, int(rows * rows_share)), rows)
     u = slice(int(cols * (0.5 - strip / 2)), int(cols * (0.5 + strip / 2)))
     down = (v - cam.cy) / cam.fy * math.cos(cam.pitch_rad) + math.sin(cam.pitch_rad)
@@ -151,7 +202,7 @@ class Reader:
 
     def _learn(self, depth, cam, own) -> Seen:
         if own is None:
-            low = cam.pitch_rad < MIN_PITCH
+            low = not floor_in_view(cam, depth.shape[0])
             why = "tilt the camera down to the floor" if low else "no floor in view"
             return Seen(depth, None, None, why=why)
         scaled = depth * own

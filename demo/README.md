@@ -140,22 +140,28 @@ walking. On a device with wheels the steps would come from wheel odometry instea
 `python -m demo.server --depth` adds a depth model (Depth Anything V2, metric, small; Apache-2.0)
 that runs on the laptop's CPU, about half a second a frame on its own (more while the detector
 runs). The first run downloads it (about 100 MB) from Hugging Face; after that it works offline.
-It gives the camera two things it could not measure before (#131):
+With the detector it gives the camera what it could not measure before (#131):
 
-- **Ground reports**: level floor, ramp, curb, steps up, and a drop or steps down, with the
-  distance to the edge, through the same reader as the 3D camera (`mana_perception.depth`).
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
   box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+- **Stairs, where and which way**: when the detector (the open-vocabulary YOLOE model from
+  `demo/build_detector.py`) boxes stairs, the stairs are where the box's bottom edge meets the
+  floor (camera height and tilt), and up or down by whether the depth in the box is above or
+  below the floor. They go to the core as the camera's ground report.
+- **The ground read from the shape of the depth** (level, ramp, curb, steps, drop, with the same
+  reader as the 3D camera) is shown on the dashboard but **not sent to the core** unless the
+  server has `--depth-ground`. On real phone frames it took level floors for drops
+  (`docs/results.md`, "Camera depth and stairs on real phone frames"); stairs from the detector
+  had no false alarm there.
 
-The model's own metres can be 10 to 20 percent off, and the ground reader needs better: it compares
-the ground with the camera's height. So the depth is scaled first: the phone's motion sensors give
-the camera's tilt, the person holds it at a known height (`--camera-height`, default 1.2 m), and
-level floor at the bottom of the picture must lie that far below the camera.
+The model's own metres can be 10 to 20 percent off, so the depth is scaled first: the phone's
+motion sensors give the camera's tilt, the person holds it at a known height (`--camera-height`,
+default 1.2 m), and level floor at the bottom of the picture must lie that far below the camera.
 
 - **Start on level floor.** The scale is learned from the first three frames that show level
-  floor with nothing close ahead ("learning the scale: point at level floor"), and then held. Hold
-  the phone tilted at least 15 degrees down, so the floor ahead is in the picture; otherwise the
-  dashboard says "tilt the camera down to the floor" and no ground report is made.
+  floor with nothing close ahead ("learning the scale: point at level floor"), and then held. The
+  floor must show at the bottom of the picture within 4 m: a phone at chest height held level or
+  tilted down does; tilted up, the dashboard says "tilt the camera down to the floor".
 - **Why it is held, not measured on every frame:** an edge closer than the bottom of the picture
   (standing at a kerb or the top of stairs) would be scaled up to the person's level and read as
   flat. With the held scale the reader still sees it: the floor in view is off the person's
@@ -170,10 +176,10 @@ Distances come from the depth only once a scale is held; otherwise the box-heigh
 kept.
 
 It is the same camera as the detector, so for the decision core it is the camera, not a second
-sensor: a drop or a step it sees close ahead stops, one farther off slows, and changing to tracks
-still needs a second sensor. The model on the indoor data (the default) or
+sensor: stairs it sees close ahead stop, farther off they slow, and changing to tracks still needs
+a second sensor. The model on the indoor data (the default) or
 `--depth depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf` outdoors; the scale from the
-floor makes the choice matter less. How close its readings come to a tape measure is #133.
+floor makes the choice matter less. How close the distances come to a tape measure is #133.
 
 ## Optional models
 

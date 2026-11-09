@@ -62,11 +62,30 @@ def test_the_floor_sets_the_scale(scale):
     assert found * scale == pytest.approx(1.0, abs=0.02)
 
 
-def test_no_scale_when_the_camera_looks_too_level_to_see_the_floor():
-    cam = MOUNT.camera(COLS, ROWS, math.radians(5))
-    assert dz.floor_scale(scene(syn.flat, pitch=math.radians(5)), cam) is None
-    seen = dz.Reader(MOUNT).read(scene(syn.flat, pitch=math.radians(5)), math.radians(5))
+def test_no_scale_when_the_floor_is_not_in_view():
+    up = math.radians(-20)  # looking up: the bottom row meets the floor about 10 m off
+    cam = MOUNT.camera(COLS, ROWS, up)
+    assert dz.floor_scale(scene(syn.flat, pitch=up), cam) is None
+    seen = dz.Reader(MOUNT).read(scene(syn.flat, pitch=up), up)
     assert seen.reading is None and seen.why == "tilt the camera down to the floor"
+
+
+def test_a_camera_held_nearly_level_still_sees_the_floor():
+    # the real phone frames were taken 4 to 20 degrees down (docs/results.md, #131)
+    low = math.radians(8)
+    cam = MOUNT.camera(COLS, ROWS, low)
+    assert dz.floor_scale(scene(syn.flat, pitch=low, scale=1.2), cam) * 1.2 == pytest.approx(
+        1.0, abs=0.02
+    )
+
+
+@pytest.mark.parametrize(
+    "pitch_deg, row, ahead", [(30, 132.5, 1.2 / math.tan(math.radians(30))), (0, 132.5, None)]
+)
+def test_the_floor_under_an_image_row(pitch_deg, row, ahead):
+    cam = MOUNT.camera(COLS, ROWS, math.radians(pitch_deg))
+    got = dz.floor_at(cam, row)  # the middle row looks along the optical axis
+    assert got == (None if ahead is None else pytest.approx(ahead, abs=0.01))
 
 
 def test_no_scale_when_the_bottom_of_the_picture_is_not_a_floor():
@@ -277,7 +296,7 @@ def test_a_drop_seen_by_the_camera_reaches_the_decision_core():
         assert r.status == 200 and (await r.read())[:2] == b"\xff\xd8"
         reader.cancel()
 
-    run(with_clients(go, depth=RenderedDepth(syn.step(2.0, -1.0)), mount=MOUNT))
+    run(with_clients(go, depth=RenderedDepth(syn.step(2.0, -1.0)), mount=MOUNT, depth_ground=True))
 
 
 class TwoPeople:
@@ -345,3 +364,82 @@ def test_with_depth_the_obstacle_distance_is_measured_not_estimated():
         assert vision_estimate() != pytest.approx(3.0, abs=0.5)
 
     run(with_clients(go, detector=OnePerson(), depth=PersonAt3m(), mount=MOUNT))
+
+
+def test_the_shape_of_the_depth_reaches_the_core_only_when_asked():
+    pytest.importorskip("aiohttp")
+    from mana_core.decision import Source
+    from test_demo_server import jpeg, run, with_clients
+
+    async def go(client, phone, dash):
+        async def drain(ws):
+            async for _ in ws:
+                pass
+
+        reader = asyncio.create_task(drain(phone))
+        await tilted_30(phone)
+        for _ in range(100):
+            await phone.send_bytes(b"" + jpeg())
+            await asyncio.sleep(0.05)
+            if (client.app["depth"].get("view") or {}).get("ground") == "drop":
+                break
+        assert client.app["depth"]["view"]["ground"] == "drop"  # read and shown
+        assert Source.CAMERA not in client.app["mw"].core.ground  # but not sent
+        reader.cancel()
+
+    run(with_clients(go, depth=RenderedDepth(syn.step(2.0, -1.0)), mount=MOUNT))
+
+
+# ---- stairs: what from the detector's box, where from the floor, which way from the depth
+
+
+def stairs_box(y2=300):
+    from demo.vision import Detection
+
+    return Detection("stairs", 0.6, 150, 120, 330, y2)
+
+
+def test_stairs_are_where_the_box_meets_the_floor():
+    ground, distance = dz.stairs_ground(stairs_box(300), 480, 360, MOUNT, PITCH)
+    cam = MOUNT.camera(480, 360, PITCH)
+    assert ground == STAIRS_UP and distance == pytest.approx(dz.floor_at(cam, 300))
+    assert 1.0 < distance < 2.0
+    _, unknown = dz.stairs_ground(stairs_box(300), 480, 360, MOUNT, None)  # no tilt: no distance
+    assert math.isnan(unknown)
+
+
+@pytest.mark.parametrize("rise, kind", [(0.17, STAIRS_UP), (-0.17, dz.dp.STAIRS_DOWN)])
+def test_the_depth_says_whether_the_stairs_go_up_or_down(rise, kind):
+    seen = reader_on(scale=1.2).read(scene(syn.stairs(1.5, rise), scale=1.2), PITCH)
+    from demo.vision import Detection
+
+    box = Detection("stairs", 0.6, 120, 40, 360, 250)
+    assert dz.stairs_ground(box, 480, 360, MOUNT, PITCH, seen)[0] == kind
+
+
+class StairsDetector:
+    """The detector sees stairs whose bottom edge is at row 300 of a 480 x 360 frame."""
+
+    def detect(self, jpeg):
+        return [stairs_box(300)], 480, 360
+
+
+def test_stairs_the_detector_sees_reach_the_core_with_their_distance():
+    pytest.importorskip("aiohttp")
+    from mana_core.decision import Ground, Source
+    from test_demo_server import jpeg, run, with_clients
+
+    async def go(client, phone, dash):
+        await tilted_30(phone)
+        mw = client.app["mw"]
+        for _ in range(100):
+            await phone.send_bytes(b"" + jpeg())
+            await asyncio.sleep(0.05)
+            if Source.DETECTOR in mw.core.ground:
+                break
+        held = mw.core.ground[Source.DETECTOR]
+        expected = dz.floor_at(MOUNT.camera(480, 360, PITCH), 300)
+        assert held.ground == Ground.STAIRS_UP
+        assert held.distance_m == pytest.approx(expected, abs=0.6)  # less the sensor's offset
+
+    run(with_clients(go, detector=StairsDetector(), mount=MOUNT))

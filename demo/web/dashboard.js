@@ -149,7 +149,8 @@ function showDepth(d) {
   if (!d.ground) text = "Depth: no ground reading (" + d.why + ").";
   else {
     text = "Depth: " + GROUND_TEXT[d.ground] + (d.distance_m === null ? "" : " at " + d.distance_m.toFixed(1) + " m") +
-      (d.step_m === null ? "" : ", " + Math.round(d.step_m * 100) + " cm") + ".";
+      (d.step_m === null ? "" : ", " + Math.round(d.step_m * 100) + " cm") +
+      (d.sent ? "." : " (shown only).");
     text += d.ahead_m === null ? " Path clear." : " Something in the path at " + d.ahead_m.toFixed(1) + " m.";
   }
   setText($("depthText"), text + " Camera tilted " + (d.pitch_deg === null ? "?" : d.pitch_deg) + "°, " + Math.round(d.ms) + " ms a frame.");
