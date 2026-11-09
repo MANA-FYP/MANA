@@ -47,8 +47,10 @@ STAIR_CLASSES = ("level", "to_stairs", "stairs", "to_level")
 
 
 def stair_ground(label: str) -> str:
-    """The ground type a classifier label stands for: stairs, or flat."""
-    return "stairs" if label in ("to_stairs", "stairs") else "flat"
+    """The ground type a classifier label stands for: stairs, or flat. Only level ground is flat:
+    at the top of the stairs (to_level, StairNet's IS-LG) the last steps are still ahead, and going
+    back to wheels waits for the IMU to say the chair is level (docs/datasets.md)."""
+    return "flat" if label == "level" else "stairs"
 
 
 def preprocess(image, size: int = 224):
