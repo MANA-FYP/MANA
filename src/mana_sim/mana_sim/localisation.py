@@ -11,6 +11,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+# where the chair is spawned in worlds/mana_indoor.sdf (x, y, heading: facing +x). It comes to rest
+# 3.5 cm ahead of it, where map and odom begin; a log whose first row came after the chair started
+# moving can only be scored from here
+INDOOR_START = (1.0, 1.375, 0.0)
 # the corridor loop round the central block of worlds/mana_indoor.sdf, from the start at (1, 1.375)
 INDOOR_LOOP = [(14.5, 1.375), (14.9, 8.6), (1.5, 8.6), (1.5, 1.375), (8.0, 1.375)]
 
@@ -49,12 +53,17 @@ class Errors:
     last_m: float
 
 
-def errors(rows: list[dict], x: str, y: str) -> Errors | None:
+def errors(
+    rows: list[dict], x: str, y: str, start: tuple[float, float, float] | None = None
+) -> Errors | None:
     """The distance between a logged pose (columns x and y) and the ground truth, over the rows
-    that have that pose; None when none has it (the frame never appeared)."""
+    that have that pose; None when none has it (the frame never appeared). The ground truth is
+    taken from start, the pose where map and odom began; without it, from the first row's, which is
+    right when the chair had not moved before that row (the loop driver writes it at rest)."""
     if not rows:
         return None
-    start = tuple(float(rows[0][k]) for k in ("gx", "gy", "gyaw"))
+    if start is None:
+        start = tuple(float(rows[0][k]) for k in ("gx", "gy", "gyaw"))
     e = []
     for r in rows:
         if math.isnan(float(r[x])):

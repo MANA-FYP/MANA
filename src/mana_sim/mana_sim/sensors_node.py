@@ -36,6 +36,8 @@ class SensorsNode(Node):
         # odom from the simulation's ground truth (exact), or from the wheels and the gyro
         # (drifts, as on a real chair: what a lidar localisation must correct, #43)
         self.odom_from = p("odom_from", "ground_truth").value
+        if self.odom_from not in ("ground_truth", "wheels"):
+            raise ValueError(f"odom_from is ground_truth or wheels, not {self.odom_from!r}")
         self.pose = (0.0, 0.0, 0.0)  # x, y, yaw of the dead reckoning
         self.imu_t: float | None = None
 
