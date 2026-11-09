@@ -787,8 +787,9 @@ class Middleware:
     ) -> Command | None:
         """A recognised word. Only the command words reach the decision layer."""
         now = self.clock() if now is None else now
-        command = WORD_COMMANDS.get(word.strip().lower())
-        heard = word.strip().lower()
+        # recognisers add punctuation ("Stop."): a command word is its letters only
+        heard = re.sub(r"[^a-z']", "", word.strip().lower())
+        command = WORD_COMMANDS.get(heard)
         self._seen("microphone", now, f'heard "{heard}"', confidence)
         if record and heard:
             said = COMMAND_TEXT.get(command, "") if command else ""

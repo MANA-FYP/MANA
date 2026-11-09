@@ -246,8 +246,16 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
     if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
     app["live"]["busy"] = True
+    # not awaited: the phone's next messages (a stop, the tilt, GPS, heartbeats) must not wait for
+    # the detector, which takes a few hundred milliseconds a frame, or seconds on a busy laptop
+    app["live"]["analysing"] = asyncio.get_running_loop().create_task(analyse_task(app, jpeg, now))
+
+
+async def analyse_task(app: web.Application, jpeg: bytes, now: float) -> None:
     try:
         await asyncio.get_running_loop().run_in_executor(None, analyse, app, jpeg, now)
+    except Exception as e:  # a model failing on one frame must not stop the server
+        print(f"analyse: {e}", file=sys.stderr)
     finally:
         app["live"]["busy"] = False
 
