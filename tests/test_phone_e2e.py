@@ -1,6 +1,7 @@
 """tools/phone_e2e.py: the video Chrome plays as the phone's camera. The run itself needs Chrome
 and the demo server, so it is not part of the tests; this checks the conversion."""
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
@@ -36,3 +37,29 @@ def test_a_video_becomes_jpegs_at_30_a_second(tmp_path):
     assert data.count(b"\xff\xd8") == 60  # each frame six times: 2 s at 30 a second
     first = cv2.imdecode(np.frombuffer(data[: data.index(b"\xff\xd9") + 2], np.uint8), 1)
     assert first.shape[:2] == (120, 160)
+
+
+class SlowTab:
+    """Chrome answering each override 30 ms late, as on a busy laptop."""
+
+    def __init__(self):
+        self.gps = []
+
+    async def call(self, method, **params):
+        await asyncio.sleep(0.03)
+        if method == "Emulation.setGeolocationOverride":
+            self.gps.append(params["latitude"])
+        return {}
+
+
+def test_the_walk_keeps_its_pace_when_chrome_answers_slowly():
+    tab = SlowTab()
+
+    async def go():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(phone_e2e.walk(tab, 0.2, 33.0, 72.0), 2.5)
+
+    asyncio.run(go())
+    # GPS once a wall-clock second, 1.1 m/s north; counting 40 ms loops it got to only 0.8 s
+    assert len(tab.gps) == 3
+    assert 2.2 <= (tab.gps[2] - 33.0) * 111_000 < 2.6  # sent just after 2 s
