@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import datetime as dt
 import ipaddress
+import os
 import socket
 import ssl
 from pathlib import Path
+
+FOLDER = Path(__file__).resolve().parent.parent / "certs"  # git-ignored, wherever it is run
 
 
 def addresses() -> list[str]:
@@ -62,13 +65,12 @@ def make(cert: Path, key: Path, ips: list[str]) -> None:
         .sign(private, hashes.SHA256())
     )
     cert.parent.mkdir(parents=True, exist_ok=True)
-    key.write_bytes(
-        private.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
+    pem = private.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
     )
+    # unencrypted, as the server starts with no one to type a password: readable by the owner only
+    with os.fdopen(os.open(key, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(pem)
     cert.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
 
 
@@ -86,7 +88,7 @@ def names(cert: Path) -> set[str]:
     return {str(ip) for ip in alt.get_values_for_type(x509.IPAddress)}
 
 
-def context(folder: Path | str = "certs", ips: list[str] | None = None) -> ssl.SSLContext:
+def context(folder: Path | str = FOLDER, ips: list[str] | None = None) -> ssl.SSLContext:
     """A server context with the kept certificate, made again if it does not name every address."""
     folder = Path(folder)
     cert, key = folder / "demo-cert.pem", folder / "demo-key.pem"

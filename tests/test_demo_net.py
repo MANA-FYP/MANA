@@ -2,7 +2,12 @@
 
 import ssl
 
-from demo import certs, tunnel
+import pytest
+
+from demo import tunnel
+
+pytest.importorskip("cryptography")  # demo/requirements.txt; certs makes the certificate with it
+from demo import certs  # noqa: E402
 
 
 def test_the_certificate_names_the_laptops_addresses_and_is_kept(tmp_path):
