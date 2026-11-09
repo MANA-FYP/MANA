@@ -51,10 +51,15 @@ function render(s) {
     chip(link[0], link[1]) + pos +
     chip("Detector " + (m.detector ? "on" : "off"), m.detector ? "" : "off") +
     chip("Voice model " + (m.speech ? "on" : "off"), m.speech ? "" : "off") +
-    chip("Stairs model " + (m.classifier ? "on" : "off"), m.classifier ? "" : "off");
+    chip("Stairs model " + (m.classifier ? "on" : "off"), m.classifier ? "" : "off") +
+    chip("Depth model " + (m.depth ? "on" : "off"), m.depth ? "" : "off");
   if (chips !== chipsKey) { chipsKey = chips; $("chips").innerHTML = chips; }
 
   updateTiles($("inputs"), s.sensors);
+  drawTrack(s.position.track);
+  onFoot = s.on_foot;
+  setText($("carried"), onFoot ? "Carried on foot" : "On the device");
+  showDepth(s.depth);
 
   // middleware messages: newest first, replaced only when something new arrived
   const rows = s.messages.slice().reverse().slice(0, 4);
@@ -132,6 +137,73 @@ function render(s) {
   }
 }
 
+// Depth from the camera image: a small picture over the camera, and what was read from it.
+const GROUND_TEXT = { flat: "level floor", ramp: "ramp", stairs_up: "steps up", stairs_down: "steps down",
+  curb: "curb", drop: "drop" };
+let depthSeq = 0;
+function showDepth(d) {
+  $("depthText").hidden = !d;
+  if (!d) return;
+  if (d.seq > depthSeq) { depthSeq = d.seq; $("depthImg").src = "/depth.jpg?seq=" + d.seq; $("depthImg").hidden = false; }
+  let text;
+  if (!d.ground) text = "Depth: no ground reading (" + d.why + ").";
+  else {
+    text = "Depth: " + GROUND_TEXT[d.ground] + (d.distance_m === null ? "" : " at " + d.distance_m.toFixed(1) + " m") +
+      (d.step_m === null ? "" : ", " + Math.round(d.step_m * 100) + " cm") +
+      (d.sent ? "." : " (shown only).");
+    text += d.ahead_m === null ? " Path clear." : " Something in the path at " + d.ahead_m.toFixed(1) + " m.";
+  }
+  setText($("depthText"), text + " Camera tilted " + (d.pitch_deg === null ? "?" : d.pitch_deg) + "°, " + Math.round(d.ms) + " ms a frame.");
+}
+
+// The path walked, north up, in metres from the start, scaled to fit, with a scale bar.
+const SOURCE_COLOUR = { gps: "#2563eb", steps: "#d97706", none: "#94a3b8" };
+const SOURCE_TEXT = { gps: "GPS", steps: "steps (no GPS)", none: "waiting for steps or GPS" };
+let trackKey = "";
+function drawTrack(t) {
+  if (!t) return;
+  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m]);
+  if (key === trackKey) return;
+  trackKey = key;
+  setText($("posText"), t.distance_m.toFixed(1) + " m walked, " + t.steps + " steps, " +
+    (t.heading === null ? "no compass" : "heading " + t.heading + "°") + ", " + t.speed.toFixed(1) +
+    " m/s, from " + SOURCE_TEXT[t.source] + (t.lat === null ? "" : " · " + t.lat.toFixed(6) + ", " + t.lon.toFixed(6)));
+  const cv = $("path");
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const pts = t.path.concat([[t.x, t.y, t.source]]);
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const span = Math.max(10, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.2;
+  const k = Math.min(w, h) / span;   // pixels per metre
+  const X = (x) => w / 2 + (x - cx) * k, Y = (y) => h / 2 - (y - cy) * k;
+  // a grid every 'step' metres, and its scale bar
+  const step = [1, 2, 5, 10, 20, 50, 100, 200, 500].find((m) => m * k >= 40) || 1000;
+  ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+  for (let gx = Math.ceil((cx - w / 2 / k) / step) * step; X(gx) <= w; gx += step) { ctx.beginPath(); ctx.moveTo(X(gx), 0); ctx.lineTo(X(gx), h); ctx.stroke(); }
+  for (let gy = Math.ceil((cy - h / 2 / k) / step) * step; Y(gy) >= 0; gy += step) { ctx.beginPath(); ctx.moveTo(0, Y(gy)); ctx.lineTo(w, Y(gy)); ctx.stroke(); }
+  ctx.fillStyle = "#475569"; ctx.font = "11px Segoe UI, Arial";
+  ctx.fillRect(10, h - 12, step * k, 3); ctx.fillText(step + " m", 10, h - 16);
+  ctx.fillText("N ↑", w - 28, 14);
+  ctx.lineWidth = 3; ctx.lineJoin = "round";
+  for (let i = 1; i < pts.length; i++) {
+    ctx.strokeStyle = SOURCE_COLOUR[pts[i][2]] || SOURCE_COLOUR.none;
+    ctx.beginPath(); ctx.moveTo(X(pts[i - 1][0]), Y(pts[i - 1][1])); ctx.lineTo(X(pts[i][0]), Y(pts[i][1])); ctx.stroke();
+  }
+  // the start, the uncertainty circle and where the person is now, with the heading
+  ctx.fillStyle = "#16a34a"; ctx.beginPath(); ctx.arc(X(0), Y(0), 4, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(37, 99, 235, 0.12)"; ctx.beginPath(); ctx.arc(X(t.x), Y(t.y), Math.max(5, t.accuracy_m * k), 0, 7); ctx.fill();
+  ctx.fillStyle = SOURCE_COLOUR[t.source]; ctx.beginPath(); ctx.arc(X(t.x), Y(t.y), 6, 0, 7); ctx.fill();
+  if (t.heading !== null) {
+    const a = t.heading * Math.PI / 180;
+    ctx.strokeStyle = SOURCE_COLOUR[t.source]; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(X(t.x), Y(t.y)); ctx.lineTo(X(t.x) + 16 * Math.sin(a), Y(t.y) - 16 * Math.cos(a)); ctx.stroke();
+  }
+}
+
 // The camera is drawn on one canvas that is never replaced, so only the camera area repaints.
 async function loadFrame(seq) {
   if (loadingFrame) return;
@@ -168,6 +240,11 @@ async function loadFrame(seq) {
 document.querySelectorAll("[data-button]").forEach((b) => {
   b.onclick = () => ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: "button", name: b.dataset.button }));
 });
+
+// how the phone is carried: on foot its steps are walking, on the device shaking is rough ground
+let onFoot = false;
+$("carried").onclick = () => ws && ws.readyState === 1 &&
+  ws.send(JSON.stringify({ type: "carried", on_foot: !onFoot }));
 
 $("voice").onclick = () => {
   voiceOn = !voiceOn;

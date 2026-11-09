@@ -25,6 +25,11 @@
         <div class="hint">Real sensors only. N/A means the browser cannot read it.</div>
         <div class="grid" id="inputs"></div>
       </section>
+      <section class="card small">
+        <h2>Position and path <button class="btn-secondary carried" id="carried">On the device</button></h2>
+        <div class="hint" id="posText">Walk with the phone: GPS outdoors, steps indoors.</div>
+        <div class="path"><canvas id="path"></canvas></div>
+      </section>
     </div>
 
     <!-- column 2: the camera, as tall as the screen allows -->
@@ -32,7 +37,8 @@
       <section class="card grow">
         <h2>Camera</h2>
         <div class="hint" id="cameraHint">The phone's camera frame, with what the detector found.</div>
-        <div class="camera"><canvas id="cam"></canvas><div class="empty" id="camEmpty">Waiting for the phone camera.</div></div>
+        <div class="camera"><canvas id="cam"></canvas><div class="empty" id="camEmpty">Waiting for the phone camera.</div><img id="depthImg" class="depth" alt="Depth from the camera image" hidden></div>
+        <div class="hint" id="depthText" hidden></div>
       </section>
     </div>
 

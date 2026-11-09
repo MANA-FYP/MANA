@@ -9,8 +9,11 @@ caregiver opens /caregiver on their own phone: a read-only status view (demo/car
 
 Phone to laptop, text messages (JSON):
   hello   {"type": "hello", "caps": {"camera": {"available": true}, ...}, "audio_rate": 48000}
-  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8}
-  gps     {"type": "gps", "accuracy": 6.0}            (accuracy is null when there is no fix)
+  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "t": 12.34}   (t: the phone's clock, s)
+  gps     {"type": "gps", "accuracy": 6.0, "lat": .., "lon": .., "speed": .., "heading": ..}
+          (accuracy is null when there is no fix; speed and heading are null when unknown)
+  orient  {"type": "orientation", "alpha": .., "beta": .., "gamma": .., "compass": ..}
+          (absolute orientation in degrees; compass is the heading an iPhone gives, else null)
   word    {"type": "word", "word": "stop", "confidence": 0.9}   (browser speech recognition)
   button  {"type": "button", "name": "stop" | "go" | "automatic" | "manual"}
   ping    {"type": "ping", "t": 123}   answered with pong; the phone then sends an rtt message
@@ -29,6 +32,7 @@ import asyncio
 import contextlib
 import io
 import json
+import math
 import sys
 import warnings
 from array import array
@@ -43,6 +47,7 @@ from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, Source  # noqa: E402
 
 from demo import caregiver, speech, vision  # noqa: E402
+from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
 warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)  # plain string keys are fine here
@@ -73,10 +78,25 @@ async def no_cache(request, handler):
     return resp
 
 
-def build_app(mw=None, detector=None, classifier=None, recognizer=None) -> web.Application:
+def build_app(
+    mw=None,
+    detector=None,
+    classifier=None,
+    recognizer=None,
+    depth=None,
+    mount=None,
+    depth_ground=False,
+) -> web.Application:
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[no_cache])
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
+    # depth from the camera image (#131): the model, how the camera is held, the last result
+    app["depth_model"], app["mount"] = depth, mount or dz.Mount()
+    app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
+    # the ground read from the depth's shape goes to the core only when asked: on real phone
+    # frames it took level floors for ramps and drops (docs/results.md, #131)
+    app["depth_ground"] = depth_ground
+    app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
     app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
@@ -91,6 +111,7 @@ def build_app(mw=None, detector=None, classifier=None, recognizer=None) -> web.A
     app.router.add_get("/ws/caregiver", ws_caregiver)
     app.router.add_get("/api/status", status)
     app.router.add_get("/frame.jpg", frame_jpg)
+    app.router.add_get("/depth.jpg", depth_jpg)
     app.router.add_get("/api/evidence", evidence)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
@@ -148,10 +169,16 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.hello(d.get("caps", {}), now)
         app["live"]["audio_rate"] = int(d.get("audio_rate") or app["live"]["audio_rate"])
     elif kind == "motion":
-        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now)
+        t = d.get("t")
+        phone_t = None if t is None else float(t)
+        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now, phone_t)
     elif kind == "gps":
-        acc = d.get("accuracy")
-        mw.on_gps(None if acc is None else float(acc), now)
+        acc, lat, lon, speed, heading = (
+            number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")
+        )
+        mw.on_gps(acc, now, lat, lon, speed, heading)
+    elif kind == "orientation":
+        mw.on_orientation(*(number(d.get(k)) for k in ("alpha", "beta", "gamma", "compass")))
     elif kind == "word":
         # the phone sends the whole phrase first ("heard"), so a word is not written down twice
         mw.on_word(str(d.get("word", "")), float(d.get("confidence", 0.8)), now, record=False)
@@ -172,6 +199,15 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.on_microphone_state(str(d.get("state", "")), now)
     elif kind == "radio":
         mw.on_radio(d.get("wifi"), d.get("bluetooth"), now)
+
+
+def number(v) -> float | None:
+    """A finite number from the phone, or None for null, missing or not a number."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 async def on_binary(app: web.Application, data: bytes) -> None:
@@ -202,6 +238,9 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
     # the last boxes stay until the next detection replaces them; frames arrive faster than the
     # detector runs, so clearing them here left most frames without boxes
     frame.update(seq=frame["seq"] + 1, jpeg=jpeg)
+    if app["depth_model"] is not None and not app["depth"]["busy"]:
+        app["depth"]["busy"] = True  # its own worker: the detector does not wait for it
+        asyncio.get_running_loop().create_task(depth_task(app, jpeg))
     if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
     app["live"]["busy"] = True
@@ -220,12 +259,16 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         detections, w, h = app["detector"].detect(jpeg)
         mw.latency["detector_ms"] = round((mw.clock() - started) * 1000, 1)
         frame.update(w=w, h=h)
-        found = vision.to_obstacles(detections, w, h)
+        found = obstacles(app, detections, w, h, now)
         nearest: dict[str, float] = {}
-        for ob in found:  # nearest first
-            mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
+        for ob in found:
             nearest.setdefault(ob.label, ob.distance_m)
+        # farthest first: the core keeps the newest report of the detector, so the nearest
+        # obstacle must be the last one it hears
+        for ob in reversed(found):
+            mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
         mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
+        stairs_seen(app, detections, w, h, now)
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
              "x2": d.x2, "y2": d.y2} for d in detections
@@ -234,6 +277,91 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         label, conf = app["classifier"].classify(jpeg)
         ground = Ground.STAIRS_UP if vision.stair_ground(label) == "stairs" else Ground.FLAT
         mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
+
+
+STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
+
+
+def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) -> None:
+    """The nearest stairs the detector sees, as the camera's ground report: what it is from the
+    box, where from the floor under its bottom edge (the camera's height and tilt), and up or
+    down from the depth when it is there."""
+    stairs = [d for d in detections if d.label == "stairs" and d.confidence >= STAIRS_CONFIDENCE]
+    if not stairs:
+        return
+    mw: Middleware = app["mw"]
+    box = max(stairs, key=lambda d: d.y2)  # the lowest bottom edge is the nearest
+    pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
+    d = app["depth"]
+    seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
+    ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
+    mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, mw.clock())
+
+
+def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
+    """The detector's obstacles, nearest first. Their distance is measured in the depth image when
+    one from the last 1.5 s is there and was scaled to the floor, and estimated from the box
+    height otherwise."""
+    d = app["depth"]
+    seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
+    found = []
+    for det in detections:
+        estimate = vision.to_obstacles([det], w, h)
+        if not estimate:
+            continue
+        ob = estimate[0]
+        measured = None if seen is None else dz.box_distance(seen, det, w, h)
+        if measured is not None:
+            ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
+        found.append(ob)
+    return sorted(found, key=lambda o: o.distance_m)
+
+
+async def depth_task(app: web.Application, jpeg: bytes) -> None:
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, depth_step, app, jpeg)
+    except Exception as e:  # a bad frame or the model failing must not stop the server
+        print(f"depth: {e}", file=sys.stderr)
+    finally:
+        app["depth"]["busy"] = False
+
+
+def depth_step(app: web.Application, jpeg: bytes) -> None:
+    """Depth for one frame (in a worker thread): the ground and the nearest thing in the path go to
+    the middleware as the camera's own reports."""
+    mw: Middleware = app["mw"]
+    started = mw.clock()
+    image = app["depth_model"].estimate(jpeg)
+    pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
+    seen = app["depth_reader"].read(image, pitch, mw.nav.track.steps)
+    now = mw.clock()
+    mw.latency["depth_ms"] = round((now - started) * 1000, 1)
+    r = seen.reading
+    if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
+        mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
+    if seen.ahead_m is not None:
+        mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
+    d = app["depth"]
+    d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now)
+    d["view"] = {
+        "seq": d["seq"],
+        "ms": mw.latency["depth_ms"],
+        "pitch_deg": None if pitch is None else round(math.degrees(pitch)),
+        "scale": None if seen.scale is None else round(seen.scale, 2),
+        "ground": None if r is None else Ground(r.ground).name.lower(),
+        "distance_m": None if r is None or math.isnan(r.distance_m) else round(r.distance_m, 2),
+        "step_m": None if r is None or math.isnan(r.step_height_m) else round(r.step_height_m, 2),
+        "ahead_m": None if seen.ahead_m is None else round(seen.ahead_m, 2),
+        "why": seen.why,
+        "sent": app["depth_ground"],  # the ground goes to the core only with --depth-ground
+    }
+
+
+async def depth_jpg(request: web.Request) -> web.Response:
+    jpeg = request.app["depth"]["jpeg"]
+    if not jpeg:
+        raise web.HTTPNotFound()
+    return web.Response(body=jpeg, content_type="image/jpeg")
 
 
 # ---- the dashboard and the test evidence
@@ -255,6 +383,8 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
             command = BUTTONS.get(str(d.get("name", "")).lower())
             if d.get("type") == "button" and command is not None:
                 app["mw"].on_command(command, 1.0, source="dashboard")
+            elif d.get("type") == "carried" and isinstance(d.get("on_foot"), bool):
+                app["mw"].set_on_foot(d["on_foot"])
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -324,6 +454,7 @@ def models_status(app: web.Application) -> dict:
         "detector": app["detector"] is not None,
         "classifier": app["classifier"] is not None,
         "speech": app["recognizer"] is not None,
+        "depth": app["depth_model"] is not None,
     }
 
 
@@ -334,6 +465,7 @@ async def broadcast(app: web.Application) -> None:
     app["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
+    snap["depth"] = app["depth"].get("view")
     for ws in list(app["dashboards"]):
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_json({"type": "snapshot", **snap})
@@ -379,6 +511,18 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
+                   help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
+    p.add_argument("--depth-size", type=int, default=266, help="depth model input; 518 is finer")
+    p.add_argument("--depth-ground", action="store_true",
+                   help="also send the ground read from the depth's shape (unreliable on "
+                        "real frames, see docs/results.md)")  # fmt: skip
+    p.add_argument("--camera-height", type=float, default=1.2,
+                   help="metres from the floor to the camera, as it is held")  # fmt: skip
+    p.add_argument("--camera-fov", type=float, default=66.0,
+                   help="degrees across the long side of the picture")  # fmt: skip
+    p.add_argument("--on-foot", action="store_true",
+                   help="the phone is carried by a person walking, not on the device")  # fmt: skip
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -386,7 +530,17 @@ def main(argv=None) -> None:
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
-    app = build_app(Middleware(directions=a.directions), detector, classifier, recognizer)
+    depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
+    mount = dz.Mount(a.camera_height, a.camera_fov)
+    app = build_app(
+        Middleware(directions=a.directions, on_foot=a.on_foot),
+        detector,
+        classifier,
+        recognizer,
+        depth,
+        mount,
+        depth_ground=a.depth_ground,
+    )
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")
