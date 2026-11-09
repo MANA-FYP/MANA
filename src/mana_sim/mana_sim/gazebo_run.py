@@ -5,7 +5,8 @@
 For every scenario it writes the world of the run (the chair at the start, the boxes), starts the
 simulation headless, the core and the scenario runner, waits for the runner to write its trace,
 and stops everything. A fresh simulation for each run keeps the runs apart: the chair is on
-wheels, the slides are down and no fault is on. A run that could not be played (the chair did not settle, the core did not answer, the time
+wheels, the slides are down and no fault is on. The core gets config/core.yaml, as in the launch
+files. A run that could not be played (the chair did not settle, the core did not answer, the time
 ran out) leaves no trace and is scored as failing every mark, and the next scenario is played.
 mana_core.evaluate --world gazebo calls this.
 """
@@ -83,6 +84,7 @@ def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
     logs = out_dir / f"{name}_logs"
     logs.mkdir(exist_ok=True)
     clock = ["--ros-args", "-p", "use_sim_time:=true"]
+    params = ["--params-file", str(share_dir() / "config" / "core.yaml")]
     procs = [
         _start(
             ["ros2", "launch", "mana_sim", "world.launch.py", "headless:=true", f"world:={world}"],
@@ -111,7 +113,9 @@ def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
             time.sleep(0.5)
         if ready.exists():
             procs.append(
-                _start(["ros2", "run", "mana_core", "core_node", *clock], logs / "core.log")
+                _start(
+                    ["ros2", "run", "mana_core", "core_node", *clock, *params], logs / "core.log"
+                )
             )
         try:
             runner.wait(timeout=run.duration_s * 4 + extra_s)
