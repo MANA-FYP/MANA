@@ -19,6 +19,11 @@ compute it), and the precision and recall at --conf, the threshold the node uses
 the recall per session: the share of each test walk's stairs frames in which a staircase was found,
 averaged over the walks, because neighbouring frames of one walk are near copies. The time per
 frame is the median on this machine, after a warm-up.
+
+SANPO's boxes come from its masks, so they include objects far off and a few pixels high. What MANA
+must react to is near, so every score is also given for the near objects alone: boxes at least
+--min-height (10 %) of the frame's height. Smaller boxes, and predictions that fall on them or are
+themselves that small, are then left out, as COCO scores its size bands.
 """
 
 from __future__ import annotations
@@ -72,6 +77,10 @@ class Box:
     y2: float
     conf: float = 1.0
 
+    @property
+    def height(self) -> float:
+        return self.y2 - self.y1
+
 
 def iou(a: Box, b: Box) -> float:
     w = min(a.x2, b.x2) - max(a.x1, b.x1)
@@ -109,12 +118,13 @@ def mapping(model_names, sanpo_names) -> dict[str, str]:
     return out
 
 
-def match(preds: list[Box], truth: list[Box]):
+def match(preds: list[Box], truth: list[Box], ignore: list[Box] = (), min_px: float = 0.0):
     """(class, conf, right) for each prediction kept, and the truth boxes that were found.
 
     Highest confidence first, each prediction takes the unfound truth box of its class it overlaps
-    most, if at IoU 0.5 or more. One that finds none but lies on a neighbouring class's box is
-    dropped; any other is wrong."""
+    most, if at IoU 0.5 or more. One that finds none is dropped when it lies on a neighbouring
+    class's box, on an ignored box of its own class (one too small for the band), or is itself
+    shorter than min_px, as COCO scores its size bands; any other is wrong."""
     found = [False] * len(truth)
     out = []
     for p in sorted(preds, key=lambda b: -b.conf):
@@ -128,6 +138,8 @@ def match(preds: list[Box], truth: list[Box]):
             found[best] = True
             out.append((p.cls, p.conf, True))
         elif any(t.cls in NEIGHBOURS.get(p.cls, ()) and iou(p, t) >= IOU for t in truth):
+            continue
+        elif p.height < min_px or any(t.cls == p.cls and iou(p, t) >= IOU for t in ignore):
             continue
         else:
             out.append((p.cls, p.conf, False))
@@ -156,13 +168,15 @@ class Tally:
     positives: dict = field(default_factory=lambda: defaultdict(int))
     scored: dict = field(default_factory=lambda: defaultdict(list))  # class -> [(conf, right)]
     stairs: dict = field(default_factory=lambda: defaultdict(lambda: [0, 0]))  # session -> [hit, n]
-    times: list = field(default_factory=list)
 
-    def add(self, session: str, preds: list[Box], truth: list[Box], classes: set[str], conf: float):
+    def add(self, session, preds, truth, classes: set[str], conf: float, min_px: float = 0.0):
+        """Score one frame. Truth boxes shorter than min_px are left out of the band."""
         truth = [
             t for t in truth if t.cls in classes or any(t.cls in v for v in NEIGHBOURS.values())
         ]
-        kept, _ = match(preds, truth)
+        ignore = [t for t in truth if t.height < min_px]
+        truth = [t for t in truth if t.height >= min_px]
+        kept, _ = match(preds, truth, ignore, min_px)
         for t in truth:
             if t.cls in classes:
                 self.positives[t.cls] += 1
@@ -209,13 +223,21 @@ def test_frames(data: Path, part: str):
             yield image.name.split("__")[0], image, data / "labels" / part / f"{image.stem}.txt"
 
 
-def evaluate(detector, data: Path, part: str, conf: float, limit: int | None = None) -> dict:
+def evaluate(
+    detector, data: Path, part: str, conf: float, limit: int | None = None, min_height: float = 0.0
+) -> dict:
+    """Scores over every object, and over the near ones (box at least min_height of the frame's
+    height) when min_height is set: what MANA has to react to is near."""
     from PIL import Image
 
     sanpo = json.loads((data / "parts.json").read_text())["names"]
     to_sanpo = mapping(detector.model.names.values(), sanpo)
     classes = set(to_sanpo.values())
-    tally = Tally()
+    bands = {"all": 0.0}
+    if min_height > 0:
+        bands[f"near (box at least {min_height:.0%} of the frame's height)"] = min_height
+    tallies = {band: Tally() for band in bands}
+    times, frames = [], 0
     for i, (session, path, labels) in enumerate(test_frames(data, part)):
         if limit is not None and i >= limit:
             break
@@ -224,23 +246,28 @@ def evaluate(detector, data: Path, part: str, conf: float, limit: int | None = N
         start = time.perf_counter()
         found = detector.detect_image(image, conf=LOW_CONF)
         if i >= WARMUP:
-            tally.times.append(time.perf_counter() - start)
+            times.append(time.perf_counter() - start)
+        frames += 1
         preds = [
             Box(to_sanpo[d.label], d.x1, d.y1, d.x2, d.y2, d.confidence)
             for d in found
             if d.label in to_sanpo
         ]
         truth = read_labels(labels, sanpo, image.width, image.height)
-        tally.add(session, preds, truth, classes, conf)
+        for band, tally in tallies.items():
+            tally.add(session, preds, truth, classes, conf, bands[band] * image.height)
     result = {
         "conf": conf,
         "imgsz": detector.imgsz,
-        "classes": tally.rows(classes, conf),
+        "frames": frames,
         "not_named": sorted(set(sanpo) - classes),
-        "ms_per_frame": 1000 * statistics.median(tally.times) if tally.times else float("nan"),
+        "ms_per_frame": 1000 * statistics.median(times) if times else float("nan"),
+        "bands": {},
     }
-    if "stairs" in classes:
-        result["stairs"] = tally.stairs_by_session()
+    for band, tally in tallies.items():
+        result["bands"][band] = {"classes": tally.rows(classes, conf)}
+        if "stairs" in classes:
+            result["bands"][band]["stairs"] = tally.stairs_by_session()
     return result
 
 
@@ -249,24 +276,27 @@ def table(name: str, r: dict) -> str:
         return "n/a" if v != v else f"{v:.2f}"  # nan
 
     lines = [
-        f"### {name} (imgsz {r['imgsz']}, conf {r['conf']}, {r['ms_per_frame']:.0f} ms/frame)",
+        f"### {name}",
         "",
-        "| Class | Objects | AP50 | Precision | Recall |",
-        "|---|---:|---:|---:|---:|",
+        f"{r['frames']} frames, imgsz {r['imgsz']}, precision and recall at conf {r['conf']}, "
+        f"{r['ms_per_frame']:.0f} ms per frame on this machine.",
     ]
-    for c in r["classes"]:
-        lines.append(
-            f"| {c['class']} | {c['objects']} | {f(c['ap50'])} | "
-            f"{f(c['precision'])} | {f(c['recall'])} |"
-        )
-    if "stairs" in r:
-        s = r["stairs"]
-        lines += [
-            "",
-            f"Stairs: found in {s['frames_found']} of {s['frames']} frames; "
-            f"mean recall per session {f(s['mean_recall_per_session'])} over "
-            f"{s['sessions']} sessions, {s['sessions_found_at_all']} found at least once.",
-        ]
+    for band, b in r["bands"].items():
+        lines += ["", f"Objects: {band}", ""]
+        lines += ["| Class | Objects | AP50 | Precision | Recall |", "|---|---:|---:|---:|---:|"]
+        for c in b["classes"]:
+            lines.append(
+                f"| {c['class']} | {c['objects']} | {f(c['ap50'])} | "
+                f"{f(c['precision'])} | {f(c['recall'])} |"
+            )
+        if "stairs" in b:
+            s = b["stairs"]
+            lines += [
+                "",
+                f"Stairs: found in {s['frames_found']} of {s['frames']} frames; "
+                f"mean recall per session {f(s['mean_recall_per_session'])} over "
+                f"{s['sessions']} sessions, {s['sessions_found_at_all']} found at least once.",
+            ]
     lines += ["", "Not named by this model: " + (", ".join(r["not_named"]) or "none")]
     return "\n".join(lines)
 
@@ -279,6 +309,9 @@ def main(argv=None) -> int:
     ap.add_argument("--imgsz", type=int, default=416)
     ap.add_argument("--conf", type=float, default=0.3, help="the node's threshold")
     ap.add_argument("--limit", type=int, help="score only the first N frames (a quick look)")
+    ap.add_argument(
+        "--min-height", type=float, default=0.1, help="near band: box height share of the frame"
+    )
     ap.add_argument("--json", type=Path, help="also write the results here")
     a = ap.parse_args(argv)
 
@@ -290,8 +323,9 @@ def main(argv=None) -> int:
         if detector is None:
             print(f"cannot load {weights}: is ultralytics installed and the file there?")
             return 2
-        results[weights] = evaluate(detector, a.data, a.part, a.conf, a.limit)
-        print(table(weights, results[weights]) + "\n", flush=True)
+        name = Path(weights).name
+        results[name] = evaluate(detector, a.data, a.part, a.conf, a.limit, a.min_height)
+        print(table(name, results[name]) + "\n", flush=True)
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps(results, indent=2) + "\n")

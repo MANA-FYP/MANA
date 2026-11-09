@@ -110,14 +110,15 @@ def test_evaluate_scores_only_named_classes_and_stairs_per_session(tmp_path):
         3: [("person", 0.5, 40, 40, 60, 60)],  # a person where there is only a pole: wrong
     }
     r = ev.evaluate(Fake(sees), data, "test", conf=0.3)
-    rows = {c["class"]: c for c in r["classes"]}
+    rows = {c["class"]: c for c in r["bands"]["all"]["classes"]}
     assert set(rows) == {"pedestrian", "stairs"} and r["not_named"] == ["pole"]
     assert rows["stairs"]["objects"] == 3
     assert rows["stairs"]["recall"] == pytest.approx(1 / 3)  # only frame 0 at conf 0.3
     assert rows["stairs"]["precision"] == 1.0
     assert rows["stairs"]["ap50"] == pytest.approx(2 / 3)  # both found when the threshold is low
     assert rows["pedestrian"]["recall"] == 1.0 and rows["pedestrian"]["precision"] == 0.5
-    assert r["stairs"] == {
+    assert r["frames"] == 4 and list(r["bands"]) == ["all"]
+    assert r["bands"]["all"]["stairs"] == {
         "sessions": 2,
         "frames": 3,
         "frames_found": 1,
@@ -132,3 +133,24 @@ def test_table_reads_well(tmp_path):
     text = ev.table("fake.pt", r)
     assert "| stairs | 1 | 1.00 | 1.00 | 1.00 |" in text
     assert "found in 1 of 1 frames" in text
+
+
+def test_the_near_band_leaves_out_small_boxes_and_what_falls_on_them(tmp_path):
+    data = dataset(
+        tmp_path,
+        [("s1", ["1 0.5 0.5 0.4 0.4", "1 0.9 0.1 0.04 0.04"])],  # stairs near, and far (4 px)
+    )
+    sees = {
+        0: [
+            ("stairs", 0.9, 30, 30, 70, 70),  # the near one, found
+            ("stairs", 0.8, 88, 8, 92, 12),  # the far one, found
+            ("stairs", 0.7, 0, 90, 5, 95),  # a small wrong box
+        ]
+    }
+    r = ev.evaluate(Fake(sees), data, "test", conf=0.3, min_height=0.1)
+    near = next(b for name, b in r["bands"].items() if name.startswith("near"))
+    every = {c["class"]: c for c in r["bands"]["all"]["classes"]}["stairs"]
+    close = {c["class"]: c for c in near["classes"]}["stairs"]
+    assert every["objects"] == 2 and every["precision"] == pytest.approx(2 / 3)
+    assert close["objects"] == 1 and close["precision"] == 1.0 and close["recall"] == 1.0
+    assert "Objects: near (box at least 10% of the frame's height)" in ev.table("x.pt", r)
