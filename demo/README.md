@@ -242,3 +242,13 @@ The server starts without any model and says which ones are missing.
 ```bash
 python -m pytest tests          # the server tests need aiohttp and are skipped without it
 ```
+
+**End to end, with no phone.** `tools/phone_e2e.py` opens the real phone page in headless Chrome
+with a video file as its camera, and the tilt, compass and GPS set as a phone held 12 degrees down
+by a person walking north. It prints what the dashboard shows every few seconds and keeps
+screenshots:
+
+```bash
+python -m demo.server --depth --weights yoloe-26s-mana.pt --imgsz 480 --on-foot
+python tools/phone_e2e.py --video stairs.mp4 --seconds 60 --out e2e
+```
