@@ -820,3 +820,32 @@ def test_on_foot_the_first_second_of_a_walk_is_not_wheel_slip_either():
         t = i / 30
         m.on_motion(0.0, 0.0, G + 1.5 * math.sin(2 * math.pi * 1.8 * t), t, phone_t=t)
     assert m.tick(1.0)["decision"]["reason"] != "Wheel slip, changing to tracks"
+
+
+def test_saying_mark_this_place_then_where_is_the_mark():
+    m = Middleware()
+    m.on_heard("mark this place", now=1.0)
+    m.nav.track.x, m.nav.track.y = 0.0, 5.0  # walked 5 m north, no compass
+    m.on_heard("where is the mark", now=2.0)
+    texts = [e["text"] for e in m.decisions]
+    assert texts == ["Place marked.", "The mark is 5 metres to the south."]
+    assert [i["command"] for i in m.inputs] == ["Mark", "Way back"]
+
+
+@pytest.mark.parametrize(
+    "heard, done",
+    [
+        ("where is the mark", "Way back"),
+        ("Where is the mark?", "Way back"),
+        ("Way back to the mark.", "Way back"),
+        ("Mark this place.", "Mark"),
+        ("Mark this place, I will come back", "Mark"),
+        ("mark", "Mark"),
+        ("I left my mark there", ""),
+    ],
+)
+def test_marks_are_understood_with_the_recognisers_punctuation(heard, done):
+    # Waqas's table on #140: Safari and Chrome add punctuation to what they hear
+    m = Middleware()
+    m.on_heard(heard, now=1.0)
+    assert m.inputs[-1]["command"] == done
