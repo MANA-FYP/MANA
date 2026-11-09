@@ -55,6 +55,18 @@ python -m demo.camera --source walk.mp4 --loop    # a video file
 Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
 and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
 
+Set `--pitch` to the camera's real tilt, within a few degrees. Stairs up or down comes from the
+depth, the camera's height and its tilt, and a wrong tilt turns stairs up into stairs down.
+- **Real iPhone frames, each with its own tilt (5 to 9 degrees down):** stairs up were read as up
+  on all 6 frames with a stairs box, from 8 degrees too little to 4 degrees too much. One frame
+  read down at 8 degrees too much.
+- **The stairs video, which only goes up, played with `demo.camera`:** `--pitch 5` gave 10 of 10
+  stairs reports up. `--pitch 12` gave 4 up and 8 down; 20 and 30 gave nearly all down.
+
+The phone measures its own tilt, so this applies to cameras without a motion sensor. Fitting the
+tilt from the floor in the depth was tried and is not good enough: on level real frames it was up to
+17 degrees off.
+
 ### Record a walk and play it again
 
 A walk can be kept and run through MANA again, the same messages at the same pace (#89):
