@@ -105,9 +105,13 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Send any camera to the MANA demo server")
     p.add_argument("--source", default="0", help="camera number, video file, or rtsp/http URL")
     p.add_argument("--server", default="http://localhost:8000", help="the demo server")
-    p.add_argument("--pitch", type=float, default=30.0,
-                   help="degrees below level the camera looks; it has no tilt sensor")  # fmt: skip
-    p.add_argument("--no-pitch", action="store_true", help="send no tilt at all")
+    # no default tilt: a wrong one turns stairs up into stairs down with no warning (#153)
+    tilt = p.add_mutually_exclusive_group(required=True)
+    tilt.add_argument("--pitch", type=float,
+                      help="degrees below level the camera looks; measure it, stairs up or down"
+                           " depend on it")  # fmt: skip
+    tilt.add_argument("--no-pitch", action="store_true",
+                      help="send no tilt: stairs then come without a distance")  # fmt: skip
     p.add_argument("--fps", type=float, default=5.0, help="frames a second, as the phone sends")
     p.add_argument("--loop", action="store_true", help="play a video file again at its end")
     a = p.parse_args(argv)

@@ -36,6 +36,18 @@ def test_the_tilt_is_sent_as_the_phone_would_read_it():
     assert math.degrees(math.asin(down["az"] / 9.81)) == pytest.approx(30.0)
 
 
+def test_the_tilt_has_no_default_it_is_given_or_turned_off(capsys):
+    # a default tilt that is wrong turns stairs up into stairs down with no warning (#153)
+    with pytest.raises(SystemExit) as stop:
+        camera.main(["--source", "no-such-file.mp4"])
+    assert stop.value.code == 2 and "--pitch" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as stop:  # not both
+        camera.main(["--pitch", "10", "--no-pitch"])
+    assert stop.value.code == 2
+    with pytest.raises(SystemExit, match="cannot open"):  # given: on to the camera
+        camera.main(["--source", "no-such-file.mp4", "--pitch", "10"])
+
+
 def test_a_frame_is_sent_480_pixels_across_as_a_jpeg():
     jpeg = camera.jpeg_of(np.zeros((720, 1280, 3), np.uint8))
     image = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)

@@ -46,14 +46,15 @@ The vision part can be tested without the phone (#132). `demo.camera` sends fram
 laptop's webcam, a USB or IP camera, or a video file to the server, the way the phone page does:
 
 ```bash
-python -m demo.camera                             # the laptop's webcam
-python -m demo.camera --source 1                  # a USB camera
-python -m demo.camera --source rtsp://192.168.1.20/stream   # an IP camera
-python -m demo.camera --source walk.mp4 --loop    # a video file
+python -m demo.camera --pitch 10                  # the laptop's webcam, 10 degrees down
+python -m demo.camera --source 1 --pitch 25       # a USB camera
+python -m demo.camera --source rtsp://192.168.1.20/stream --pitch 30   # an IP camera
+python -m demo.camera --source walk.mp4 --pitch 8 --loop    # a video file
 ```
 
-Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
-and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
+Such a camera has no motion sensor, so `--pitch` says how far below level it looks, and that tilt
+is sent as the phone's gravity reading would be. It has no default: give the tilt, or
+`--no-pitch` to send none (stairs then come without a distance). Needs `opencv-python`.
 
 Set `--pitch` to the camera's real tilt, within a few degrees. Stairs up or down comes from the
 depth, the camera's height and its tilt, and a wrong tilt turns stairs up into stairs down.
