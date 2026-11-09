@@ -218,3 +218,14 @@ The chart is drawn from these tables by `python3 tools/sweep_charts.py` (needs m
 
 Still to do: check the chosen values again in Gazebo once #16 runs, and measure the real chair's braking, which `obstacle_stop_m` and the D6 allowance wait for.
 
+## D9. The track request counts from the tracks' tip (#144)
+
+**Chosen:** on wheels, a step two sensors confirm is measured from the tracks' tip, not the front wheels, when the core decides to ask for tracks. The tip is what meets the step once the tracks come down. The core adds `front_tracks_m - front_wheels_m` to `step_m` while on wheels (`Mount.tip_lead_m`). On tracks, and while the slides move, the distances already count from the tracks' front, so nothing is added. The drop and lone-step stops keep `edge_m` from the front of the current mode, as in D6. With no mount (all 0, the scripted world) nothing changes.
+
+| Option | Problem |
+|---|---|
+| Keep `step_m` from the front wheels | In Gazebo the tracks were asked for 1.31, 1.32 and 1.28 m before the step (stairs, curb, imu_lost), measured from the tip, against a mark of 1.5 m: the tip is 0.63 m ahead of the front wheels on the simulated chair |
+| Measure every ground report from the tracks' tip on wheels | The drop stop would also come 0.63 m earlier on wheels. Safe, but it changes stops that already meet their marks, and it is the wheels, not the raised tracks, that roll over a drop |
+| **Count from the tip for the step decision only** | One more number in the step check. Stairs going down are asked about from the tip too, which is earlier, so safer |
+
+Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): the tracks were asked for 1.97 m (stairs), 1.93 m (curb) and 1.96 m (imu_lost) before the first step, from the tip, and all three marks are met. Gazebo meets 35 of 39 marks, up from 32. In that run `picture` missed "Slower on the way to the picture" on its first sample only. At 0.1 s, still at the start, the 3D camera's level ground came before the camera's picture of stairs, and the core said "Level ground" at full speed. Every later sample was slowed. The step rule needs two sensors and `picture` has one, so this change does not touch it. Run again, `picture` met all its marks, and the table shows that run.
