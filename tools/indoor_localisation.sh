@@ -61,9 +61,15 @@ run() {  # one step: the world from the start, slam_toolbox in a mode, then the 
   sleep 25  # Gazebo up and the sensors publishing
   start "$OUT/$name-slam.log" ros2 run slam_toolbox "$executable" \
     --ros-args --params-file "$SHARE/config/$config" "$@"
-  sleep 6
-  # slam_toolbox on Jazzy is a lifecycle node: it neither maps nor localises until activated
-  ros2 lifecycle set /slam_toolbox configure >/dev/null && ros2 lifecycle set /slam_toolbox activate >/dev/null \
+  # slam_toolbox on Jazzy is a lifecycle node: it neither maps nor localises until activated. On a
+  # fresh ROS domain it can take a while to be found, so wait for it first
+  local deadline=$((SECONDS + 60))
+  until timeout 5 ros2 lifecycle get /slam_toolbox >/dev/null 2>&1; do
+    [ $SECONDS -ge $deadline ] && { echo "FAIL slam_toolbox was not found"; return 1; }
+    sleep 2
+  done
+  timeout 20 ros2 lifecycle set /slam_toolbox configure >/dev/null \
+    && timeout 20 ros2 lifecycle set /slam_toolbox activate >/dev/null \
     || { echo "FAIL slam_toolbox did not activate"; return 1; }
   echo "--- $name"
   ros2 run mana_sim loop_driver --laps "$laps" --csv "$OUT/$name.csv"
@@ -71,9 +77,9 @@ run() {  # one step: the world from the start, slam_toolbox in a mode, then the 
 
 status=0
 if [ "$MAPPING" = 1 ]; then
-  run mapping async_slam_toolbox_node slam_mapping.yaml 1 || status=1
+  run mapping async_slam_toolbox_node slam_mapping.yaml 1 || { echo "FAIL mapping"; exit 1; }
   rm -f "$MAP.posegraph" "$MAP.data"
-  ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+  timeout 60 ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
     "{filename: '$MAP'}" >/dev/null
   [ -f "$MAP.posegraph" ] && echo "map saved: $MAP.posegraph" || { echo "FAIL the map was not saved"; exit 1; }
   stop_all
