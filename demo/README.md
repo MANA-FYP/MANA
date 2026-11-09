@@ -86,6 +86,19 @@ Steps are counted on the phone's own clock, so a faster replay walks the same pa
 step count and GPS position as when it was live. The frames show faces: `recordings/` is not in
 git, and a recording is kept private unless the faces are blurred first.
 
+**Field accuracy of a walk (#133).** Record a walk whose truth you know, then score it:
+
+```bash
+python -m demo.server --record recordings/loop-1          # walk a closed loop, count your steps
+python -m demo.field recordings/loop-1 --loop --steps 212 --place "corridor, floor 2"
+python -m demo.field recordings/road-1 --distance 120 --steps 160 --place "campus road"
+```
+
+`--loop`: the walk ended where it started, so the gap between the track's end and start is its
+error. `--distance`: the real length (a tape, or a route measured on a map). `--steps`: the steps
+you counted. It prints the steps and the distance against those, the gap, and a row for the table
+in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS).
+
 ## The phone screen
 
 Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an
