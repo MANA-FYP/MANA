@@ -503,8 +503,11 @@ class Middleware:
             return USER_STOP_TEXT, True
         if d.stop:
             return f"Stopped. {end_sentence(d.reason)}", False
-        how = "tracks" if d.mode == Mode.TRACKS else "wheels"
-        lead = f"Driving on {how} at {round(d.speed_limit * 100)} percent speed."
+        if self.on_foot:  # carried on foot: no wheels to talk about
+            lead = "Slow down." if d.speed_limit < 1 else "Go on."
+        else:
+            how = "tracks" if d.mode == Mode.TRACKS else "wheels"
+            lead = f"Driving on {how} at {round(d.speed_limit * 100)} percent speed."
         prefix = "MANA reactivated. " if now < self._reactivated_until else ""
         if not self.core.automatic:
             prefix += "Manual mode. "

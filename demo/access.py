@@ -26,7 +26,7 @@ from aiohttp import web
 
 FILE = Path(__file__).resolve().parent.parent / "certs" / "access-key.txt"
 COOKIE = "mana_key"
-PAGES = {"/", "/dashboard", "/phone", "/caregiver"}
+PAGES = {"/", "/live", "/dashboard", "/phone", "/caregiver"}
 REFUSED = "This demo needs its key: open the address the server printed (it ends in ?k=...)."
 
 

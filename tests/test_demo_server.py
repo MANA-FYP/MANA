@@ -219,6 +219,31 @@ class PersonDetector:
         return [Detection("person", 0.9, 10.0, 5.0, 30.0, 45.0)], 64, 48
 
 
+class PersonAndKiteDetector:
+    def detect(self, jpeg):
+        from demo.vision import Detection
+
+        return (
+            [
+                Detection("kite", 0.8, 0.0, 0.0, 9.0, 9.0),
+                Detection("person", 0.9, 10.0, 5.0, 30.0, 45.0),
+            ],
+            64,
+            48,
+        )
+
+
+def test_each_box_carries_its_distance_when_it_is_an_obstacle():
+    async def go(client, phone, dash):
+        await phone.send_bytes(b"\x01" + jpeg())
+        snap = await snapshot_where(dash, lambda s: len(s["frame"]["boxes"]) == 2)
+        kite, person = snap["frame"]["boxes"]
+        assert kite["distance_m"] is None  # no typical height: not an obstacle
+        assert person["distance_m"] is not None and person["distance_m"] > 0
+
+    run(with_clients(go, detector=PersonAndKiteDetector()))
+
+
 def test_what_the_camera_sees_reaches_the_decision_log():
     async def go(client, phone, dash):
         for _ in range(3):
@@ -372,3 +397,20 @@ def test_the_dashboard_marks_a_place_and_the_walk_can_be_saved():
         assert r.status == 200 and "<wpt" in await r.text()
 
     run(with_clients(go))
+
+
+def test_the_live_page_and_its_scripts_are_served_and_the_root_opens_it():
+    async def go():
+        client = TestClient(TestServer(build_app()))
+        await client.start_server()
+        try:
+            r = await client.get("/", allow_redirects=False)
+            assert r.status == 302 and r.headers["Location"] == "/live"
+            page = await (await client.get("/live")).text()
+            assert "/static/live.js" in page and "/static/icons.js" in page
+            for f in ("live.js", "live.css", "icons.js"):
+                assert (await client.get("/static/" + f)).status == 200
+        finally:
+            await client.close()
+
+    run(go())

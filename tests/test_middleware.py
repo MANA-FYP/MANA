@@ -488,6 +488,11 @@ def test_the_decision_sentence_is_in_the_snapshot():
     assert snap["decision"]["sentence"].startswith("Driving on wheels")
 
 
+def test_on_foot_the_sentence_does_not_talk_about_wheels():
+    snap = Middleware(on_foot=True).tick(0.0)
+    assert snap["decision"]["sentence"].split(".")[0] in ("Go on", "Slow down")
+
+
 # ---- the snapshot
 
 
