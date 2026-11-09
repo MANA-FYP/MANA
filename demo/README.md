@@ -40,6 +40,21 @@ the data, so you can show the alert link changing.
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
 
+### Or any other camera
+
+The vision part can be tested without the phone (#132). `demo.camera` sends frames from the
+laptop's webcam, a USB or IP camera, or a video file to the server, the way the phone page does:
+
+```bash
+python -m demo.camera                             # the laptop's webcam
+python -m demo.camera --source 1                  # a USB camera
+python -m demo.camera --source rtsp://192.168.1.20/stream   # an IP camera
+python -m demo.camera --source walk.mp4 --loop    # a video file
+```
+
+Such a camera has no motion sensor, so `--pitch` (default 30) says how far below level it looks,
+and that tilt is sent as the phone's gravity reading would be. Needs `opencv-python`.
+
 ## The phone screen
 
 Eight tiles in two columns, then Automatic and Manual, and the STOP and GO buttons. Tapping an
@@ -131,6 +146,16 @@ the USB cable, and GPS works without a network.
 - **Indoors**, or with GPS lost or switched off on the phone, the position carries on from the
   steps, and the path turns from blue (GPS) to orange (steps). The first good fix ties the path to
   latitude and longitude.
+
+**Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
+place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA says how far
+it is and which way as a clock face, 12 o'clock straight ahead, as orientation and mobility
+training gives directions: "The mark is 14 metres away, at 6 o'clock." Without a compass it gives
+the compass direction instead. The mark shows as a flag on the path.
+
+**Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
+GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
+fix, otherwise in metres from the start (it says so).
 
 Limits: the compass is disturbed near steel and motors, and step counting measures a person
 walking. On a device with wheels the steps would come from wheel odometry instead (#78).
