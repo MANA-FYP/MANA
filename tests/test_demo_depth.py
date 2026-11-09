@@ -131,6 +131,21 @@ def test_a_drop_farther_off_still_teaches_it_the_bottom_rows_are_floor():
     assert r.held == pytest.approx(1 / 1.2, abs=0.02)
 
 
+@pytest.mark.parametrize(
+    "drop, at, kinds", [(-0.17, 0.37, (CURB,)), (-0.12, 0.37, (CURB,)), (-0.20, 0.55, (CURB, DROP))]
+)
+def test_standing_at_a_kerb_the_held_scale_does_not_follow_the_lower_floor(drop, at, kinds):
+    # Waqas's rows on #142: the floor past a kerb is a plane at the camera's tilt too; followed,
+    # the held scale walked down onto it and the kerb read flat after 2 to 5 s
+    r = reader_on()
+    held = r.held
+    kerb = scene(syn.step(at, drop))
+    for _ in range(25):
+        seen = r.read(kerb, PITCH)
+    assert seen.reading.ground in kinds
+    assert r.held == pytest.approx(held, abs=1e-9)
+
+
 def test_the_floor_plane_must_have_the_cameras_own_tilt():
     cam = MOUNT.camera(COLS, ROWS, PITCH)
     assert dz.floor_plane(scene(syn.flat, scale=1.3, noise=0.01), cam)

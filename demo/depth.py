@@ -184,7 +184,10 @@ class Reader:
         differs = own is not None and abs(own / self.held - 1.0) > self.differ
         if not differs:
             self._differs_since = None
-            if own is not None and floor_plane(depth, cam):
+            # follow only level floor the reader also calls level: the floor past a kerb is a
+            # plane at the camera's tilt as well, and following it would walk the held scale down
+            # onto it until the kerb read flat (Waqas, #142)
+            if own is not None and reading.ground == dp.FLAT and floor_plane(depth, cam):
                 self.held += (own - self.held) * self.follow
         else:
             if self._differs_since is None:
