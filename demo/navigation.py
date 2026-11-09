@@ -232,10 +232,13 @@ class Track:
             agreed = self._agreed()
             if agreed is None:
                 return False
-            # several fixes agree: the person is there. The jump puts right where the steps had
-            # drifted to (indoors, out of a building); it was not walked, so it adds no distance
+            # several fixes agree: the person is there. After a stretch on steps alone (out of a
+            # building) the jump puts right where the steps had drifted to: not walked, so no
+            # distance. Otherwise it is how the track follows a device rolling with no steps,
+            # whose fixes leave the gate as they come: that is travel (Waqas, #150)
+            corrects_steps = self.source == self.STEPS
             self.x, self.y, self.var = agreed
-            self._used(fix, walked=False)
+            self._used(fix, walked=not corrects_steps)
             return True
         gain = self.var / (self.var + r)
         self.x += gain * (e - self.x)

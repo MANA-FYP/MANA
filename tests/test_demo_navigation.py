@@ -196,6 +196,17 @@ def test_a_track_put_right_by_gps_adds_no_distance_but_the_walk_on_does():
     assert nav.track.distance_m == pytest.approx(walked + 7.0, abs=1.0)
 
 
+@pytest.mark.parametrize("accuracy", [5.0, 10.0])
+def test_a_device_rolling_with_no_steps_counts_its_travel(accuracy):
+    # Waqas's case on #150: a chair rolls north at 1.1 m/s for 2 minutes, one fix a second; its
+    # fixes leave the gate and the track follows by the agreeing-fixes jump. That is travel.
+    track = Track()
+    for i in range(121):
+        track.on_gps(fix_at(track, 0.0, 1.1 * i, float(i), accuracy))
+    assert track.y > 110.0
+    assert track.distance_m == pytest.approx(track.y, abs=1.0)
+
+
 def test_far_fixes_scattered_in_different_directions_do_not_move_the_track():
     # multipath while standing: three far fixes that do not agree with each other (Waqas, #137)
     track = Track()
