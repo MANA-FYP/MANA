@@ -82,7 +82,9 @@ def names(cert: Path) -> set[str]:
         c = x509.load_pem_x509_certificate(cert.read_bytes())
     except (OSError, ValueError):
         return set()
-    if c.not_valid_after_utc <= dt.datetime.now(dt.UTC):
+    # cryptography 42 added the aware not_valid_after_utc; older ones have a naive UTC one
+    until = getattr(c, "not_valid_after_utc", None) or c.not_valid_after.replace(tzinfo=dt.UTC)
+    if until <= dt.datetime.now(dt.UTC):
         return set()
     alt = c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     return {str(ip) for ip in alt.get_values_for_type(x509.IPAddress)}

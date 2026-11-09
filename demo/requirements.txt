@@ -2,7 +2,7 @@
 aiohttp>=3.9          # web server and WebSockets
 py_trees>=2.2         # the decision layer's behaviour tree
 pillow>=10            # decode the phone's camera frames
-cryptography>=42      # the https certificate (--https)
+cryptography>=3.4     # the https certificate (--https)
 
 # Optional models. Without them the dashboard shows the sensor as "not available".
 # ultralytics>=8.3    # lightweight COCO object detector (yolo26n.pt or yolo11n.pt)
