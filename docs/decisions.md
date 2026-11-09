@@ -263,8 +263,8 @@ A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On
 
 **Chosen:** two changes, found by playing `stairs_down` in Gazebo.
 
-1. **In the core**, after the user's yes to stairs down, a drop report no deeper than `down_drop_m` (0.6 m) counts as those stairs. A deeper drop, a drop of unknown depth, or any drop without a yes still stops the chair.
-2. **In the simulation's sensors node**, the lidar's echoes are not sent as obstacles while the chair is pitched or rolled more than `scan_max_tilt_rad` (0.17 rad, about 10°). That is steeper than the ramps it drives on wheels (7° on the route).
+1. **In the core**, after the user's yes to stairs down, a drop report no deeper than `down_drop_m` (0.6 m) counts as those stairs, but only while another sensor itself still reports stairs down, and only at the edge (within the distance at which the drop would stop the chair). Only a sensor's own stairs down keeps the yes alive. A deeper drop, a drop of unknown depth, a drop seen with a curb or flat ground, a drop further on, or any drop without a yes still stops the chair (Waqas, #173 review).
+2. **In the simulation's sensors node**, the lidar's echoes are not sent as obstacles while the chair is pitched or rolled more than `scan_max_tilt_rad` (0.17 rad, about 10°). That is steeper than the ramps it drives on wheels (7° on the route). A tilt older than 0.5 s is not used, so an IMU that goes quiet does not turn the lidar off for good. This is a workaround for the simulated 2D lidar's single scan plane, not a rule for the real chair: on stairs it means the core hears of an obstacle (a person at their foot) only from the cameras, and the Gazebo runs do not test that.
 
 **Why.** In the first runs the chair asked at the top, waited for the yes, and started down on tracks. Then it stopped for good twice.
 
@@ -275,7 +275,7 @@ A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On
 |---|---|
 | Let the "going down" branch come before the drop branch | A real drop while going down would never stop the chair |
 | Make the 3D camera read a single deep step as stairs down | It cannot tell a flight from a ledge when the steps are in its blind zone; on a platform edge that would hide a real drop |
-| **After the yes, a shallow drop is the stairs; a deeper one still stops** | A ledge up to 0.6 m deep right after stairs the user agreed to go down would not stop the chair |
+| **After the yes, a shallow drop at the edge is the stairs while another sensor still sees them; a deeper one still stops** | A ledge up to 0.6 m deep at the foot of stairs the user agreed to go down, while the camera still sees those stairs, would not stop the chair |
 | Judge each lidar echo against the ground ahead | A 2D lidar has one plane: on a tilted chair every echo is at the same height in the chair's frame, so floor and obstacle look alike |
 | **No lidar obstacles while the chair is tilted more than 10°** | On stairs, obstacles come only from the cameras; the lidar is back once the chair is level |
 

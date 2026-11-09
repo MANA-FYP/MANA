@@ -89,3 +89,11 @@ def scan_is_level(pitch_rad: float | None, roll_rad: float | None, max_rad: floa
     for one for good (#52). True while the tilt is not known yet."""
     tilt = max(abs(pitch_rad or 0.0), abs(roll_rad or 0.0))
     return tilt <= max_rad
+
+
+def fresh_tilt(tilt, now_s: float, max_age_s: float = 0.5) -> tuple[float | None, float | None]:
+    """(pitch, roll) from a (pitch, roll, time) kept from the IMU, or (None, None) once it is older
+    than max_age_s: a tilt from before the IMU went quiet must not turn the lidar off for good."""
+    if tilt is None or now_s - tilt[2] > max_age_s:
+        return None, None
+    return tilt[0], tilt[1]

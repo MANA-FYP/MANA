@@ -374,8 +374,8 @@ class DecisionCore:
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
-        if seen["stairs down"]:
-            self.down_seen_at = now
+        if seen["stairs down"] and self._really_down():
+            self.down_seen_at = now  # only a sensor's own stairs down keeps a yes alive
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         self.tree.tick_once()
@@ -406,16 +406,29 @@ class DecisionCore:
         down_drop_m counts as those stairs: once the 3D camera is past the top edge, the steps
         are in its blind zone and it sees one step down, to the floor at their foot, which it
         reads as a drop (in Gazebo, 0.52 m for three steps of 17 cm). Without that the chair
-        stopped at the edge for good (#52). A deeper drop, or one of unknown depth, still stops."""
+        stopped at the edge for good (#52). Only while another sensor still sees those stairs
+        down, and only a drop at the edge, close enough to stop the chair: a ledge seen with a
+        curb, or a drop further on, stays a drop (#173 review). A deeper drop, or one of unknown
+        depth, still stops."""
         found = [r for r in self.ground.values() if self._ok(r)]
         if not self.down_ok:
             return found
+        down = {SENSOR_OF.get(r.source, r.source) for r in found if r.ground == Ground.STAIRS_DOWN}
+        lim = self.limits
+        edge = lim.edge_m + self.mount.travel_m(self.moving_speed) + lim.release_m
         return [
             replace(r, ground=Ground.STAIRS_DOWN)
-            if r.ground == Ground.DROP and r.step_height_m <= self.limits.down_drop_m
+            if r.ground == Ground.DROP
+            and r.step_height_m <= lim.down_drop_m
+            and r.distance_m <= edge
+            and down - {SENSOR_OF.get(r.source, r.source)}
             else r
             for r in found
         ]
+
+    def _really_down(self) -> bool:
+        """A sensor reports stairs down itself: not a drop taken for them after a yes."""
+        return any(r.ground == Ground.STAIRS_DOWN for r in self.ground.values() if self._ok(r))
 
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)

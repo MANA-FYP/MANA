@@ -34,7 +34,7 @@ class SensorsNode(Node):
         self.obstacle_max_m = p("obstacle_max_m", 4.0).value
         self.obstacle_trust = p("obstacle_trust", 0.9).value
         self.scan_max_tilt_rad = p("scan_max_tilt_rad", 0.17).value
-        self.tilt: tuple[float, float] | None = None  # (pitch, roll) from the IMU
+        self.tilt: tuple[float, float, float] | None = None  # (pitch, roll, time) from the IMU
 
         self.mode = WHEELS
         self.left_rad_s: list[float] = []
@@ -91,7 +91,7 @@ class SensorsNode(Node):
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
         pitch, roll = conv.tilt(q.x, q.y, q.z, q.w)
-        self.tilt = (pitch, roll)
+        self.tilt = (pitch, roll, self.get_clock().now().nanoseconds / 1e9)
         wheels = self.left_rad_s + self.right_rad_s
         slip = self.mode == WHEELS and (
             conv.wheel_slip(wheels, self.speed_mps)
@@ -103,7 +103,7 @@ class SensorsNode(Node):
         self.motion.publish(r)
 
     def on_scan(self, m: LaserScan) -> None:
-        pitch, roll = self.tilt or (None, None)
+        pitch, roll = conv.fresh_tilt(self.tilt, self.get_clock().now().nanoseconds / 1e9)
         if not conv.scan_is_level(pitch, roll, self.scan_max_tilt_rad):
             return
         found = conv.nearest_ahead(
