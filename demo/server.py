@@ -9,7 +9,8 @@ caregiver opens /caregiver on their own phone: a read-only status view (demo/car
 
 Phone to laptop, text messages (JSON):
   hello   {"type": "hello", "caps": {"camera": {"available": true}, ...}, "audio_rate": 48000}
-  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "t": 12.34}   (t: the phone's clock, s)
+  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "rot": 3.1, "t": 12.34}
+          (t: the phone's clock, s; rot: how fast it turns, deg/s, or null)
   gps     {"type": "gps", "accuracy": 6.0, "lat": .., "lon": .., "speed": .., "heading": ..}
           (accuracy is null when there is no fix; speed and heading are null when unknown)
   orient  {"type": "orientation", "alpha": .., "beta": .., "gamma": .., "compass": ..}
