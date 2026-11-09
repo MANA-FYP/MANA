@@ -87,8 +87,15 @@ python -m demo.tunnel                  # prints https://<random words>.trycloudf
 ```
 
 It needs Cloudflare's `cloudflared`, from Cloudflare's release page. Every message goes through
-Cloudflare, so the round trip is longer than on the same Wi-Fi. Anyone with that address can open
-the dashboard and see the camera, so stop the tunnel (Ctrl+C) when the demo ends.
+Cloudflare, so the round trip is longer than on the same Wi-Fi: from Pakistan the tunnel goes
+through Singapore, and our phone's round trip was about 230 to 250 ms. Watch the dashboard on the
+laptop at `http://localhost:8000/dashboard`, not through the tunnel, or every frame makes that trip
+twice. Anyone with that address can open the dashboard and see the camera, so stop the tunnel
+(Ctrl+C) when the demo ends.
+
+Keep the phone page open on the screen. Chrome slows a page in the background or with the screen
+off to a frame a second or less, so the page asks to keep the screen on. On a slow link the page
+drops old camera frames and voice rather than sending them late.
 
 The dashboard shows the round trip to the phone under *Inputs from the phone*, for any of these ways.
 
