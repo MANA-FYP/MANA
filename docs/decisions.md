@@ -263,16 +263,17 @@ A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On
 **Chosen:** the object detector keeps sending its confidence, times the light factor, as the trust of
 its reports. It is not mapped through a calibration.
 
-**Why.** On SANPO-Real (`results.md`, #87) the confidence was close to calibrated. The expected
-calibration error was 0.066 on the train split and 0.052 on the test split. Two maps fitted on the
-train split lowered the test error only to 0.038. Both were worse than the confidence where the core
-decides: their trusts of 0.5 to 0.6 were right 41 to 42 percent of the time on the test split.
+**Why.** On SANPO-Real (`results.md`, #87) the confidence was close to calibrated, and
+under-confident from 0.3 to 0.6. The expected calibration error was 0.074 on the train split and
+0.071 on the test split. Two maps fitted on the train split lowered the test error to 0.027 and
+0.028, but both were worse than the confidence where the core decides: their trusts of 0.5 to 0.6
+were right 39 percent of the time on the test split.
 
 | Option | Problem |
 |---|---|
-| **The confidence as the trust** | Under-confident between 0.3 and 0.6: a confidence of 0.4 to 0.5 is right 71 to 80 percent of the time, and the core ignores it (min_trust 0.5) |
-| Platt scaling of the confidence | ECE 0.038 on test, but its trusts of 0.5 to 0.6 are right 41 percent of the time |
-| Isotonic regression | The same: ECE 0.038, and trusts of 0.5 to 0.6 right 42 percent of the time |
+| **The confidence as the trust** | Under-confident between 0.3 and 0.6: a confidence of 0.4 to 0.5 is right 77 to 80 percent of the time, and the core ignores it (min_trust 0.5) |
+| Platt scaling of the confidence | ECE 0.028 on test, but its trusts of 0.5 to 0.6 are right 39 percent of the time |
+| Isotonic regression | The same: ECE 0.027, and trusts of 0.5 to 0.6 right 39 percent of the time |
 
 **Limits.** The test split has 1803 detections, so the bins near 0.5 hold only 66 to 101 each.
 SANPO's frames come from cameras worn by people walking, not the chair's camera. A larger set

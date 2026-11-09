@@ -38,6 +38,12 @@ SAME = {
     "vehicle": {"car", "bus", "truck", "motorcycle", "bicycle"},
     "animal": {"dog"},
 }
+# SANPO's broad "obstacle" (a class with objects, as the ones above): every other obstacle label of
+# the detector, a chair, a bench, a potted plant, a fire hydrant... Without it such a detection
+# could never be right (#175 review). A loose match: the class is broad
+SAME["obstacle"] = set(OBSTACLE_HEIGHT_M) - set().union(*SAME.values())
+# the detector's labels in groups, for the share right of each
+GROUPS = {"person": {"person"}, "vehicle": SAME["vehicle"], "other": SAME["obstacle"] | {"dog"}}
 MIN_PIXELS = 400  # an object smaller than this in the mask is not counted
 MIN_BOX_PX = 40  # a detection lower than this is left out
 MIN_IOU = 0.5
@@ -179,12 +185,13 @@ def detect(root: Path, split: str, weights: str, imgsz: int) -> Path:
     return out
 
 
-def load(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def load(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with path.open(newline="") as f:
         rows = list(csv.DictReader(f))
     return (
         np.array([float(r["confidence"]) for r in rows]),
         np.array([r["right"] == "1" for r in rows]),
+        np.array([r["label"] for r in rows]),
     )
 
 
@@ -208,10 +215,14 @@ def main(argv=None) -> int:
         if a.again or not path.exists():
             detect(a.root, split, a.weights, a.imgsz)
         data[split] = load(path)
-    fa, fb = fit_platt(*data["train"])
-    knots = fit_isotonic(*data["train"])
-    conf, right = data["test"]
+    fa, fb = fit_platt(*data["train"][:2])
+    knots = fit_isotonic(*data["train"][:2])
+    conf, right, labels = data["test"]
     print(table(conf, right, "test, confidence as the trust"))
+    for group, names in GROUPS.items():
+        inside = np.isin(labels, list(names))
+        print()
+        print(table(conf[inside], right[inside], f"test, {group}"))
     print()
     print(table(trust(conf, fa, fb), right, f"test, trust = sigmoid({fa:.3f} logit(c) + {fb:.3f})"))
     print()

@@ -65,3 +65,15 @@ def test_isotonic_regression_is_monotone_and_follows_the_data():
     assert np.all(np.diff(y) >= 0)
     assert y[0] == 0.0 and y[-1] == 1.0
     assert cd.trust_isotonic([0.0, 1.0], (x, y)).tolist() == [0.0, 1.0]  # held at the ends
+
+
+def test_a_chair_over_an_obstacle_in_the_mask_is_right():
+    # SANPO labels chairs, benches, plants and the like "obstacle" (#175 review)
+    found = [("obstacle", (100, 100, 150, 180)), ("pedestrian", (300, 100, 350, 250))]
+    dets = [
+        Detection("chair", 0.6, 100, 100, 150, 180),
+        Detection("potted plant", 0.5, 300, 100, 350, 250),  # over a pedestrian: wrong
+    ]
+    assert cd.judge(dets, found) == [("chair", 0.6, True), ("potted plant", 0.5, False)]
+    assert "person" not in cd.SAME["obstacle"] and "car" not in cd.SAME["obstacle"]
+    assert {"chair", "bench", "potted plant", "fire hydrant"} <= cd.SAME["obstacle"]
