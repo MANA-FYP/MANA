@@ -366,6 +366,25 @@ def test_a_wobbly_compass_still_gives_two_legs_for_an_l_shaped_walk(seed):
     assert abs(legs[0][1] - 270) < 10 and abs(legs[1][1] - 180) < 15
 
 
+def test_the_way_back_after_a_long_walk_does_not_hold_up_the_server():
+    # the server waits while the route is built, a stop from the phone too (Waqas, #158): a
+    # straight walk with a wobbly compass, about 4950 points between the mark and now
+    import time
+
+    rnd = random.Random(1)
+    nav, t = Navigator(), 0.0
+    nav.on_orientation(None, None, None, compass=0)
+    nav.track.mark()
+    for _ in range(4950):
+        nav.on_orientation(None, None, None, compass=rnd.gauss(0, 8) % 360)
+        t += 0.55
+        nav.track.on_step(Step(t, 0.7), t)
+    started = time.perf_counter()
+    legs = nav.track.route_back()
+    assert time.perf_counter() - started < 0.5  # 0.04 s here; 1.8 s scanning every pair
+    assert len(legs) == 1 and abs(legs[0][1] - 180) < 5
+
+
 def test_more_turns_are_counted_and_no_compass_gives_compass_directions():
     from demo.navigation import route_text
 

@@ -391,15 +391,25 @@ def _cut_loops(points: list, near_m: float) -> list:
     along = [0.0]
     for a, b in zip(points, points[1:], strict=False):
         along.append(along[-1] + math.dist(a, b))
+    # a grid of near_m cells: a point within near_m is in the same cell or one of the 8 around,
+    # so each point looks at a few others, not all (the server waits for this; Waqas, #158)
+    cells: dict[tuple[int, int], list[int]] = {}
+    for k, (x, y) in enumerate(points):
+        cells.setdefault((math.floor(x / near_m), math.floor(y / near_m)), []).append(k)
     out, i = [], 0
     while i < len(points):
         out.append(points[i])
+        cx, cy = math.floor(points[i][0] / near_m), math.floor(points[i][1] / near_m)
         back = [
             k
-            for k in range(i + 1, len(points))
-            if math.dist(points[k], points[i]) <= near_m and along[k] - along[i] > 3 * near_m
+            for dx in (-1, 0, 1)
+            for dy in (-1, 0, 1)
+            for k in cells.get((cx + dx, cy + dy), ())
+            if k > i
+            and math.dist(points[k], points[i]) <= near_m
+            and along[k] - along[i] > 3 * near_m
         ]
-        i = back[-1] if back else i + 1  # always forward: later points come after i
+        i = max(back) if back else i + 1  # always forward: later points come after i
     return out
 
 
