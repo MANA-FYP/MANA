@@ -750,3 +750,11 @@ def test_saying_how_the_phone_is_carried_is_written_down_once():
         "The phone is on the device. Shaking counts as rough ground.",
     ]
     assert m.tick(4.0)["on_foot"] is False
+
+
+@pytest.mark.parametrize("word", ["stop", "Stop.", "STOP!", " stop, "])
+def test_a_spoken_stop_with_the_recognisers_punctuation_still_stops(word):
+    # Safari on an iPhone, and Chrome at times, add punctuation: "Stop." must stop all the same
+    m = Middleware()
+    assert m.on_word(word, 0.9, now=1.0) == Command.STOP
+    assert m.tick(1.0)["decision"]["stop"]
