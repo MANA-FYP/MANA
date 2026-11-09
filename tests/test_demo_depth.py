@@ -535,3 +535,25 @@ def test_stairs_the_detector_sees_are_not_sent_as_something_in_the_path(detector
 
     kw = {"detector": StairsDetector()} if detector else {}
     run(with_clients(go, depth=RenderedStairs(), mount=MOUNT, **kw))
+
+
+def test_the_stairs_window_uses_the_cameras_distance_not_the_cores_from_the_front():
+    # with a mount the core counts from the device's front, here 0.12 m ahead of the camera;
+    # the depth's something is from the camera, so the stairs must be too (Waqas, #160)
+    pytest.importorskip("aiohttp")
+    from mana_core.decision import DecisionCore, Mount, Source
+
+    from demo.middleware import Middleware
+    from demo.server import build_app, stairs_seen, the_stairs
+
+    mw = Middleware(core=DecisionCore(mount=Mount(front_wheels_m=0.47, camera_m=0.35)))
+    mw.gravity = (0.0, 8.5, 4.9)  # 30 degrees down
+    app = build_app(mw, mount=MOUNT)
+    stairs_seen(app, [stairs_box(300)], 480, 360, mw.clock())
+    from_camera = dz.floor_at(MOUNT.camera(480, 360, PITCH), 300)
+    assert app["stairs"].distance_m == pytest.approx(from_camera, abs=0.05)
+    assert mw.core.ground[Source.DETECTOR].distance_m == pytest.approx(from_camera - 0.12, abs=0.05)
+    # a riser 1.45 m past where the stairs start, from the camera: inside the window
+    assert the_stairs(app["stairs"], from_camera + 1.45, mw.clock())
+    # the core's copy, 0.12 m less, would have put it outside: an obstacle, as before this change
+    assert not the_stairs(mw.core.ground[Source.DETECTOR], from_camera + 1.45, mw.clock())
