@@ -59,7 +59,19 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
   | opening-door | 46 (34) | 0 |
   | **stairs** | **61 (61)** | **7 (7)** |
 
-  **Stairs are rare.** Seven stairs in the test split is far too few to report a stairs recall against the 0.85 target with any confidence: one miss moves it by 14 points. Before #49 trains, it has to find more. The plan is to run `--masks-only --count` over all 701 sessions with `--every 1` (about 2.5 GB of masks), list the sessions that contain stairs, and fetch those sessions in full. The test split stays the authors' own test sessions. Adjacent frames are near copies, so stairs recall should also be reported per staircase, not only per frame.
+  **Stairs are rare.** Seven stairs in the test split is far too few to report a stairs recall against the 0.85 target with any confidence: one miss moves it by 14 points. So we scanned the masks of every session (10 November 2026, one annotated frame in 10, 11,383 masks, about 190 MB):
+
+  ```
+  python3 tools/fetch_sanpo.py --root datasets/sanpo-masks --train -1 --test -1 --every 10 \
+      --masks-only --sessions stairs --workers 16
+  ```
+
+  | | Sessions | With masks | With stairs | Stairs frames (of their masks) | Stairs objects |
+  |---|---|---|---|---|---|
+  | Train | 560 | 189 | 45 | 700 (of 2,228) | 795 |
+  | Test | 141 | 48 | **6** | 65 (of 304) | 76 |
+
+  Only a third of SANPO's sessions have masks at all. Training is not short of stairs: 45 walks and 700 frames, ten times the default subset, and `--only datasets/sanpo-masks/sessions_with_stairs.txt` fetches exactly those walks. **The authors' test split holds only 6 walks with stairs.** A frame-level recall over 65 frames looks firmer than it is, because neighbouring frames of one walk are near copies; the honest unit is the walk, and six walks cannot show 0.85 with confidence. We keep the authors' test split (moving training walks into it would break the comparison with their figures) and report stairs recall both per frame and per walk, with the number of walks. A firmer stairs figure needs stairs from outside SANPO: our own phone recordings (#89) and the iPhone stairs frames used in #131.
 
 - **Split:** the authors' own lists, `splits/train_session_ids.txt` (560 sessions) and `splits/test_session_ids.txt` (141 sessions), so a test walk is never seen in training. We take sessions spread evenly over each list (every 14th of the 560, every 14th of the 141), so every member gets the same ones, and hold out 10 % of the training sessions (by session) for validation.
 
