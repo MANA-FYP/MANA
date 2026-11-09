@@ -34,3 +34,16 @@ def test_the_tunnels_address_is_found_in_its_log():
         tunnel.find_url("INF Requesting new quick Tunnel on https://api.trycloudflare.com") is None
     )
     assert tunnel.command("cloudflared", 8000)[-2:] == ["--url", "http://localhost:8000"]
+
+
+def test_a_tunnel_that_stops_with_no_address_says_what_cloudflared_said_last(monkeypatch, capsys):
+    import sys
+
+    from demo import access
+
+    say = "import sys; sys.stderr.write('INF Starting\\nfailed to dial edge\\n'); sys.exit(1)"
+    monkeypatch.setattr(access, "read", lambda: "k")
+    monkeypatch.setattr(tunnel, "command", lambda exe, port: [sys.executable, "-c", say])
+    assert tunnel.main(["--cloudflared", "x"]) == 1
+    out = capsys.readouterr().out
+    assert "stopped (exit 1) before giving an address" in out and "failed to dial edge" in out

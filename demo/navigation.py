@@ -44,6 +44,13 @@ class StepCounter:
     given out at the next rise, or 1.5 s later when the walk stops: rises closer together than
     `min_gap_s` are shaking (a rough floor, a vehicle), and then no step is counted.
 
+    A hand moving the phone also swings it at a walker's pace. What tells it from a step is how
+    fast the phone turns (the gyroscope, `rot` in degrees a second): on our phone a walk with it
+    held in front turned it about 15 deg/s on average, waving it about 210. So a step is not
+    counted while the phone turned faster than `max_turn_dps` on average over the `turn_window_s`
+    before it. Without a gyroscope (rot None) every step counts, as before. `high` is 0.35: at 0.6
+    that walk of about 20 steps gave 8, at 0.35 it gives 18.
+
     The length of each step follows Weinberg: k * (peak - valley) ** 0.25, with the peak and the
     valley of that step's swing, between `shortest_m` and `longest_m`. `k` can be set from a walk
     of known length (calibrate)."""
@@ -51,14 +58,18 @@ class StepCounter:
     def __init__(
         self,
         k: float = 0.5,
-        high: float = 0.6,
+        high: float = 0.35,
         low: float = 0.0,
         min_gap_s: float = 0.3,
         shortest_m: float = 0.3,
         longest_m: float = 1.0,
+        max_turn_dps: float = 60.0,
+        turn_window_s: float = 0.6,
     ):
         self.k, self.high, self.low, self.min_gap_s = k, high, low, min_gap_s
         self.shortest_m, self.longest_m = shortest_m, longest_m
+        self.max_turn_dps, self.turn_window_s = max_turn_dps, turn_window_s
+        self.turns: deque = deque()  # (t, deg/s) of the last few seconds
         self.gravity = 9.81  # m/s^2; then followed, for the sensor's own offset
         self.smooth = 0.0
         self.t: float | None = None
@@ -70,7 +81,13 @@ class StepCounter:
         self.pending: Step | None = None
         self.count = 0
 
-    def add(self, t: float, ax: float, ay: float, az: float) -> Step | None:
+    def add(
+        self, t: float, ax: float, ay: float, az: float, rot: float | None = None
+    ) -> Step | None:
+        if rot is not None:
+            self.turns.append((t, rot))
+            while self.turns and self.turns[0][0] < t - 3.0:  # a step is given out within 2.1 s
+                self.turns.popleft()
         m = math.sqrt(ax * ax + ay * ay + az * az)
         if self.t is None or t <= self.t or t - self.t > 1.0:  # first reading, or a gap
             # start over: a swing half before the gap is not a step
@@ -89,13 +106,13 @@ class StepCounter:
             self.valley = min(self.valley, s)
             if s <= self.high:
                 # the last step of a walk: no next rise came, so it was not shaking
-                return self._confirm() if self.pending and t - self.pending.t > 1.5 else None
+                return self._give() if self.pending and t - self.pending.t > 1.5 else None
             self.above, self.peak = True, s
             calm = t - self.last_rise_t >= self.min_gap_s
             self.last_rise_t = t
             if not calm:
                 self.pending = None  # rises faster than anyone steps: shaking, not a step
-            return self._confirm() if self.pending else None
+            return self._give() if self.pending else None
         self.peak = max(self.peak, s)
         if s >= self.low:
             return None
@@ -105,6 +122,15 @@ class StepCounter:
             length = min(self.longest_m, max(self.shortest_m, self.k * swing**0.25))
             self.pending = Step(t, length)  # a step once the next rise shows it was not shaking
         return None
+
+    def _give(self) -> Step | None:
+        """The pending step, unless the phone turned fast just before it: a hand, not a step."""
+        step = self._confirm()
+        w = [r for when, r in self.turns if step.t - self.turn_window_s <= when <= step.t]
+        if w and sum(w) / len(w) >= self.max_turn_dps:
+            self.count -= 1
+            return None
+        return step
 
     def _confirm(self) -> Step:
         step, self.pending = self.pending, None
@@ -167,8 +193,11 @@ class Track:
         drift_m2_per_s: float = 0.02,
         path_every_m: float = 0.5,
         path_points: int = 5000,
+        still_mps: float = 0.5,
+        coast_mps: float = 1.0,
     ):
         self.poor_gps_m, self.gate_sigmas = poor_gps_m, gate_sigmas
+        self.still_mps, self.coast_mps = still_mps, coast_mps
         self.agree_to_jump = agree_to_jump
         self.heading_sd = math.radians(heading_sd_deg)
         self.step_sd, self.drift = step_sd, drift_m2_per_s
@@ -188,6 +217,7 @@ class Track:
         self.last_gps_t: float | None = None
         self.last_step_t: float | None = None
         self.last_fix: Fix | None = None
+        self.sound: tuple[float, float] | None = None  # time and accuracy of the last sound fix
         self.refused: deque = deque(maxlen=agree_to_jump)  # fixes refused as jumps, in a row
         self.t: float | None = None
         self._recent: deque = deque(maxlen=50)  # (t, distance) for the speed
@@ -218,7 +248,7 @@ class Track:
         """Take a fix into the position. Returns whether it was used."""
         self._grow(fix.t)
         self.last_fix = fix
-        if fix.accuracy_m is None or fix.accuracy_m > self.poor_gps_m:
+        if fix.accuracy_m is None or fix.accuracy_m > self.poor_gps_m or self._coasting(fix):
             return False
         if self.origin is None:
             # the first good fix ties the track to the earth: where the track is now is this fix
@@ -228,8 +258,18 @@ class Track:
             return True
         e, n = self.to_metres(fix.lat, fix.lon)
         r = fix.accuracy_m**2
-        gap = math.hypot(e - self.x, n - self.y)
-        if gap > self.gate_sigmas * math.sqrt(self.var + r):
+        standing = self._standing(fix)
+        if standing and self.source == self.GPS:
+            # static hold, as GPS receivers do it: the position stays, and the fix neither moves
+            # it nor makes the filter surer of it. With no limit on the distance: indoors our
+            # phone's fixes wandered 10 to 25 m from a person sitting still, with an accuracy of 3
+            # to 5 m and a speed of 0.03 to 0.3 m/s, and once 6 m against the steps just taken.
+            # Steps move the position themselves. Where the position came from steps alone (out
+            # of a building) the source is steps, and GPS puts it right (below)
+            self.last_fix = fix
+            self.last_gps_t = fix.t
+            return True
+        if math.hypot(e - self.x, n - self.y) > self.gate_sigmas * math.sqrt(self.var + r):
             self.refused.append((e, n, fix.accuracy_m))
             agreed = self._agreed()
             if agreed is None:
@@ -238,16 +278,38 @@ class Track:
             # building) the jump puts right where the steps had drifted to: not walked, so no
             # distance. Otherwise it is how the track follows a device rolling with no steps,
             # whose fixes leave the gate as they come: that is travel (Waqas, #150)
+            # Standing still, this comes only after steps alone (the hold above): not walked
             corrects_steps = self.source == self.STEPS
             self.x, self.y, self.var = agreed
-            self._used(fix, walked=not corrects_steps)
+            self._used(fix, walked=not (corrects_steps or standing))
             return True
         gain = self.var / (self.var + r)
         self.x += gain * (e - self.x)
         self.y += gain * (n - self.y)
         self.var *= 1.0 - gain
-        self._used(fix)
+        self._used(fix, walked=not standing)  # a GPS move while standing is not walked either
         return True
+
+    def _coasting(self, fix: Fix) -> bool:
+        """The phone's location going on along its last velocity rather than measuring: its
+        accuracy grows by more than coast_mps each second (and by a metre at least) from the last
+        sound fix. Sitting indoors, our phone's fixes twice ran off at 2 to 3 m/s for 5 to 8 s,
+        their accuracy growing from 5 to 24 and 28 m, and moved the position 8 m. Map apps keep
+        the marker then and widen the accuracy circle."""
+        if self.sound is not None:
+            t, acc = self.sound
+            if fix.accuracy_m - acc > max(1.0, self.coast_mps * (fix.t - t)):
+                return True
+        self.sound = (fix.t, fix.accuracy_m)
+        return False
+
+    def _standing(self, fix: Fix) -> bool:
+        """The phone's own GPS speed (from the Doppler shift, not from positions) under still_mps:
+        GPS says the person is not moving, so a GPS move is wandering, not travel. Standing still
+        indoors our phone gave 0.03 to 0.17 m/s while its fixes drifted 10 to 15 m; walking is
+        about 1.2. Steps are not asked: a hand shaking the phone can still make one, and steps
+        move the position themselves. With no speed from the phone, nothing changes."""
+        return fix.speed is not None and fix.speed < self.still_mps
 
     # -- what it shows
 
@@ -483,16 +545,47 @@ def way_text(way: tuple[float, float | None, str] | None, name: str = "mark") ->
 
 
 class Navigator:
-    """The step counter and the track together, as the demo server feeds them."""
+    """The step counter and the track together, as the demo server feeds them.
 
-    def __init__(self, counter: StepCounter | None = None, track: Track | None = None):
+    A walk is found before its steps count, as the step-counting studies do it (walk detection,
+    then counting): steps are held until walk_steps of them come no more than walk_gap_s apart,
+    and then all go on the track. A lone step, from a hand shaking the phone, never does. A walk
+    reaches the track a couple of seconds late but whole."""
+
+    def __init__(
+        self,
+        counter: StepCounter | None = None,
+        track: Track | None = None,
+        walk_steps: int = 4,
+        walk_gap_s: float = 1.5,
+    ):
         self.counter = counter or StepCounter()
         self.track = track or Track()
+        self.walk_steps, self.walk_gap_s = walk_steps, walk_gap_s
+        self.held: list[Step] = []  # steps not yet known to be a walk
+        self.walking = False
+        self.last_step: Step | None = None
 
-    def on_accel(self, phone_t: float, ax: float, ay: float, az: float, now: float) -> Step | None:
-        step = self.counter.add(phone_t, ax, ay, az)
-        if step is not None:
+    def on_accel(
+        self, phone_t: float, ax: float, ay: float, az: float, now: float, rot: float | None = None
+    ) -> Step | None:
+        """The step that went on the track now, the last one when a walk was just found."""
+        step = self.counter.add(phone_t, ax, ay, az, rot)
+        if step is None:
+            return None
+        last = self.held[-1] if self.held else self.last_step
+        if last is None or not 0 < step.t - last.t <= self.walk_gap_s:
+            self.held, self.walking = [], False  # a pause, or the phone's clock started again
+        self.last_step = step
+        if self.walking:
             self.track.on_step(step, now)
+            return step
+        self.held.append(step)
+        if len(self.held) < self.walk_steps:
+            return None
+        for s in self.held:  # a walk: every step of it counts
+            self.track.on_step(s, now)
+        self.held, self.walking = [], True
         return step
 
     def on_orientation(

@@ -9,7 +9,8 @@ caregiver opens /caregiver on their own phone: a read-only status view (demo/car
 
 Phone to laptop, text messages (JSON):
   hello   {"type": "hello", "caps": {"camera": {"available": true}, ...}, "audio_rate": 48000}
-  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "t": 12.34}   (t: the phone's clock, s)
+  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "rot": 3.1, "t": 12.34}
+          (t: the phone's clock, s; rot: how fast it turns, deg/s, or null)
   gps     {"type": "gps", "accuracy": 6.0, "lat": .., "lon": .., "speed": .., "heading": ..}
           (accuracy is null when there is no fix; speed and heading are null when unknown)
   orient  {"type": "orientation", "alpha": .., "beta": .., "gamma": .., "compass": ..}
@@ -108,9 +109,13 @@ def build_app(
     app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
+    app["satellite"] = (  # the satellite layer, kept beside them
+        None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
+    )
     app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
+    app.router.add_get("/live", live_page)
     app.router.add_get("/dashboard", dashboard_page)
     app.router.add_get("/phone", phone_page)
     app.router.add_get("/caregiver", caregiver_page)
@@ -124,6 +129,7 @@ def build_app(
     app.router.add_get("/api/walk.gpx", walk_gpx)
     app.router.add_get("/api/walk.geojson", walk_geojson)
     app.router.add_get(r"/tiles/{z:\d+}/{x:\d+}/{y:\d+}.png", tile)
+    app.router.add_get(r"/tiles/satellite/{z:\d+}/{x:\d+}/{y:\d+}.jpg", tile)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
     app.on_cleanup.append(stop_loop)
@@ -134,7 +140,12 @@ def build_app(
 
 
 async def index(request: web.Request) -> web.Response:
-    raise web.HTTPFound("/dashboard")
+    raise web.HTTPFound("/live")
+
+
+async def live_page(request: web.Request) -> web.FileResponse:
+    """The screen to show: the camera, the decision and the sensors at a glance."""
+    return web.FileResponse(WEB / "live.html")
 
 
 async def dashboard_page(request: web.Request) -> web.FileResponse:
@@ -189,7 +200,15 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
     elif kind == "motion":
         t = d.get("t")
         phone_t = None if t is None else float(t)
-        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now, phone_t)
+        rot = d.get("rot")
+        mw.on_motion(
+            float(d["ax"]),
+            float(d["ay"]),
+            float(d["az"]),
+            now,
+            phone_t,
+            None if rot is None else float(rot),
+        )
     elif kind == "gps":
         acc, lat, lon, speed, heading = (
             number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")
@@ -287,7 +306,8 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         detections, w, h = app["detector"].detect(jpeg)
         mw.latency["detector_ms"] = round((mw.clock() - started) * 1000, 1)
         frame.update(w=w, h=h)
-        found = obstacles(app, detections, w, h, now)
+        per_box: dict[int, float] = {}
+        found = obstacles(app, detections, w, h, now, per_box)
         nearest: dict[str, float] = {}
         for ob in found:
             nearest.setdefault(ob.label, ob.distance_m)
@@ -299,7 +319,9 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         stairs_seen(app, detections, w, h, now)
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
-             "x2": d.x2, "y2": d.y2} for d in detections
+             "x2": d.x2, "y2": d.y2,
+             "distance_m": None if i not in per_box else round(per_box[i], 1)}
+            for i, d in enumerate(detections)
         ]  # fmt: skip
     if app["classifier"] is not None:
         label, conf = app["classifier"].classify(jpeg)
@@ -330,8 +352,8 @@ async def walk_gpx(request: web.Request) -> web.Response:
 
 
 async def tile(request: web.Request) -> web.Response:
-    """A street map tile: from the laptop's copy, or from OpenStreetMap when online (#161)."""
-    cache = request.app["tiles"]
+    """A map tile, street or satellite: from the laptop's copy, or fetched when online (#161)."""
+    cache = request.app["satellite" if request.path.startswith("/tiles/satellite/") else "tiles"]
     if cache is None:
         raise web.HTTPNotFound()
     try:
@@ -341,7 +363,7 @@ async def tile(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest() from e
     if data is None:  # offline and never seen: the dashboard keeps its grid
         raise web.HTTPNotFound()
-    return web.Response(body=data, content_type="image/png")
+    return web.Response(body=data, content_type=cache.content_type)
 
 
 async def walk_geojson(request: web.Request) -> web.Response:
@@ -391,16 +413,19 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
-def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> list:
+def obstacles(
+    app: web.Application, detections, w: int, h: int, now: float, per_box: dict | None = None
+) -> list:
     """The detector's obstacles, nearest first. Each distance is the box height's estimate, or the
     depth image's (one from the last 1.5 s, scaled to the floor) when that is nearer: on 413 boxes
     of real SANPO walks the depth was better from 2 m out, but read 1.5 times too far under 2 m,
     where box height did better; the nearer of the two read over 20 percent too far on 6 percent
-    of the boxes (#88, docs/decisions.md D12)."""
+    of the boxes (#88, docs/decisions.md D12). per_box, when given, gets each detection's distance
+    by its place in detections, for the dashboard."""
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     found = []
-    for det in detections:
+    for i, det in enumerate(detections):
         estimate = vision.to_obstacles([det], w, h)
         if not estimate:
             continue
@@ -408,6 +433,8 @@ def obstacles(app: web.Application, detections, w: int, h: int, now: float) -> l
         measured = None if seen is None else dz.box_distance(seen, det, w, h)
         if measured is not None and measured < ob.distance_m:
             ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
+        if per_box is not None:
+            per_box[i] = ob.distance_m
         found.append(ob)
     return sorted(found, key=lambda o: o.distance_m)
 
@@ -598,8 +625,9 @@ async def stop_loop(app: web.Application) -> None:
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
-    if app["tiles"] is not None:
-        await app["tiles"].close()
+    for cache in (app["tiles"], app["satellite"]):
+        if cache is not None:
+            await cache.close()
     if app["recorder"] is not None:
         app["recorder"].close()
 
@@ -677,6 +705,7 @@ def main(argv=None) -> None:
             url = access.with_key(f"https://{ip}:{a.port}/phone", key)
             print(f"           {url}   (another network of this laptop)")
     scheme = "https" if a.https else "http"
+    print(f"live:      {access.with_key(f'{scheme}://localhost:{a.port}/live', key)}")
     print(f"dashboard: {access.with_key(f'{scheme}://localhost:{a.port}/dashboard', key)}")
     if not a.https:
         url = access.with_key(f"http://localhost:{a.port}/phone", key)

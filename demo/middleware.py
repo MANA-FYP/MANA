@@ -474,7 +474,15 @@ class Middleware:
         st.last_seen, st.value, st.trust = now, value, round(trust, 2)
         st.stamps.append(now)
 
-    def _decide(self, now: float, kind: str, text: str, priority: Priority | None = None) -> None:
+    def _decide(
+        self,
+        now: float,
+        kind: str,
+        text: str,
+        priority: Priority | None = None,
+        state: str | None = None,
+        why: str = "",
+    ) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
         detection also goes into the message queue, which says one at a time, urgent first."""
@@ -490,6 +498,7 @@ class Middleware:
                 "t": round(self._since_start(now), 1),
                 "kind": kind,
                 "text": text,
+                **({"state": state, "why": why} if state else {}),
             }
         )
         if kind != "detection":  # a detection is shown as a box, not said
@@ -503,8 +512,11 @@ class Middleware:
             return USER_STOP_TEXT, True
         if d.stop:
             return f"Stopped. {end_sentence(d.reason)}", False
-        how = "tracks" if d.mode == Mode.TRACKS else "wheels"
-        lead = f"Driving on {how} at {round(d.speed_limit * 100)} percent speed."
+        if self.on_foot:  # carried on foot: no wheels to talk about
+            lead = "Slow down." if d.speed_limit < 1 else "Go on."
+        else:
+            how = "tracks" if d.mode == Mode.TRACKS else "wheels"
+            lead = f"Driving on {how} at {round(d.speed_limit * 100)} percent speed."
         prefix = "MANA reactivated. " if now < self._reactivated_until else ""
         if not self.core.automatic:
             prefix += "Manual mode. "
@@ -553,7 +565,9 @@ class Middleware:
         key = (user_stop, d.stop, d.mode.name, re.sub(r"[\d.]+", "#", d.reason))
         if key != self._decision_key:
             self._decision_key = key
-            self._decide(now, "decision", sentence, d.priority)
+            state = "stop" if d.stop else "slow" if d.speed_limit < 1 else "go"
+            why = "You stopped it" if user_stop else d.reason
+            self._decide(now, "decision", sentence, d.priority, state, why)
 
         if link != self._last_link:
             if link != "unknown":
@@ -659,10 +673,12 @@ class Middleware:
         az: float,
         now: float | None = None,
         phone_t: float | None = None,
+        rot: float | None = None,
     ) -> None:
-        """phone_t: the phone's own time of the reading in seconds, for counting steps."""
+        """phone_t: the phone's own time of the reading in seconds, for counting steps; rot: how
+        fast the phone turns (deg/s), to tell a hand moving it from a step."""
         now = self.clock() if now is None else now
-        self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
+        self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now, rot)
         self.level.add((ax, ay, az))
         pitch, roll = self.level.tilt((ax, ay, az))
         self.gravity = (ax, ay, az)  # the last reading, for the camera's tilt
@@ -879,7 +895,9 @@ class Middleware:
         if command == Command.STOP:
             self._stop_sent = now
             if already_stopped:  # answered again, so the user knows this stop was heard too
-                self._decide(now, "decision", USER_STOP_TEXT, Priority.URGENT)
+                self._decide(
+                    now, "decision", USER_STOP_TEXT, Priority.URGENT, "stop", "You stopped it"
+                )
         self._say(now, source, "command", command.name, trust)
         return command
 

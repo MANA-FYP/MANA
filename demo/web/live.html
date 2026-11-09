@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MANA Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/live.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="logo" aria-hidden="true"></span><b>MANA</b><span class="pulse" id="pulse">Live</span></div>
+    <ul class="senses" id="senses" aria-label="Sensors"></ul>
+    <div class="right">
+      <span class="link" id="link" title="Link to the phone"></span>
+      <button class="iconbtn" id="voice" title="Spoken messages on this laptop" aria-pressed="true"></button>
+      <a class="iconbtn" id="details" href="/dashboard" title="All the details"></a>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="view card" id="view" data-state="idle">
+      <div class="feed">
+        <canvas id="cam" aria-label="The phone's camera, with what was detected"></canvas>
+        <div class="waiting" id="waiting"></div>
+        <div class="ahead" id="ahead" hidden><span class="n" id="aheadM"></span><span class="u" id="aheadU">m ahead</span></div>
+        <figure class="depth" id="depthBox" hidden title="Depth from the camera: near is warm, far is cool">
+          <img id="depth" alt="Depth from the camera image">
+        </figure>
+        <p class="caption" id="caption"></p>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="decision" id="decision" data-state="idle">
+        <svg class="sign" id="sign" viewBox="0 0 100 100" aria-hidden="true"></svg>
+        <div class="words">
+          <div class="word" id="word">Waiting</div>
+          <div class="why" id="why">Open the phone page</div>
+        </div>
+        <div class="meta">
+          <span class="mode" id="mode"></span>
+          <span class="speed" title="Speed limit"><i id="speedBar"></i></span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn stop" data-button="stop" id="btnStop"></button>
+        <button class="btn go" data-button="go" id="btnGo"></button>
+        <div class="seg" role="group" aria-label="Who decides">
+          <button data-button="automatic" id="btnAuto"></button>
+          <button data-button="manual" id="btnManual"></button>
+        </div>
+      </div>
+
+      <div class="heard" id="heard"></div>
+
+      <ol class="history" id="history" aria-label="What MANA decided last"></ol>
+
+      <section class="map card" id="mapBox" aria-label="The path walked">
+        <canvas id="map"></canvas>
+        <div class="stats" id="stats"></div>
+        <div class="mapctl top">
+          <div class="layers" id="layers" role="group" aria-label="Map layer"></div>
+          <button class="mapbtn" id="mapFull" title="Map large"></button>
+        </div>
+        <div class="mapctl zoom">
+          <button class="mapbtn" id="recentre" title="Back to the person"></button>
+          <div class="stack"><button class="mapbtn" id="zoomIn" title="Zoom in"></button><button class="mapbtn" id="zoomOut" title="Zoom out"></button></div>
+        </div>
+        <small class="credit" id="credit"></small>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/icons.js"></script>
+  <script src="/static/live.js"></script>
+</body>
+</html>
