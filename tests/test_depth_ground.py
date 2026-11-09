@@ -3,8 +3,7 @@
 The depth frames are rendered by mana_perception.synthetic, which casts a ray for every pixel at a
 ground shape: flat ground, ramps, a curb, stairs up and down, drops and a wall. The camera is the
 3D camera planned for the chair: 1.0 m up, tilted 0.6 rad down, 87 degrees across, with a blind
-zone to about 0.37 m. When the Gazebo world (#13, #14) exists, frames saved from it go through the
-same checks.
+zone to about 0.37 m. Frames saved from the Gazebo runs are checked in test_gazebo_depth_frames.py.
 """
 
 import math
