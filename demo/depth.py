@@ -23,7 +23,7 @@ from __future__ import annotations
 import io
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -163,11 +163,24 @@ class Reader:
     The model's scale can change between scenes (a corridor, then outdoors). If the frames keep
     differing after `relearn_steps` steps, the person has walked past where an edge would be, so
     the held scale is learned again.
+
+    All of that assumes the phone is held at about the mount's height. The floor in the picture
+    says how high it really is: the model gives metres, so the floor's own depth puts the camera
+    at height_m / own scale. Sitting on our floor with the phone in hand that was 0.49 m, and the
+    floor-learned scale (2.45) put a cupboard 0.46 m away at 1.13 m. So when the floor puts the
+    camera outside `held_m` (lower or higher than a phone held while walking), no scale is learned
+    from it: the model's own metres are kept with the camera at the height the floor gives, and
+    the ground is not read. This is asked only while learning: once a scale is held, a lower floor
+    at the bottom of the picture is a drop, as above.
+    The nearest thing ahead is measured in every frame the tilt is known, also while the scale is
+    being learned, so an obstacle is never missed for want of a scale.
     """
 
-    def __init__(self, mount: Mount, learn=3, follow=0.1, differ=0.15, relearn_steps=4):
+    def __init__(
+        self, mount: Mount, learn=3, follow=0.1, differ=0.15, relearn_steps=4, held_m=(0.7, 2.0)
+    ):
         self.mount, self.learn, self.follow, self.differ = mount, learn, follow, differ
-        self.relearn_steps = relearn_steps
+        self.relearn_steps, self.held_m = relearn_steps, held_m
         self.held: float | None = None
         self._learning: list[float] = []
         self._differs_since: int | None = None  # the step count when the frames began to differ
@@ -178,6 +191,14 @@ class Reader:
         cam = self.mount.camera(depth.shape[1], depth.shape[0], pitch_rad)
         own = floor_scale(depth, cam)
         if self.held is None:
+            height = None if own is None else cam.height_m / own  # the camera above the floor
+            if height is not None and not self.held_m[0] <= height <= self.held_m[1]:
+                # not learned from: the phone is not held as when walking (sitting, lying, on a
+                # table). Once a scale is held this is not asked, so a drop at the bottom of the
+                # picture (which also puts the camera higher) is still read as a drop
+                low = replace(cam, height_m=height)
+                why = f"phone held {height:.1f} m above the floor: the ground is not read"
+                return Seen(depth, None, None, nearest_ahead(depth, low), why=why, cam=low)
             return self._learn(depth, cam, own)
         scaled = depth * self.held
         reading, ahead = dp.read_ground(scaled, cam), nearest_ahead(scaled, cam)
@@ -204,17 +225,22 @@ class Reader:
         return Seen(scaled, self.held, reading, ahead, cam=cam)
 
     def _learn(self, depth, cam, own) -> Seen:
+        # while there is no held scale, the model's own metres still measure what is ahead
+        ahead = nearest_ahead(
+            depth, cam if own is None else replace(cam, height_m=cam.height_m / own)
+        )
         if own is None:
             low = not floor_in_view(cam, depth.shape[0])
             why = "tilt the camera down to the floor" if low else "no floor in view"
-            return Seen(depth, None, None, why=why)
+            return Seen(depth, None, None, ahead, why=why, cam=cam)
         if floor_plane(depth, cam):
             self._learning.append(own)
         else:
             self._learning = []  # in a row: one frame of an edge starts over
         if len(self._learning) >= self.learn:
             self.held = float(np.median(self._learning))
-        return Seen(depth, None, None, cam=cam, why="learning the scale: point at level floor")
+        why = "learning the scale: point at level floor"
+        return Seen(depth, None, None, ahead, why=why, cam=cam)
 
 
 def floor_plane(depth: np.ndarray, cam: dp.Camera, rows_share=0.15, strip=0.3,
