@@ -6,9 +6,12 @@ shared Wi-Fi, no certificate warning. A Cloudflare quick tunnel (no account) car
 
 Needs Cloudflare's `cloudflared` on the PATH (or --cloudflared PATH), installed by you from
 Cloudflare's own release page. Every message goes through Cloudflare, so the round trip is longer
-than on the same Wi-Fi (`demo.server --https`); the dashboard shows it. Anyone with the address can
-open the dashboard and see the camera, so the address is for this session only: stop the tunnel
-(Ctrl+C) when the demo ends.
+than on the same Wi-Fi (`demo.server --https`); the dashboard shows it.
+
+The server answers only requests with its key (demo.access), and the addresses printed here carry
+it. Anyone with such an address can drive the device, and see and hear what the phone sends: share
+it with no one, and stop the tunnel (Ctrl+C) when the demo ends. The tunnel does not start before
+the server has made its key.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+from demo import access
 
 # the tunnel's own address: cloudflared also logs api.trycloudflare.com, where it asks for one
 URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")
@@ -41,6 +46,10 @@ def main(argv=None) -> int:
     if not a.cloudflared:
         print("cloudflared was not found: install it from Cloudflare, or give --cloudflared PATH")
         return 1
+    key = access.read()
+    if key is None:
+        print("The server has no key yet: start python -m demo.server first, then the tunnel.")
+        return 1
     proc = subprocess.Popen(command(a.cloudflared, a.port), stderr=subprocess.PIPE, text=True)
     found = False
     try:
@@ -48,9 +57,10 @@ def main(argv=None) -> int:
             url = None if found else find_url(line)
             if url:
                 found = True
-                print(f"phone:     {url}/phone")
-                print(f"dashboard: {url}/dashboard   (or http://localhost:{a.port}/dashboard)")
-                print("Ctrl+C ends the tunnel.", flush=True)
+                print(f"phone:     {access.with_key(url + '/phone', key)}")
+                print(f"dashboard: {access.with_key(url + '/dashboard', key)}")
+                print("Anyone with these addresses can drive the device and see the camera:")
+                print("share them with no one. Ctrl+C ends the tunnel.", flush=True)
             elif " ERR " in line:
                 print(line.rstrip(), flush=True)
         return proc.wait()

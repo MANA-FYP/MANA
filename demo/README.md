@@ -35,7 +35,8 @@ the data, so you can show the alert link changing.
    ```bash
    python -m demo.usb
    ```
-3. On the phone open **http://localhost:8000/phone** in Chrome.
+3. On the phone open in Chrome the phone address the server printed: **http://localhost:8000/phone?k=...**
+   (the key, below).
 
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
@@ -56,11 +57,23 @@ with no internet.
 
    After that, `python -m demo.usb --wifi 192.168.1.23:41235` is enough. Android may change that
    port when wireless debugging is turned off and on again.
-3. On the phone open **http://localhost:8000/phone** in Chrome.
+3. On the phone open in Chrome the phone address the server printed:
+   **http://localhost:8000/phone?k=...** (the key, below).
+4. Turn *Wireless debugging* off after the demo: pairing gives the laptop the same control over
+   the phone (adb) as the cable.
 
 The dashboard shows the round trip to the phone under *Inputs from the phone*. Compare it with the
 cable before a demo. The phone's Wi-Fi then carries the data, so use the cable to show the alert
 link changing (switching Wi-Fi off would cut the demo).
+
+### The key
+
+The server can drive the device, so it answers only requests that carry its key (`demo/access.py`,
+#178). The key is made once and kept in `certs/access-key.txt` (not in git), and the server prints
+every address with it (`.../phone?k=...`). A page opened with it keeps the key in a cookie and
+reloads without it, so the key does not stay in the address bar or in screenshots. Share an address
+with its key with no one; delete `certs/access-key.txt` for a new key. `demo.camera`, `demo.replay`
+and `tools/phone_e2e.py` read the key from that file.
 
 ### Connect the phone over the network: no cable, no adb
 
@@ -70,7 +83,7 @@ or https. Two ways to an https page:
 **Same Wi-Fi (the fastest):** the laptop serves https itself.
 
 ```bash
-python -m demo.server --https          # prints the phone's address, e.g. https://192.168.1.2:8000/phone
+python -m demo.server --https          # prints the phone's address, https://192.168.1.2:8000/phone?k=...
 ```
 
 Open that address on the phone and, the first time, tap *Advanced*, then *Proceed*: the certificate
@@ -83,15 +96,16 @@ the phone can be on mobile data, with no warning.
 
 ```bash
 python -m demo.server                  # as usual
-python -m demo.tunnel                  # prints https://<random words>.trycloudflare.com/phone
+python -m demo.tunnel                  # prints https://<random words>.trycloudflare.com/phone?k=...
 ```
 
 It needs Cloudflare's `cloudflared`, from Cloudflare's release page. Every message goes through
 Cloudflare, so the round trip is longer than on the same Wi-Fi: from Pakistan the tunnel goes
 through Singapore, and our phone's round trip was about 230 to 250 ms. Watch the dashboard on the
-laptop at `http://localhost:8000/dashboard`, not through the tunnel, or every frame makes that trip
-twice. Anyone with that address can open the dashboard and see the camera, so stop the tunnel
-(Ctrl+C) when the demo ends.
+laptop at the `localhost` address the server printed, not through the tunnel, or every frame makes
+that trip twice. Anyone with the tunnel's address and its key can drive the device and see the
+camera: share it with no one, and stop the tunnel (Ctrl+C) when the demo ends. The tunnel does not
+start before the server has made its key.
 
 Keep the phone page open on the screen. Chrome slows a page in the background or with the screen
 off to a frame a second or less, so the page asks to keep the screen on. On a slow link the page
