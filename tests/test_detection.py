@@ -85,6 +85,27 @@ def test_detect_image_and_detect_give_the_same_boxes():
     assert from_array == from_jpeg and (w, h) == (64, 48)
 
 
+def test_an_rgb_array_reaches_the_model_as_an_rgb_image_not_as_bgr():
+    # Ultralytics takes a numpy array for BGR (OpenCV's order) and a PIL image for RGB. The node's
+    # frames are RGB arrays (to_rgb): passed as they are, red and blue were swapped, which lost a
+    # car and up to 0.23 of confidence on real SANPO frames
+    np = pytest.importorskip("numpy")
+    image = pytest.importorskip("PIL.Image")
+    from types import SimpleNamespace
+
+    class Model:
+        def __call__(self, frame, imgsz, conf, verbose):
+            self.seen = frame
+            return [SimpleNamespace(names={}, boxes=[])]
+
+    det = detection.Detector(Model(), imgsz=320)
+    rgb = np.zeros((4, 6, 3), dtype=np.uint8)
+    rgb[..., 0] = 200  # red
+    det.detect_image(rgb)
+    assert isinstance(det.model.seen, image.Image) and det.model.seen.mode == "RGB"
+    assert np.array_equal(np.asarray(det.model.seen), rgb)
+
+
 def test_the_phone_and_ros_share_one_trust_rule_for_the_light():
     from demo import middleware
 

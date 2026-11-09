@@ -395,6 +395,41 @@ def test_with_depth_the_obstacle_distance_is_measured_not_estimated():
     run(with_clients(go, detector=OnePerson(), depth=PersonAt3m(), mount=MOUNT))
 
 
+def test_with_depth_farther_than_the_box_says_the_nearer_box_estimate_is_kept():
+    # under 2 m the depth model read people 1.5 times too far on real SANPO walks (#88)
+    pytest.importorskip("aiohttp")
+    from test_demo_server import jpeg, run, with_clients
+
+    from demo.vision import Detection, to_obstacles
+
+    close = Detection("person", 0.9, 200, 20, 280, 330)  # tall: about 1.9 m by its height
+
+    class OnePerson:
+        def detect(self, jpeg):
+            return [close], 480, 360
+
+    class WallAt6m(RenderedDepth):
+        def __init__(self):
+            super().__init__(wall(6.0))
+
+    async def go(client, phone, dash):
+        mw, depth, kept = client.app["mw"], client.app["depth"], []
+        await tilted_30(phone)
+        for _ in range(200):  # frames until the depth has arrived, then 20 more
+            await phone.send_bytes(b"" + jpeg())
+            await asyncio.sleep(0.05)
+            if depth["seen"] is not None:
+                kept += [d["distance_m"] for d in mw.detections if d["label"] == "person"]
+                if len(kept) >= 20:
+                    break
+        estimate = to_obstacles([close], 480, 360)[0].distance_m
+        measured = dz.box_distance(depth["seen"], close, 480, 360)
+        assert measured > estimate + 0.1  # the depth says farther (2.14 m against 1.90 m)
+        assert kept and max(kept) == pytest.approx(estimate, abs=0.01)
+
+    run(with_clients(go, detector=OnePerson(), depth=WallAt6m(), mount=MOUNT))
+
+
 def test_the_shape_of_the_depth_reaches_the_core_only_when_asked():
     pytest.importorskip("aiohttp")
     from mana_core.decision import Source

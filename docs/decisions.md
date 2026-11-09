@@ -258,3 +258,29 @@ Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): `
 
 A limit (Waqas, #165): the fit takes whatever plane is under the bottom rows. On a level chair where a ramp starts under them, it takes the ramp's plane for the floor and reads the ramp ahead as level until the chair is on it. On synthetic depth, a 0.1 slope starting 0 to 0.3 m ahead of the camera was read as flat (fitted pitch about 6°), and one starting 1 m or more ahead was still read as a ramp. This happens only with the IMU lost, and a ramp is the benign case: the steps down that matter are kept by the height bound above.
 
+## D12. The camera's obstacle distance is the nearer of box height and depth (#88)
+
+**Chosen:** on the phone, each detected obstacle's distance is the box height's estimate (a typical
+height for the class and the camera's focal length), or the depth model's median over the middle of
+the box when that is nearer. Before, the depth replaced the box height whenever it was there. The
+depth model stays Depth Anything V2 Metric **Indoor** Small, outdoors too.
+
+**Why.** On 413 boxes of real SANPO walks (`results.md`, #88), the depth was better from 2 m out
+(median error 17 percent against 29), but under 2 m it read people 1.5 times too far, on 14 of 15
+boxes, where box height did better. Too far is the unsafe side: the chair stops later. The nearer
+of the two kept most of the depth's accuracy (19 percent) and read more than 20 percent too far on 6
+percent of the boxes.
+
+| Option | Problem |
+|---|---|
+| Box height always (as on ROS) | 38% of boxes read more than 20% too far; 39% of boxes cut by the frame do (36% median error) |
+| Depth whenever there is one (as before) | Under 2 m it reads 1.5 times too far |
+| Depth only for boxes cut by the frame (an option in #88) | Better than box height there (17% against 36%), but no better under 2 m, where it matters |
+| The outdoor model outdoors | 2 to 3.5 times too far on every band |
+| **The nearer of box height and depth** | Errs near: may slow or stop the chair early, for a moment |
+
+**Limits.** The depth was measured in the model's own metres. The demo scales it so that level
+floor at the bottom of the picture lies at the phone's height, which SANPO does not give, so
+the scaled depth's error is not measured here. The frames are SANPO's chest and head cameras on
+people walking, not a phone in a holder on a chair. This is the camera alone; on the chair, the 3D
+camera and the lidar measure the distance, and ROS's detector keeps box height.
