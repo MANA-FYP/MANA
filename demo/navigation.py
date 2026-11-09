@@ -44,6 +44,13 @@ class StepCounter:
     given out at the next rise, or 1.5 s later when the walk stops: rises closer together than
     `min_gap_s` are shaking (a rough floor, a vehicle), and then no step is counted.
 
+    A hand moving the phone also swings it at a walker's pace. What tells it from a step is how
+    fast the phone turns (the gyroscope, `rot` in degrees a second): on our phone a walk with it
+    held in front turned it about 15 deg/s on average, waving it about 210. So a step is not
+    counted while the phone turned faster than `max_turn_dps` on average over the `turn_window_s`
+    before it. Without a gyroscope (rot None) every step counts, as before. `high` is 0.35: at 0.6
+    that walk of about 20 steps gave 8, at 0.35 it gives 18.
+
     The length of each step follows Weinberg: k * (peak - valley) ** 0.25, with the peak and the
     valley of that step's swing, between `shortest_m` and `longest_m`. `k` can be set from a walk
     of known length (calibrate)."""
@@ -51,14 +58,18 @@ class StepCounter:
     def __init__(
         self,
         k: float = 0.5,
-        high: float = 0.6,
+        high: float = 0.35,
         low: float = 0.0,
         min_gap_s: float = 0.3,
         shortest_m: float = 0.3,
         longest_m: float = 1.0,
+        max_turn_dps: float = 60.0,
+        turn_window_s: float = 0.6,
     ):
         self.k, self.high, self.low, self.min_gap_s = k, high, low, min_gap_s
         self.shortest_m, self.longest_m = shortest_m, longest_m
+        self.max_turn_dps, self.turn_window_s = max_turn_dps, turn_window_s
+        self.turns: deque = deque()  # (t, deg/s) of the last few seconds
         self.gravity = 9.81  # m/s^2; then followed, for the sensor's own offset
         self.smooth = 0.0
         self.t: float | None = None
@@ -70,7 +81,13 @@ class StepCounter:
         self.pending: Step | None = None
         self.count = 0
 
-    def add(self, t: float, ax: float, ay: float, az: float) -> Step | None:
+    def add(
+        self, t: float, ax: float, ay: float, az: float, rot: float | None = None
+    ) -> Step | None:
+        if rot is not None:
+            self.turns.append((t, rot))
+            while self.turns and self.turns[0][0] < t - 3.0:  # a step is given out within 2.1 s
+                self.turns.popleft()
         m = math.sqrt(ax * ax + ay * ay + az * az)
         if self.t is None or t <= self.t or t - self.t > 1.0:  # first reading, or a gap
             # start over: a swing half before the gap is not a step
@@ -89,13 +106,13 @@ class StepCounter:
             self.valley = min(self.valley, s)
             if s <= self.high:
                 # the last step of a walk: no next rise came, so it was not shaking
-                return self._confirm() if self.pending and t - self.pending.t > 1.5 else None
+                return self._give() if self.pending and t - self.pending.t > 1.5 else None
             self.above, self.peak = True, s
             calm = t - self.last_rise_t >= self.min_gap_s
             self.last_rise_t = t
             if not calm:
                 self.pending = None  # rises faster than anyone steps: shaking, not a step
-            return self._confirm() if self.pending else None
+            return self._give() if self.pending else None
         self.peak = max(self.peak, s)
         if s >= self.low:
             return None
@@ -105,6 +122,15 @@ class StepCounter:
             length = min(self.longest_m, max(self.shortest_m, self.k * swing**0.25))
             self.pending = Step(t, length)  # a step once the next rise shows it was not shaking
         return None
+
+    def _give(self) -> Step | None:
+        """The pending step, unless the phone turned fast just before it: a hand, not a step."""
+        step = self._confirm()
+        w = [r for when, r in self.turns if step.t - self.turn_window_s <= when <= step.t]
+        if w and sum(w) / len(w) >= self.max_turn_dps:
+            self.count -= 1
+            return None
+        return step
 
     def _confirm(self) -> Step:
         step, self.pending = self.pending, None
@@ -489,8 +515,10 @@ class Navigator:
         self.counter = counter or StepCounter()
         self.track = track or Track()
 
-    def on_accel(self, phone_t: float, ax: float, ay: float, az: float, now: float) -> Step | None:
-        step = self.counter.add(phone_t, ax, ay, az)
+    def on_accel(
+        self, phone_t: float, ax: float, ay: float, az: float, now: float, rot: float | None = None
+    ) -> Step | None:
+        step = self.counter.add(phone_t, ax, ay, az, rot)
         if step is not None:
             self.track.on_step(step, now)
         return step

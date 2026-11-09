@@ -72,6 +72,30 @@ def test_step_length_is_longer_for_a_stronger_swing_and_stays_in_bounds():
     assert 0.3 <= mean(soft) < mean(hard) <= 1.0
 
 
+def with_turn(readings, dps):
+    """The same readings, with the gyroscope's turn rate added."""
+    return [(*r, dps) for r in readings]
+
+
+def test_a_walk_holding_the_phone_steady_counts_its_steps():
+    # on our phone a walk with it held in front turned it about 15 deg/s
+    assert abs(len(count(with_turn(walk(20.0), 15.0))) - 36) <= 1
+
+
+def test_a_hand_waving_the_phone_at_a_walkers_pace_counts_no_steps():
+    # waving turned it about 210 deg/s; the swing alone looks like a brisk walk
+    assert count(with_turn(walk(20.0, swing=6.0), 210.0)) == []
+
+
+def test_without_a_gyroscope_every_step_counts_as_before():
+    assert abs(len(count(with_turn(walk(20.0), None))) - 36) <= 1
+
+
+def test_a_gentle_walk_is_counted():
+    # a swing of 1 m/s^2: the 0.6 threshold of before missed most of these steps
+    assert abs(len(count(walk(20.0, swing=1.0, noise=0.05))) - 36) <= 2
+
+
 def test_a_walk_of_known_length_sets_the_step_length():
     counter = StepCounter()
     steps = count(walk(20.0), counter)

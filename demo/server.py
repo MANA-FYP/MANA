@@ -185,7 +185,15 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
     elif kind == "motion":
         t = d.get("t")
         phone_t = None if t is None else float(t)
-        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now, phone_t)
+        rot = d.get("rot")
+        mw.on_motion(
+            float(d["ax"]),
+            float(d["ay"]),
+            float(d["az"]),
+            now,
+            phone_t,
+            None if rot is None else float(rot),
+        )
     elif kind == "gps":
         acc, lat, lon, speed, heading = (
             number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")

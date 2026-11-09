@@ -659,10 +659,12 @@ class Middleware:
         az: float,
         now: float | None = None,
         phone_t: float | None = None,
+        rot: float | None = None,
     ) -> None:
-        """phone_t: the phone's own time of the reading in seconds, for counting steps."""
+        """phone_t: the phone's own time of the reading in seconds, for counting steps; rot: how
+        fast the phone turns (deg/s), to tell a hand moving it from a step."""
         now = self.clock() if now is None else now
-        self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now)
+        self.nav.on_accel(now if phone_t is None else phone_t, ax, ay, az, now, rot)
         self.level.add((ax, ay, az))
         pitch, roll = self.level.tilt((ax, ay, az))
         self.gravity = (ax, ay, az)  # the last reading, for the camera's tilt
