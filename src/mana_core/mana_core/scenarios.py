@@ -220,7 +220,7 @@ def waits_before(at_m: float, command: Command, what: str) -> Mark:
 
 def reaches_end(length_m: float) -> Mark:
     def test(tr):
-        return tr.end_m >= length_m, f"reached {tr.end_m:.2f} of {length_m:.0f} m"
+        return tr.end_m >= length_m, f"reached {tr.end_m:.2f} of {length_m:g} m"
 
     return Mark("Reaches the end of the route", test)
 

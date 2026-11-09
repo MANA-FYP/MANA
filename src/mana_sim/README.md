@@ -3,7 +3,8 @@
 The Gazebo test route, the wheel-and-track test host and its sensors. The chair follows the core's
 `DriveRequest` and publishes a camera, a 3D camera, a lidar, an IMU, a GPS and wheel encoders on ROS 2
 ([docs/topics.md](docs/topics.md)), and `set_fault` switches sensor faults during a run
-([docs/faults.md](docs/faults.md)). The ten scenarios and the CI smoke test come next.
+([docs/faults.md](docs/faults.md)). The ten original scenarios play on the route in Gazebo with the
+same pass marks (see below), and a smoke test runs in CI.
 
 ## Run it
 
@@ -119,6 +120,32 @@ logic and no ROS; `panel_node.py` adds the topics and the web server (Python's o
 The caregiver's view in `demo/` (#65) is not reused. It reads the phone demo's state, not ROS
 topics, and it has no switches by design.
 
+## The scenarios in Gazebo
+
+The ten original scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, `drop`, `manual_drop`,
+`picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
+
+```bash
+ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 20 minutes)
+ros2 run mana_core evaluate --world gazebo stairs curb    # some of them
+ros2 run mana_core evaluate --world gazebo --rerun        # play again; traces are kept in gazebo_traces/
+python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
+```
+
+For each scenario `gazebo_run.py` writes the world of the run (the chair at its start, a box for the
+person), starts the simulation headless, waits for `scenario_runner` to say the chair has settled,
+starts the core (with `config/core.yaml`), and the runner plays the scenario: it says the user's
+commands, switches the faults, stands in for the camera's ground classifier (still to be trained) and
+records the chair's place, the drive requests and the messages as a trace. The chair's place is its
+front, as in the scripted world: the front wheels (0.47 m ahead of the centre) on wheels, the tracks'
+tip (1.1 m) on tracks. A box is hit when the tracks' tip reaches its face, on wheels too, because the
+raised tracks reach as far. `evaluate` scores the trace with `check()`, as it scores a scripted run.
+If the chair does not settle, the core does not answer or the run takes too long, no trace is written
+and every mark of that scenario fails; the next scenario is still played. The logs of a run are in
+`gazebo_traces/<scenario>_logs/`. The scenarios, their start and end on the route, and what differs from the scripted
+route are in `gazebo_scenarios.py`; the results are in the Gazebo section of
+[docs/results.md](../../docs/results.md).
+
 ## Smoke test
 
 `tools/sim_smoke.sh` starts the world headless with no cameras and no lidar (`sensors:=false`, for a machine
@@ -200,7 +227,9 @@ is the driver's speed, capped there.
 `colcon test --packages-select mana_sim` runs `test/test_host.py` (the mode switch, the speeds, the
 stop, and a driver's steering capped by the drive request), `test/test_driver.py` (who drives, and
 the keys), `test/test_sensors.py` (the sensor maths, and that the frames in the code are the ones in
-the model) and `test/test_faults.py` (the faults and their scenarios) without Gazebo, and
+the model) `test/test_faults.py` (the faults and their scenarios), `test/test_gazebo_scenarios.py` and
+`test/test_gazebo_results.py` (the scenarios on the route, the world files, the traces and the results
+page) without Gazebo, and
 `test/test_driver_select_node.py` in ROS 2. With the simulation running,
 `tools/check_topic_rates.sh` checks that every sensor publishes at the rate in
 [docs/topics.md](docs/topics.md).

@@ -1,7 +1,9 @@
 """Pass-mark acceptance tests: every scripted scenario, run against the decision core in fast time.
 The last tests break the core or a sensor on purpose, to show the evaluator catches a failure."""
 
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from mana_core.decision import Limits
@@ -47,3 +49,44 @@ def test_command_line(capsys):
     out = capsys.readouterr().out
     assert "PASS  Stop acted on within 1 s" in out and "All pass marks met." in out
     assert main(["nowhere"]) == 2
+
+
+def test_the_world_option_is_checked(capsys):
+    assert main(["--world", "mars"]) == 2
+    assert "unknown world mars" in capsys.readouterr().out
+    assert main(["--world"]) == 2
+
+
+def test_the_gazebo_world_names_only_the_scenarios_that_play_there(capsys):
+    pytest.importorskip("mana_sim")  # built and sourced workspace
+    assert main(["--world", "gazebo", "entry"]) == 2
+    assert "not in Gazebo: entry" in capsys.readouterr().out
+
+
+def test_the_options_of_one_world_are_refused_with_the_other(capsys):
+    assert main(["--rerun"]) == 2 and main(["--traces", "here"]) == 2
+    assert "cannot be used with --world scripted" in capsys.readouterr().out
+    assert main(["--world=gazebo", "--compare"]) == 2
+    assert "--compare cannot be used with --world gazebo" in capsys.readouterr().out
+    assert main(["--world=mars"]) == 2
+
+
+def test_a_gazebo_run_that_could_not_be_played_fails_and_the_next_one_is_played(
+    monkeypatch, tmp_path, capsys
+):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "mana_sim"))
+    from mana_core.scenarios import Trace
+
+    from mana_sim import gazebo_run as gr
+    from mana_sim import gazebo_scenarios as gs
+
+    def play(name, traces):
+        if name == "level":
+            raise gr.RunFailed("the chair did not settle")
+        (traces / f"{name}.json").write_text(gs.trace_to_json(Trace()))
+        return traces / f"{name}.json"
+
+    monkeypatch.setattr(gr, "play", play)
+    assert main(["--world", "gazebo", "level", "stop", "--traces", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "not played: the chair did not settle" in out and "[stop]" in out
