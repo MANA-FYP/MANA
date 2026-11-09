@@ -2,18 +2,23 @@
 reach the demo server as the phone's do. Needs OpenCV and aiohttp; skipped without them."""
 
 import asyncio
+import importlib.util
 import math
 
+import numpy as np
 import pytest
 
-cv2 = pytest.importorskip("cv2")
-pytest.importorskip("aiohttp")
-np = pytest.importorskip("numpy")
+from demo import camera
 
-from aiohttp.test_utils import TestServer  # noqa: E402
+# A mark, not pytest.importorskip at module level: in CI, ROS's launch_testing plugin imports each
+# test module itself, and a skip raised there skipped the whole session (0 tests collected).
+HAVE = all(importlib.util.find_spec(m) for m in ("cv2", "aiohttp"))
+pytestmark = pytest.mark.skipif(not HAVE, reason="needs OpenCV and aiohttp")
+if HAVE:
+    import cv2
+    from aiohttp.test_utils import TestServer
 
-from demo import camera  # noqa: E402
-from demo.server import build_app  # noqa: E402
+    from demo.server import build_app
 
 
 def video(path, n=10, size=(320, 240)):
