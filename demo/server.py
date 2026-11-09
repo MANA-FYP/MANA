@@ -171,6 +171,8 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
                 await on_binary(app, msg.data)
     finally:
         app["phones"].discard(ws)
+        if not app["phones"]:  # no round trip is measured now: not shown as if it were live
+            app["mw"].on_phone_gone()
     return ws
 
 
@@ -208,7 +210,9 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.on_heartbeat(None, now)
         await ws.send_json({"type": "pong", "t": d.get("t")})
     elif kind == "rtt":
-        mw.on_heartbeat(float(d["ms"]), now)
+        ms = number(d.get("ms"))  # as the phone says it: never below 0, never not a number
+        if ms is not None:
+            mw.on_heartbeat(max(0.0, ms), now)
     elif kind == "sensor":
         mw.on_sensor_switch(str(d.get("id", "")), bool(d.get("on")), now)
     elif kind == "mic":
