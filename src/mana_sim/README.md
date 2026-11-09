@@ -126,7 +126,7 @@ The ten original scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, 
 `picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
 
 ```bash
-ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 15 minutes)
+ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 20 minutes)
 ros2 run mana_core evaluate --world gazebo stairs curb    # some of them
 ros2 run mana_core evaluate --world gazebo --rerun        # play again; traces are kept in gazebo_traces/
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md

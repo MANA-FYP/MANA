@@ -154,7 +154,7 @@ stairs down (26 m) and the drop (38 m) are never driven over. A drop is 1 m deep
 
 ```bash
 colcon build && source install/setup.bash
-ros2 run mana_core evaluate --world gazebo               # all ten (about 15 minutes)
+ros2 run mana_core evaluate --world gazebo               # all ten (about 20 minutes)
 ros2 run mana_core evaluate --world gazebo stairs curb   # some of them
 ros2 run mana_core evaluate --world gazebo --rerun       # play again, also those with a trace
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
