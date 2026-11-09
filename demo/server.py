@@ -109,6 +109,9 @@ def build_app(
     app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
+    app["satellite"] = (  # the satellite layer, kept beside them
+        None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
+    )
     app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
@@ -126,6 +129,7 @@ def build_app(
     app.router.add_get("/api/walk.gpx", walk_gpx)
     app.router.add_get("/api/walk.geojson", walk_geojson)
     app.router.add_get(r"/tiles/{z:\d+}/{x:\d+}/{y:\d+}.png", tile)
+    app.router.add_get(r"/tiles/satellite/{z:\d+}/{x:\d+}/{y:\d+}.jpg", tile)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
     app.on_cleanup.append(stop_loop)
@@ -348,8 +352,8 @@ async def walk_gpx(request: web.Request) -> web.Response:
 
 
 async def tile(request: web.Request) -> web.Response:
-    """A street map tile: from the laptop's copy, or from OpenStreetMap when online (#161)."""
-    cache = request.app["tiles"]
+    """A map tile, street or satellite: from the laptop's copy, or fetched when online (#161)."""
+    cache = request.app["satellite" if request.path.startswith("/tiles/satellite/") else "tiles"]
     if cache is None:
         raise web.HTTPNotFound()
     try:
@@ -359,7 +363,7 @@ async def tile(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest() from e
     if data is None:  # offline and never seen: the dashboard keeps its grid
         raise web.HTTPNotFound()
-    return web.Response(body=data, content_type="image/png")
+    return web.Response(body=data, content_type=cache.content_type)
 
 
 async def walk_geojson(request: web.Request) -> web.Response:
@@ -621,8 +625,9 @@ async def stop_loop(app: web.Application) -> None:
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
-    if app["tiles"] is not None:
-        await app["tiles"].close()
+    for cache in (app["tiles"], app["satellite"]):
+        if cache is not None:
+            await cache.close()
     if app["recorder"] is not None:
         app["recorder"].close()
 

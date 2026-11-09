@@ -82,6 +82,10 @@ def test_the_server_serves_tiles_and_the_dashboard_asks_it(tmp_path):
             assert (await client.get("/tiles/17/91115/52650.png")).status == 200
             assert (await client.get("/tiles/17/1/1.png")).status == 404  # never seen: grid
             assert (await client.get("/tiles/2/9/0.png")).status == 400
+            osm.online = True
+            r = await client.get("/tiles/satellite/17/91115/52650.jpg")
+            assert r.status == 200 and r.content_type == "image/jpeg"
+            assert (tmp_path / "satellite" / "17" / "91115" / "52650.jpg").exists()
         finally:
             await client.close()
 
