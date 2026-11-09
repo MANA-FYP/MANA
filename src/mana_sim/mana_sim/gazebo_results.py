@@ -9,6 +9,7 @@ between its two marker lines in the file, or adds it at the end. Pure Python, no
 
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 from mana_core.decision import Mode
@@ -66,7 +67,7 @@ def why_marks_fail(failing: list[tuple[str, str]]) -> str:
         lines.append(
             f'- **#118:** "Stops before the ..." counts the chair moving on after the first stop'
             f" as a released stop. In these runs it moved on {min(on):.2f} to {max(on):.2f} m"
-            f" while braking (the stop stayed set to the end), and stood {min(before):.2f} to"
+            f", and stood {min(before):.2f} to"
             f" {max(before):.2f} m before the hazard ({len(moved)} marks)."
         )
     if n := sum(text.startswith("Track request") for text, _ in failing):
@@ -77,7 +78,8 @@ def why_marks_fail(failing: list[tuple[str, str]]) -> str:
             f" once they are asked for. So the request comes {later:.2f} m later from the tracks'"
             f" tip than from the wheels ({n} marks)."
         )
-    return "\n".join(lines) or "- none"
+    wrapped = [textwrap.fill(line, 100, subsequent_indent="  ") for line in lines]
+    return "\n".join(wrapped) or "- none"
 
 
 def routes_table() -> str:
@@ -123,7 +125,7 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 - Distances are from the chair's front, as in the scripted world: the front wheels (0.47 m ahead
   of the centre) on wheels, the tracks' tip (1.1 m) on tracks, as the core is told in
   `config/core.yaml`. The ground truth gives the centre. On wheels the raised tracks reach 0.63 m
-  further than the front wheels, so a box is that much closer to the tracks' tip than the table says.
+  further than the front wheels, so a box is that much nearer the tracks' tip than the table says.
 - A mishap is the front on a step on wheels (stairs 22 to 22.7 m, curb 31 to 31.3 m), over the drop
   (38 m, or the chassis lower than -0.3 m), or the tracks' tip at a box's face. The tracks' tip
   counts on wheels too: raised, the tracks still reach 1.1 m ahead, about 0.4 m above the ground.
@@ -171,7 +173,7 @@ def update_file(path: Path, section: str) -> None:
         text = text[:a] + section.rstrip("\n") + text[b + len(END) :]
     else:
         text = text.rstrip("\n") + "\n\n" + section
-    path.write_text(text)
+    path.write_text(text, newline="\n")  # LF on Windows too
 
 
 def main() -> int:

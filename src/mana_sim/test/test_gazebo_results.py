@@ -58,6 +58,8 @@ def test_the_notes_on_missed_marks_take_their_numbers_from_the_traces():
             ("Track request at least 1.5 m before the first step", "tracks requested 1.27 m"),
         ]
     )
+    assert all(len(line) <= 100 for line in notes.splitlines())
+    notes = " ".join(notes.split())  # as the page reads, without the line breaks
     assert "moved on 0.02 to 0.21 m" in notes and "stood 0.67 to 0.91 m" in notes
     assert "(2 marks)" in notes and "0.63 m later from the tracks' tip" in notes
     assert gr.why_marks_fail([]) == "- none"
