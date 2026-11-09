@@ -9,8 +9,11 @@ caregiver opens /caregiver on their own phone: a read-only status view (demo/car
 
 Phone to laptop, text messages (JSON):
   hello   {"type": "hello", "caps": {"camera": {"available": true}, ...}, "audio_rate": 48000}
-  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8}
-  gps     {"type": "gps", "accuracy": 6.0}            (accuracy is null when there is no fix)
+  motion  {"type": "motion", "ax": 0, "ay": 0, "az": 9.8, "t": 12.34}   (t: the phone's clock, s)
+  gps     {"type": "gps", "accuracy": 6.0, "lat": .., "lon": .., "speed": .., "heading": ..}
+          (accuracy is null when there is no fix; speed and heading are null when unknown)
+  orient  {"type": "orientation", "alpha": .., "beta": .., "gamma": .., "compass": ..}
+          (absolute orientation in degrees; compass is the heading an iPhone gives, else null)
   word    {"type": "word", "word": "stop", "confidence": 0.9}   (browser speech recognition)
   button  {"type": "button", "name": "stop" | "go" | "automatic" | "manual"}
   ping    {"type": "ping", "t": 123}   answered with pong; the phone then sends an rtt message
@@ -29,6 +32,7 @@ import asyncio
 import contextlib
 import io
 import json
+import math
 import sys
 import warnings
 from array import array
@@ -148,10 +152,16 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.hello(d.get("caps", {}), now)
         app["live"]["audio_rate"] = int(d.get("audio_rate") or app["live"]["audio_rate"])
     elif kind == "motion":
-        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now)
+        t = d.get("t")
+        phone_t = None if t is None else float(t)
+        mw.on_motion(float(d["ax"]), float(d["ay"]), float(d["az"]), now, phone_t)
     elif kind == "gps":
-        acc = d.get("accuracy")
-        mw.on_gps(None if acc is None else float(acc), now)
+        acc, lat, lon, speed, heading = (
+            number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")
+        )
+        mw.on_gps(acc, now, lat, lon, speed, heading)
+    elif kind == "orientation":
+        mw.on_orientation(*(number(d.get(k)) for k in ("alpha", "beta", "gamma", "compass")))
     elif kind == "word":
         # the phone sends the whole phrase first ("heard"), so a word is not written down twice
         mw.on_word(str(d.get("word", "")), float(d.get("confidence", 0.8)), now, record=False)
@@ -172,6 +182,15 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         mw.on_microphone_state(str(d.get("state", "")), now)
     elif kind == "radio":
         mw.on_radio(d.get("wifi"), d.get("bluetooth"), now)
+
+
+def number(v) -> float | None:
+    """A finite number from the phone, or None for null, missing or not a number."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 async def on_binary(app: web.Application, data: bytes) -> None:
@@ -255,6 +274,8 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
             command = BUTTONS.get(str(d.get("name", "")).lower())
             if d.get("type") == "button" and command is not None:
                 app["mw"].on_command(command, 1.0, source="dashboard")
+            elif d.get("type") == "carried" and isinstance(d.get("on_foot"), bool):
+                app["mw"].set_on_foot(d["on_foot"])
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -379,6 +400,8 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--on-foot", action="store_true",
+                   help="the phone is carried by a person walking, not on the device")  # fmt: skip
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -386,7 +409,9 @@ def main(argv=None) -> None:
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
-    app = build_app(Middleware(directions=a.directions), detector, classifier, recognizer)
+    app = build_app(
+        Middleware(directions=a.directions, on_foot=a.on_foot), detector, classifier, recognizer
+    )
 
     print(f"dashboard: http://localhost:{a.port}/dashboard")
     print(f"phone:     http://localhost:{a.port}/phone   (after: python -m demo.usb)")

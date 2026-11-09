@@ -101,8 +101,8 @@ STOP and GO, to that network, so do it only on a network you trust.
 | Tile | In the demo | What the decision layer does with it |
 |---|---|---|
 | Camera | real frames and light level | light level sets the trust of camera reports; frames go to the detector |
-| Motion | real tilt and vibration | level or not; shaking counts as rough ground, so it changes to tracks |
-| GPS | real position accuracy | worse than 15 m for 3 s leaves GPS, better than 8 m for 5 s returns |
+| Motion | real tilt, vibration, steps and compass heading | level or not; shaking counts as rough ground, so it changes to tracks (a person's steps do not); steps and heading move the position |
+| GPS | real position and accuracy | worse than 15 m for 3 s leaves GPS, better than 8 m for 5 s returns; a good fix corrects the position |
 | Microphone | real audio and the browser's recogniser | the words stop, go, on, off, up, down become commands |
 | Wi-Fi | the network type the browser reports (Android Chrome); switched off shows Not available | gone for 2 s means alerts would move to Bluetooth |
 | Bluetooth | what the browser says about the Bluetooth adapter (asked every second). Chrome does not always follow the Settings switch, so tap the tile to declare it off | Wi-Fi gone and Bluetooth on means alerts use Bluetooth; both off means no link |
@@ -112,6 +112,28 @@ STOP and GO, to that network, so do it only on a network you trust.
 The alert link is a **decision**: a web page cannot open a Bluetooth connection to the chair, so
 the dashboard shows which radio the alerts *would* use. The data of the demo itself travels over the
 USB cable.
+
+## Position and path travelled
+
+The dashboard's *Position and path* box shows where the person is and the path they walked, in
+metres from where they started, north up, with the distance, the steps, the heading and the speed
+(`demo/navigation.py`, #129). It needs no internet and no Wi-Fi: the phone reaches the laptop over
+the USB cable, and GPS works without a network.
+
+- **Steps.** The phone sends its acceleration about 30 times a second. A step is a rise and fall
+  of its size, at a walking pace; faster shaking is not a step. The length of each step comes from
+  how hard it swings (Weinberg), between 0.3 and 1 m.
+- **Heading.** The compass from the phone's absolute orientation (Android Chrome), or the heading
+  an iPhone gives. Held upright for the camera, it is where the back camera looks.
+- **GPS.** Each step moves the position along the heading; a GPS fix better than 25 m corrects it
+  (a Kalman filter: a step adds uncertainty, a fix of accuracy *a* counts with variance *a*²).
+  A fix far from where the steps say is refused as a jump, unless three in a row agree.
+- **Indoors**, or with GPS lost or switched off on the phone, the position carries on from the
+  steps, and the path turns from blue (GPS) to orange (steps). The first good fix ties the path to
+  latitude and longitude.
+
+Limits: the compass is disturbed near steel and motors, and step counting measures a person
+walking. On a device with wheels the steps would come from wheel odometry instead (#78).
 
 ## Optional models
 
