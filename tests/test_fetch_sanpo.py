@@ -226,3 +226,27 @@ def test_many_workers_fetch_the_same_files_as_one(tmp_path):
     one = sorted(p.relative_to(tmp_path / "one") for p in (tmp_path / "one").rglob("*.png"))
     six = sorted(p.relative_to(tmp_path / "six") for p in (tmp_path / "six").rglob("*.png"))
     assert one == six and len(one) == 24
+
+
+def test_only_fetches_the_listed_sessions_from_either_split(tmp_path):
+    sessions = {"train": ["t1", "t2", "t3"], "test": ["e1", "e2"]}
+    listed = tmp_path / "want.txt"
+    listed.write_text("t2\ne1\n\nnot-a-session\n")
+    root = tmp_path / "data"
+    assert fs.main(["--root", str(root), "--only", str(listed)], fetch=bucket_with(sessions)) == 0
+    got = sorted({p.relative_to(root).parts[:2] for p in root.glob("*/*/camera_chest/*/*.png")})
+    assert got == [("test", "e1"), ("train", "t2")]
+
+
+def test_sessions_writes_the_list_for_only(tmp_path, capsys):
+    (tmp_path / "labelmap.json").write_text(json.dumps({"road": 1, "stairs": 15}))
+    (tmp_path / "labeltype.json").write_text(json.dumps({"road": "semantic", "stairs": "panoptic"}))
+    stairs_mask(tmp_path / "train" / "t1" / "camera_chest/segmentation_masks", 0, 1)
+    stairs_mask(tmp_path / "train" / "t2" / "camera_chest/segmentation_masks", 0, 0)
+    stairs_mask(tmp_path / "test" / "e1" / "camera_chest/segmentation_masks", 0, 2)
+    sessions = {"train": ["t1", "t2"], "test": ["e1"]}
+    args = ["--root", str(tmp_path), "--train", "0", "--test", "0", "--sessions", "stairs"]
+    assert fs.main(args, fetch=bucket_with(sessions)) == 0
+    assert (tmp_path / "sessions_with_stairs.txt").read_text() == "e1\nt1\n"
+    out = capsys.readouterr().out
+    assert "train: 1 sessions, 1 frames" in out and "test: 1 sessions, 1 frames" in out

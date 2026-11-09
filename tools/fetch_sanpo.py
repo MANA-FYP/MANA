@@ -25,7 +25,14 @@ With --masks-only the counts cost about 20 MB instead of 3 GB.
 
 --sessions CLASS prints, for each session whose masks show that class, the frames and objects of
 it, split by split. It is how #49 finds the sessions with stairs before fetching their images; one
-frame in 10 is enough for that, since a staircase stays in view for many frames.
+frame in 10 is enough for that, since a staircase stays in view for many frames. The session ids
+are also written to <root>/sessions_with_<CLASS>.txt, one per line.
+--only FILE fetches just the sessions named in FILE (one id per line, such as that list), from
+whichever split each is in; --train and --test are then ignored. Fetching the stairs sessions:
+
+    python3 tools/fetch_sanpo.py --root datasets/sanpo --every 2 \\
+        --only /tmp/sanpo-masks/sessions_with_stairs.txt
+
 --workers sets how many files are fetched at once (the masks are many small files).
 """
 
@@ -201,7 +208,9 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
     ap.add_argument("--count", action="store_true", help="count objects per class in the masks")
     ap.add_argument("--sessions", metavar="CLASS", help="list the sessions whose masks show CLASS")
     ap.add_argument("--workers", type=int, default=8, help="files fetched at once")
+    ap.add_argument("--only", type=Path, metavar="FILE", help="fetch only the sessions listed")
     args = ap.parse_args(argv)
+    only = set(parse_ids(args.only.read_text())) if args.only else None
 
     args.root.mkdir(parents=True, exist_ok=True)
     cameras = CAMERAS if args.camera == "both" else (args.camera,)
@@ -220,7 +229,8 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
     for split, list_file in SPLITS.items():
         dest = args.root / "splits" / list_file
         download(file_url(f"{PREFIX}/sanpo-real/splits/{list_file}"), dest, fetch)
-        sessions = pick(parse_ids(dest.read_text()), counts[split])
+        ids = parse_ids(dest.read_text())
+        sessions = [s for s in ids if s in only] if only is not None else pick(ids, counts[split])
         for i, session in enumerate(sessions, 1):
             got = 0
             for camera in cameras:
@@ -258,6 +268,8 @@ def main(argv: list[str] | None = None, fetch=get) -> int:
             print(f"{split}: {len(mine)} sessions, {frames} frames")
             for session, (f, objects, masks) in mine:
                 print(f"  {session}  {f:4d} / {masks:4d}  {objects:5d}")
+        listed = "".join(f"{s}\n" for _, s in sorted(rows))
+        (args.root / f"sessions_with_{args.sessions}.txt").write_text(listed)
     if skipped:
         print(f"{skipped} skipped; run again to fill the gaps", file=sys.stderr)
         return 1
