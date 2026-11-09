@@ -160,9 +160,49 @@ function showDepth(d) {
 const SOURCE_COLOUR = { gps: "#2563eb", steps: "#d97706", none: "#94a3b8" };
 const SOURCE_TEXT = { gps: "GPS", steps: "steps (no GPS)", none: "waiting for steps or GPS" };
 let trackKey = "";
+let lastTrack = null;
+
+// With internet, the street map under the path: OpenStreetMap tiles, placed from where the track's
+// x = y = 0 is (its origin, from the first GPS fix). Offline the tiles fail and the grid stays.
+const TILE = "https://tile.openstreetmap.org/";
+const tiles = new Map();   // "z/x/y" -> its Image
+function tile(key) {
+  if (!tiles.has(key)) {
+    const img = new Image();
+    img.onload = () => { trackKey = ""; drawTrack(lastTrack); };
+    img.src = TILE + key + ".png";
+    tiles.set(key, img);
+  }
+  const img = tiles.get(key);
+  return img.complete && img.naturalWidth ? img : null;
+}
+function drawStreets(ctx, t, w, h, ox, oy, k) {
+  if (!t.origin || !$("streets").checked) return false;
+  const lat = t.origin[0] * Math.PI / 180, cos = Math.cos(lat);
+  // the zoom whose tile pixel is no smaller than a canvas pixel, so tiles are only enlarged
+  const z = Math.max(0, Math.min(19, Math.floor(Math.log2(156543.03 * cos * k))));
+  const n = 2 ** z, s = k * 156543.03 * cos / n;   // canvas pixels per tile pixel
+  // the origin in tile pixels (Web Mercator); ox, oy is where it is on the canvas
+  const px = (t.origin[1] + 180) / 360 * 256 * n;
+  const py = (1 - Math.log(Math.tan(lat) + 1 / cos) / Math.PI) / 2 * 256 * n;
+  let drawn = false;
+  for (let tx = Math.floor((px - ox / s) / 256); tx <= Math.floor((px + (w - ox) / s) / 256); tx++) {
+    for (let ty = Math.floor((py - oy / s) / 256); ty <= Math.floor((py + (h - oy) / s) / 256); ty++) {
+      if (ty < 0 || ty >= n) continue;
+      const img = tile(z + "/" + (((tx % n) + n) % n) + "/" + ty);
+      if (!img) continue;
+      ctx.drawImage(img, ox + (tx * 256 - px) * s, oy + (ty * 256 - py) * s, 256 * s + 1, 256 * s + 1);
+      drawn = true;
+    }
+  }
+  return drawn;
+}
+
 function drawTrack(t) {
   if (!t) return;
-  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m, t.marks]);
+  lastTrack = t;
+  const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m, t.marks,
+    t.origin, $("streets").checked]);
   if (key === trackKey) return;
   trackKey = key;
   setText($("posText"), t.distance_m.toFixed(1) + " m walked, " + t.steps + " steps, " +
@@ -182,12 +222,22 @@ function drawTrack(t) {
   const span = Math.max(10, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.2;
   const k = Math.min(w, h) / span;   // pixels per metre
   const X = (x) => w / 2 + (x - cx) * k, Y = (y) => h / 2 - (y - cy) * k;
-  // a grid every 'step' metres, and its scale bar
+  // the street map when there is one, else a grid every 'step' metres; and the scale bar
+  const streets = drawStreets(ctx, t, w, h, X(0), Y(0), k);
   const step = [1, 2, 5, 10, 20, 50, 100, 200, 500].find((m) => m * k >= 40) || 1000;
   ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
-  for (let gx = Math.ceil((cx - w / 2 / k) / step) * step; X(gx) <= w; gx += step) { ctx.beginPath(); ctx.moveTo(X(gx), 0); ctx.lineTo(X(gx), h); ctx.stroke(); }
-  for (let gy = Math.ceil((cy - h / 2 / k) / step) * step; Y(gy) >= 0; gy += step) { ctx.beginPath(); ctx.moveTo(0, Y(gy)); ctx.lineTo(w, Y(gy)); ctx.stroke(); }
-  ctx.fillStyle = "#475569"; ctx.font = "11px Segoe UI, Arial";
+  if (!streets) {
+    for (let gx = Math.ceil((cx - w / 2 / k) / step) * step; X(gx) <= w; gx += step) { ctx.beginPath(); ctx.moveTo(X(gx), 0); ctx.lineTo(X(gx), h); ctx.stroke(); }
+    for (let gy = Math.ceil((cy - h / 2 / k) / step) * step; Y(gy) >= 0; gy += step) { ctx.beginPath(); ctx.moveTo(0, Y(gy)); ctx.lineTo(w, Y(gy)); ctx.stroke(); }
+  }
+  ctx.font = "11px Segoe UI, Arial";
+  if (streets) {   // the tiles' licence asks for this credit
+    const credit = "© OpenStreetMap contributors";
+    const cw = ctx.measureText(credit).width + 8;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)"; ctx.fillRect(w - cw, h - 16, cw, 16);
+    ctx.fillStyle = "#334155"; ctx.fillText(credit, w - cw + 4, h - 4);
+  }
+  ctx.fillStyle = "#475569";
   ctx.fillRect(10, h - 12, step * k, 3); ctx.fillText(step + " m", 10, h - 16);
   ctx.fillText("N ↑", w - 28, 14);
   ctx.lineWidth = 3; ctx.lineJoin = "round";
@@ -256,6 +306,8 @@ document.querySelectorAll("[data-place]").forEach((b) => {
 
 $("carried").onclick = () => ws && ws.readyState === 1 &&
   ws.send(JSON.stringify({ type: "carried", on_foot: !onFoot }));
+
+$("streets").onchange = () => drawTrack(lastTrack);
 
 $("voice").onclick = () => {
   voiceOn = !voiceOn;
