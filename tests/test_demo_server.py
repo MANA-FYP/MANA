@@ -269,3 +269,35 @@ def test_the_imgsz_option_reaches_the_detector(monkeypatch):
     server.main(["--weights", "yoloe-26n-mana.pt", "--imgsz", "480"])
     server.main([])
     assert loaded == [("yoloe-26n-mana.pt", 480), ("yolo26n.pt", 416)]
+
+
+def test_a_walk_from_the_phone_shows_steps_and_the_gps_position_on_the_dashboard():
+    import math
+
+    async def go(client, phone, dash):
+        await phone.send_json({"type": "orientation", "alpha": 0, "beta": 70, "gamma": 0})
+        await phone.send_json(
+            {"type": "gps", "accuracy": 5.0, "lat": 31.5204, "lon": 74.3587, "speed": None}
+        )
+        for i in range(150):  # 5 s at 1.8 steps a second, the phone's clock in t
+            t = i / 30
+            m = 9.81 + 1.5 * math.sin(2 * math.pi * 1.8 * t)
+            await phone.send_json({"type": "motion", "ax": 0, "ay": 0, "az": m, "t": t})
+        await phone.send_json({"type": "orientation", "alpha": None, "beta": "x", "gamma": 0})
+        snap = await snapshot_where(dash, lambda s: s["position"]["track"]["steps"] >= 7)
+        track = snap["position"]["track"]
+        assert track["heading"] == 0 and track["y"] > 3.0  # walked north
+        assert track["lat"] > 31.5204 and track["lon"] == pytest.approx(74.3587, abs=1e-6)
+
+    run(with_clients(go))
+
+
+def test_the_dashboard_says_how_the_phone_is_carried():
+    async def go(client, phone, dash):
+        await dash.send_json({"type": "carried", "on_foot": True})
+        await snapshot_where(dash, lambda s: s["on_foot"] is True)
+        await dash.send_json({"type": "carried", "on_foot": "yes"})  # not a switch: ignored
+        await dash.send_json({"type": "carried", "on_foot": False})
+        await snapshot_where(dash, lambda s: s["on_foot"] is False)
+
+    run(with_clients(go))
