@@ -9,6 +9,7 @@ import pytest
 from mana_core.decision import (
     ASK_DOWN,
     STEP_STOP,
+    WAITING,
     Command,
     DecisionCore,
     Ground,
@@ -968,3 +969,47 @@ def test_manual_mode_on_wheels_still_stops_at_a_lone_step():
     c.on_ground(ground(DEPTH, Ground.CURB, 0.3))
     c.on_motion(level())
     assert c.tick(NOW).reason == STEP_STOP
+
+
+# ---- start-up: slow until each of the host's ground sensors has reported once (#151)
+
+
+def started(*reports, sensors=2):
+    c = DecisionCore(mount=Mount(ground_sensors=sensors))
+    for r in reports:
+        c.on_ground(r)
+    c.on_motion(level())
+    c.tick(NOW)
+    return c
+
+
+def test_the_first_sensor_up_alone_does_not_set_full_speed():
+    # the 3D camera's level ground came first; the camera has not reported yet
+    d = started(ground(DEPTH, Ground.FLAT)).decision
+    assert (d.speed_limit, d.reason, d.mode) == (LIM.slow, WAITING, Mode.WHEELS)
+
+
+def test_once_both_have_reported_it_drives_on_at_full_speed():
+    d = started(ground(DEPTH, Ground.FLAT), ground(CAM, Ground.FLAT)).decision
+    assert (d.speed_limit, d.reason) == (1.0, "Level ground")
+
+
+def test_a_sensor_that_has_reported_counts_even_when_its_report_is_old_or_untrusted():
+    # as in the dark corridor: the camera reports but cannot be trusted; it is up
+    reports = (ground(DEPTH, Ground.FLAT), ground(CAM, Ground.FLAT, trust=0.1))
+    assert started(*reports).decision.speed_limit == 1.0
+
+
+def test_the_classifier_and_the_detector_are_the_camera_not_a_second_sensor():
+    reports = (ground(Source.CLASSIFIER, Ground.FLAT), ground(Source.DETECTOR, Ground.FLAT))
+    assert started(*reports).decision.reason == WAITING
+
+
+def test_a_more_telling_reason_to_slow_down_comes_first():
+    reports = (ground(CAM, Ground.STAIRS_UP),)  # a picture of stairs, the 3D camera not up yet
+    assert started(*reports).decision.reason == "Possible step ahead, slowing down"
+
+
+def test_a_host_with_one_ground_sensor_or_none_set_does_not_wait():
+    assert started(ground(DEPTH, Ground.FLAT), sensors=1).decision.speed_limit == 1.0
+    assert core(ground(DEPTH, Ground.FLAT)).decision.speed_limit == 1.0  # ground_sensors 0
