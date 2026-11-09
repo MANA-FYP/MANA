@@ -16,3 +16,5 @@ mana_core:
     top_mps: 1.2
     reaction_s: 0.5
     decel_mps2: 3.0
+    # the camera and the 3D camera: slow until both have reported once (#151)
+    ground_sensors: 2

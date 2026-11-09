@@ -242,27 +242,27 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 |---|---|---|---|---|---|
 | `level` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `level` | Full speed on wheels | PASS | PASS | slowest 100% of top speed |  |
-| `level` | Reaches the end of the route | PASS | PASS | reached 4.51 of 4.5 m |  |
+| `level` | Reaches the end of the route | PASS | PASS | reached 4.50 of 4.5 m |  |
 | `level` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `ramp` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `ramp` | Slower on the ramp, on wheels | PASS | PASS | at most 30% of top speed on the ramp |  |
 | `ramp` | Reaches the end of the route | PASS | PASS | reached 12.02 of 12 m |  |
 | `ramp` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.92 m before the first step |  |
-| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.94 m |  |
-| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.82 of 6.8 m |  |
+| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.93 m before the first step |  |
+| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.98 m |  |
+| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.84 of 6.8 m |  |
 | `stairs` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.97 m before the first step |  |
+| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.91 m before the first step |  |
 | `curb` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 6.02 m |  |
-| `curb` | Reaches the end of the route | PASS | PASS | reached 6.21 of 6.2 m |  |
+| `curb` | Reaches the end of the route | PASS | PASS | reached 6.22 of 6.2 m |  |
 | `curb` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `stop` | Stop acted on within 1 s | PASS | PASS | stopped 0.20 s after the command |  |
+| `stop` | Stop acted on within 1 s | PASS | PASS | stopped 0.10 s after the command |  |
 | `stop` | Stays stopped until the user says go | PASS | PASS | held the stop |  |
 | `stop` | Moving again within 1 s of go | PASS | PASS | moving 0.20 s after go |  |
-| `stop` | Says "Stopped by you" | PASS | PASS | at 2.1 s |  |
+| `stop` | Says "Stopped by you" | PASS | PASS | at 2.0 s |  |
 | `stop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `drop` | Stops before the drop | PASS | FAIL | stopped, then moved on 0.01 m, to 0.55 m before the drop | #118 |
-| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.5 s |  |
+| `drop` | Stops before the drop | PASS | FAIL | stopped, then moved on 0.01 m, to 0.54 m before the drop | #118 |
+| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.3 s |  |
 | `drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `manual_drop` | Follows the user in manual mode | PASS | PASS | manual from 0.3 s |  |
 | `manual_drop` | Stops before the drop | PASS | FAIL | stopped, then moved on 0.20 m, to 0.78 m before the drop | #118 |
@@ -270,12 +270,12 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 | `manual_drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `picture` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `picture` | Slower on the way to the picture, on wheels | PASS | PASS | at most 30% of top speed on the way to the picture |  |
-| `picture` | Reaches the end of the route | PASS | PASS | reached 9.01 of 9 m |  |
+| `picture` | Reaches the end of the route | PASS | PASS | reached 9.00 of 9 m |  |
 | `picture` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `dark` | Stops before the person | PASS | FAIL | stopped, then moved on 0.03 m, to 0.91 m before the person | #118 |
-| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 6.8 s |  |
+| `dark` | Stops before the person | PASS | FAIL | stopped, then moved on 0.02 m, to 0.91 m before the person | #118 |
+| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 6.6 s |  |
 | `dark` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.96 m before the first step |  |
+| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.95 m before the first step |  |
 | `imu_lost` | Stays on tracks while the tilt cannot be checked | PASS | PASS | stayed on tracks |  |
 | `imu_lost` | Shows "On tracks until the ground is level" | PASS | FAIL | not told | **none yet** |
 | `imu_lost` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
@@ -283,7 +283,7 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 What is known about the missed marks:
 
 - **#118:** "Stops before the ..." counts the chair moving on after the first stop as a released
-  stop. In these runs it moved on 0.01 to 0.20 m, and stood 0.55 to 0.91 m before the hazard (3
+  stop. In these runs it moved on 0.01 to 0.20 m, and stood 0.54 to 0.91 m before the hazard (3
   marks).
 
 ### The routes

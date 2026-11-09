@@ -229,3 +229,16 @@ Still to do: check the chosen values again in Gazebo once #16 runs, and measure 
 | **Count from the tip for the step decision only** | One more number in the step check. Stairs going down are asked about from the tip too, which is earlier, so safer |
 
 Measured in Gazebo, all ten scenarios, twice. Second run (the one in [`results.md`](results.md)): the tracks were asked for 1.92 m (stairs), 1.97 m (curb) and 1.96 m (imu_lost) before the first step, from the tip, and 35 of 39 marks are met, up from 32. First run: 1.97, 1.93 and 1.96 m, and 34 of 39. There `picture` missed "Slower on the way to the picture" on its first sample: at 0.1 s, still at the start, the 3D camera's level ground came before the camera's picture of stairs, and the core said "Level ground" at full speed. Every later sample was slowed. The step rule needs two sensors and `picture` has one, so this change does not touch it. Which sensor reports first differs from run to run; #151 is about starting slow until every ground source has reported.
+
+## D10. Slow at start-up until each ground sensor has reported (#151)
+
+**Chosen:** the host says how many ground sensors it has (`Mount.ground_sensors`; the classifier and the detector count as the camera). Until that many have reported once, the core slows down and says "Waiting for the ground sensors, slowing down". A more telling reason to slow down, such as a possible step, comes first. The simulated chair sets 2 (the camera and the 3D camera). The default, 0, keeps the scripted world and the phone as they were. A sensor counts once it has reported, even with low trust, as the camera in the dark corridor.
+
+| Option | Problem |
+|---|---|
+| Keep going on whatever has reported | In one full Gazebo run (D9) the 3D camera's level ground came first, and `picture` drove its first tick at full speed towards a picture of stairs |
+| Learn the sensors from the first seconds | The core cannot tell "one sensor" from "the other is not up yet" without waiting, and how long is a guess |
+| **The host says how many it has** | One more parameter in `core.yaml`, beside the mount |
+
+Measured in Gazebo, all ten scenarios (results in [`results.md`](results.md)): 35 of 39 marks, the same marks met as on `main`. The wait showed in `stop` for its first 0.3 s, while only one sensor had reported. In this run the camera reported first in `picture`, so the race did not come up; the unit tests feed the 3D camera first.
+

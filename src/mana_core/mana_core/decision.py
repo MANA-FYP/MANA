@@ -83,6 +83,7 @@ class Priority(IntEnum):
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 NO_GROUND = "Ground sensors not available, slowing down"
+WAITING = "Waiting for the ground sensors, slowing down"
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
@@ -175,6 +176,10 @@ class Mount:
     top_mps: float = 0.0  # the host's top speed, at speed limit 1.0
     reaction_s: float = 0.0  # from a sensor frame to the wheels braking
     decel_mps2: float = 0.0
+    # how many ground sensors the host has (the camera, the 3D camera): until each has reported
+    # once, the core slows down, so that the first one up alone cannot set full speed (#151).
+    # 0: no wait, as in the scripted world and on the phone.
+    ground_sensors: int = 0
 
     def travel_m(self, speed_limit: float) -> float:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
@@ -477,6 +482,13 @@ class DecisionCore:
             for r in self.links.values()
         )
 
+    def _waiting_for_ground(self) -> bool:
+        """Fewer of the host's ground sensors have ever reported than it has: at start-up the 3D
+        camera's level ground can come before the camera's stairs. The classifier and the
+        detector are the camera, as in _confirmed_step."""
+        seen = {SENSOR_OF.get(source, source) for source in self.ground}
+        return len(seen) < self.mount.ground_sensors
+
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
 
@@ -610,6 +622,11 @@ class DecisionCore:
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
                     ),
+                ),
+                branch(
+                    "waiting",
+                    self._waiting_for_ground,
+                    lambda: self._set(Mode.WHEELS, False, lim.slow, WAITING, Priority.WARNING),
                 ),
                 branch(
                     "no alert link",
