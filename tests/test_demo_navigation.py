@@ -478,3 +478,50 @@ def test_a_walk_indoors_with_no_fix_has_no_gpx_and_says_its_geojson_is_in_metres
     geo = to_geojson(nav.track)
     assert geo["features"][0]["geometry"]["coordinates"][-1] == [7.0, 0.0]
     assert "metres east and north" in geo["crs_note"]
+
+
+# ---- walk detection, and GPS while standing (our phone, 9 and 10 November)
+
+
+def feed(nav, readings):
+    for t, ax, ay, az in readings:
+        nav.on_accel(t, ax, ay, az, now=t)
+
+
+def test_a_walk_reaches_the_track_whole():
+    nav = Navigator()
+    feed(nav, walk(20.0))
+    assert abs(nav.track.steps - 36) <= 1  # the first steps are held, then all counted
+
+
+def test_lone_swings_of_a_hand_do_not_reach_the_track():
+    # two swings, a pause, two swings...: the counter may take each for a step; no walk
+    nav, t = Navigator(), 0.0
+    for i in range(6):
+        feed(nav, still(3.0, seed=10 + i, t0=t))
+        feed(nav, walk(1.1, t0=t + 3.0, seed=20 + i))
+        t += 4.1
+    feed(nav, still(3.0, seed=30, t0=t))
+    assert nav.track.steps == 0
+
+
+def standing_fix(e, n, t, speed, acc=4.0):
+    f = fix_at(None, e, n, t, acc)
+    return Fix(f.t, f.lat, f.lon, f.accuracy_m, speed)
+
+
+def test_gps_wandering_round_a_person_standing_is_not_walked():
+    # indoors our phone's fixes drifted 10 to 15 m with a speed of 0.03 to 0.17 m/s
+    track = Track()
+    track.on_gps(standing_fix(0, 0, 0.0, 0.1))
+    for i in range(1, 60):
+        track.on_gps(standing_fix(15 * math.sin(i / 9), 6 * math.cos(i / 5), float(i), 0.1))
+    assert track.distance_m == 0.0
+
+
+def test_gps_with_a_walking_speed_counts_as_it_did_with_no_speed():
+    walking, unknown = Track(), Track()
+    for i in range(30):
+        walking.on_gps(standing_fix(1.2 * i, 0, float(i), 1.2))
+        unknown.on_gps(standing_fix(1.2 * i, 0, float(i), None))
+    assert walking.distance_m == unknown.distance_m > 25.0  # 34.8 m walked; the filter lags
