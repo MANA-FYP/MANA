@@ -81,6 +81,13 @@ def average_precision(scores, labels) -> float:
 # to the scores of every AudioSet class, and that rate
 
 
+def ten_seconds(wave: np.ndarray, rate: int) -> np.ndarray:
+    """EfficientAT was trained on AudioSet's 10 s clips (input_dim_t=1000 frames). A shorter clip
+    as it is gives nonsense: on UrbanSound8K every clip under 2 s scored over 0.9 for both siren
+    and horn. So it is padded with silence to 10 s, as AudioSet's shorter clips were."""
+    return wave if wave.size >= 10 * rate else np.pad(wave, (0, 10 * rate - wave.size))
+
+
 def efficientat(folder: Path):
     import os
 
@@ -100,6 +107,7 @@ def efficientat(folder: Path):
 
     def run(wave: np.ndarray) -> np.ndarray:
         with torch.no_grad():
+            wave = ten_seconds(wave, 32000)
             spec = mel(torch.from_numpy(wave[None, :].astype(np.float32)))
             logits, _ = model(spec.unsqueeze(0))
             return torch.sigmoid(logits.float()).numpy()[0]

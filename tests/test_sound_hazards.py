@@ -45,3 +45,11 @@ def test_average_precision():
     # positives at ranks 1 and 3: (1/1 + 2/3) / 2
     assert sh.average_precision([0.9, 0.8, 0.7], [True, False, True]) == pytest.approx(5 / 6)
     assert sh.average_precision([0.5], [False]) == 0.0
+
+
+def test_efficientat_gets_ten_seconds_short_clips_padded_with_silence():
+    short = np.ones(16000, dtype=np.float32)
+    padded = sh.ten_seconds(short, 32000)
+    assert padded.size == 320000 and padded[:16000].all() and not padded[16000:].any()
+    long = np.ones(400000, dtype=np.float32)
+    assert sh.ten_seconds(long, 32000) is long
