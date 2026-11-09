@@ -5,9 +5,13 @@ tests/fixtures/gazebo_depth.npz (made by tools/grab_depth_frames.py) holds frame
 1.0 m (within 5 cm) from the first riser, the curb or the edge, and on flat ground, in millimetres
 as a 16UC1 camera sends them, with the true distance and the chair's pitch from Gazebo's ground
 truth. They are read as `depth_node` reads
-them in the Gazebo runs: the mount from mana_sim.frames, the pitch from the IMU.
+them in the Gazebo runs: the mount from mana_sim.frames, the pitch from the IMU. The `climb:` frames
+are from the stairs run, the chair pitched nose up from 6 to 39 degrees, one per 0.1 rad: where
+reading with the wrong pitch made a drop at 0 m (#117), and where the IMU was lost on the top step
+(#156).
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -27,14 +31,19 @@ FX, FY, CX, CY = DATA["k"]
 CAM = dp.Camera(FX, FY, CX, CY, *depth_mount())
 
 
-def frames():
+def frames(climbing=False):
     i = 0
     while f"f{i}_name" in DATA:
         kind, _ = str(DATA[f"f{i}_name"]).split(":")
         gap, pitch = DATA[f"f{i}_meta"]
         mm = DATA[f"f{i}_depth_mm"]
-        yield pytest.param(kind, float(gap), float(pitch), mm, id=str(DATA[f"f{i}_name"]))
+        if (kind == "climb") == climbing:
+            yield pytest.param(kind, float(gap), float(pitch), mm, id=str(DATA[f"f{i}_name"]))
         i += 1
+
+
+def metres(mm):
+    return np.where(mm > 0, mm / 1000.0, np.nan)
 
 
 EXPECTED = {
@@ -47,8 +56,7 @@ EXPECTED = {
 
 @pytest.mark.parametrize(("kind", "gap", "pitch", "mm"), list(frames()))
 def test_a_gazebo_frame_reads_the_hazard_at_its_true_distance(kind, gap, pitch, mm):
-    depth = np.where(mm > 0, mm / 1000.0, np.nan)
-    r = dp.read_ground(depth, CAM, chair_pitch_rad=pitch)
+    r = dp.read_ground(metres(mm), CAM, chair_pitch_rad=pitch)
     ground, height = EXPECTED[kind]
     assert r.ground == ground
     if ground != dp.FLAT:
@@ -64,3 +72,23 @@ def test_the_frames_cover_every_hazard_at_every_distance():
             f"{kind}:{d}" for d in ("1.0", "1.5", "2.0", "2.5")
         ]
     assert any(n.startswith("flat") for n in names)
+    assert sum(n.startswith("climb") for n in names) == 7
+
+
+@pytest.mark.parametrize(("kind", "gap", "pitch", "mm"), list(frames(climbing=True)))
+def test_climbing_with_the_imus_pitch_no_frame_reads_a_drop_at_0_m(kind, gap, pitch, mm):
+    r = dp.read_ground(metres(mm), CAM, chair_pitch_rad=pitch)
+    assert not (r.ground == dp.DROP and r.distance_m < 0.3)
+
+
+@pytest.mark.parametrize(("kind", "gap", "pitch", "mm"), list(frames(climbing=True)))
+def test_the_floor_pitch_is_right_within_1_degree_or_none(kind, gap, pitch, mm):
+    # with no IMU, depth_node takes the pitch from the floor; on a riser it must give none rather
+    # than a wrong one (it gave 67 degrees nose down at 17 nose up before MAX_PITCH_RAD)
+    found = dp.floor_pitch(metres(mm), CAM)
+    assert found is None or abs(found - pitch) <= math.radians(1)
+
+
+def test_the_floor_pitch_is_found_on_most_of_the_climb():
+    found = [dp.floor_pitch(metres(p.values[3]), CAM) for p in frames(climbing=True)]
+    assert sum(f is not None for f in found) >= 3  # 3 of the 7 frames, at 11, 29 and 34 degrees

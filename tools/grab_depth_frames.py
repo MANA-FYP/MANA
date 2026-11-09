@@ -7,7 +7,8 @@ tests/test_gazebo_depth_frames.py. Run it beside the Gazebo runs, in the same RO
 
 A frame is kept the first time the camera is 2.5, 2.0, 1.5 or 1.0 m (within 5 cm) from the stairs,
 the curb or the drop, and once on the flat between the stairs and the curb, with the true distance
-and the chair's pitch from Gazebo's ground truth. Depth is kept in millimetres (16UC1).
+and the chair's pitch from Gazebo's ground truth. On the stairs, the chair pitched, it keeps one
+frame for each 0.1 rad of pitch: the one nearest that pitch. Depth is kept in millimetres (16UC1).
 """
 
 import math
@@ -17,15 +18,19 @@ from pathlib import Path
 
 import numpy as np
 import rclpy
+from mana_sim.frames import SENSORS
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 
+from mana_perception import depth as dp
+
 HAZARDS = ((22.0, "stairs_up"), (31.0, "curb"), (38.0, "drop"))  # worlds/mana_route.sdf
 FLAT = (26.5, 27.5)  # the chair here: the camera sees only flat ground (the stairs end at 25.4 m)
 TARGETS = (2.5, 2.0, 1.5, 1.0)
-CAM_X, CAM_Z = 0.35, 0.6  # depth_link from base_link (mana_sim.frames)
+STAIRS = (20.5, 25.4)  # the chair here, pitched: climbing
+CAM_X, _, CAM_Z = SENSORS["depth_link"][:3]
 STOP = Path("/tmp/grab_depth_frames.stop")
 
 
@@ -58,12 +63,22 @@ class Grab(Node):
             keys = [(f"{name}:{t}", gap) for t in TARGETS if abs(gap - t) < 0.05]
         if FLAT[0] < x < FLAT[1] and abs(pitch) < 0.01:
             keys.append(("flat:27", math.nan))
+        band = round(pitch, 1)
+        climbing = STAIRS[0] < x < STAIRS[1] and abs(band) >= 0.1
+        if climbing:
+            old = self.saved.get(f"climb:{band:+.1f}")
+            if old is None or abs(pitch - band) < abs(old[2] - band):
+                self.saved.pop(f"climb:{band:+.1f}", None)  # a nearer one replaces it
+                keys.append((f"climb:{band:+.1f}", math.nan))
         for key, gap in keys:
             if key not in self.saved:
-                depth = np.frombuffer(bytes(m.data), np.float32).reshape(m.height, m.width)
+                depth = dp.to_metres(m.encoding, m.height, m.width, m.step, m.data, m.is_bigendian)
+                if depth is None:
+                    return
                 mm = np.where(np.isfinite(depth), np.clip(depth * 1000, 0, 65535), 0)
                 self.saved[key] = (mm.astype(np.uint16), gap, pitch)
-                print(f"kept {key}: {gap:.3f} m, pitch {pitch:.4f} rad", flush=True)
+                if not climbing:
+                    print(f"kept {key}: {gap:.3f} m, pitch {pitch:.4f} rad", flush=True)
 
 
 def main():
@@ -78,6 +93,8 @@ def main():
         frames |= {f"f{i}_name": np.array(key), f"f{i}_depth_mm": mm}
         frames[f"f{i}_meta"] = np.array([gap, pitch])
     np.savez_compressed(out, **frames)
+    for key, (_, _, pitch) in sorted(node.saved.items()):
+        print(f"{key}: pitch {pitch:.4f} rad")
     print(f"{len(node.saved)} frames in {out}")
     time.sleep(0.1)
 
