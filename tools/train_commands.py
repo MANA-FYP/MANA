@@ -94,15 +94,18 @@ class Augment:
 
 
 def spec_augment(x: torch.Tensor, rng: random.Random) -> torch.Tensor:
+    """Two frequency and two time masks per clip, filled with the clip's mean: a log-mel's 0 is
+    loud (the mean is about -7), so masking with 0 would add a loud band instead of hiding one."""
     x = x.clone()
     for i in range(x.shape[0]):
+        fill = float(x[i].mean())
         for _ in range(2):
             f = rng.randint(0, 7)
             f0 = rng.randint(0, kws.N_MELS - f)
-            x[i, :, f0 : f0 + f, :] = 0
+            x[i, :, f0 : f0 + f, :] = fill
             t = rng.randint(0, 20)
             t0 = rng.randint(0, x.shape[-1] - t)
-            x[i, :, :, t0 : t0 + t] = 0
+            x[i, :, :, t0 : t0 + t] = fill
     return x
 
 
@@ -147,9 +150,14 @@ def main(argv=None) -> int:
           flush=True)  # fmt: skip
     t0 = time.time()
     word_waves, word_labels = load(words)
-    # validation: its words and unknowns as they are, and as many silences as an average word
-    val_waves, val_labels = load(data["val"])
-    vsil = np.stack([aug.silence() for _ in range(len(val_labels) // 11)])
+    # validation in the same shares as training: every command word, and as many unknown
+    # clips and silences as an average word has (all the unknown clips would be 60% of it)
+    val_words = [x for x in data["val"] if x[0] != UNKNOWN]
+    val_unknown = random.Random(a.seed).sample(
+        [x for x in data["val"] if x[0] == UNKNOWN], len(val_words) // len(WORDS)
+    )
+    val_waves, val_labels = load(val_words + val_unknown)
+    vsil = np.stack([aug.silence() for _ in range(len(val_words) // len(WORDS))])
     val_waves = np.concatenate([as_float(val_waves), vsil])
     val_labels = np.concatenate([val_labels, np.full(len(vsil), SILENCE)])
     print(f"loaded in {time.time() - t0:.0f} s", flush=True)
@@ -189,7 +197,7 @@ def main(argv=None) -> int:
             loss.backward()
             opt.step()
             step, seen = step + 1, seen + len(idx)
-            losses.append(float(loss))
+            losses.append(loss.item())
         val = accuracy(model, mel, val_waves, val_labels)
         minutes = round((time.time() - t) / 60, 1)
         log.append({"epoch": epoch + 1, "loss": round(float(np.mean(losses)), 4),

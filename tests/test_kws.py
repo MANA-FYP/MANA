@@ -113,3 +113,13 @@ def test_a_word_below_the_threshold_or_not_a_command_is_not_given():
 
 def test_a_checkpoint_that_cannot_be_read_gives_no_spotter(tmp_path):
     assert kws.Spotter.load(str(tmp_path / "missing.pt")) is None
+
+
+def test_spec_augment_masks_with_the_clips_mean_not_with_a_loud_zero():
+    import random
+
+    x = torch.full((1, 1, kws.N_MELS, 101), -7.0)
+    x[0, 0, 0, 0] = -6.0
+    out = tc.spec_augment(x, random.Random(3))
+    assert (out <= -6.0).all()  # nothing louder than the clip itself
+    assert out.shape == x.shape
