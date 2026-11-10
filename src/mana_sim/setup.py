@@ -27,7 +27,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.py")),
         ("share/" + package_name + "/worlds", glob("worlds/*.sdf")),
-        ("share/" + package_name + "/config", glob("config/*.yaml")),
+        ("share/" + package_name + "/config", glob("config/*.yaml") + glob("config/*.rviz")),
         ("share/" + package_name + "/web", glob("web/*.html")),
         *tree("models", "models"),
     ],
