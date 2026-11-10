@@ -244,11 +244,12 @@ percent **too far**, the unsafe side):
 | noise at 20 dB | 95.3% | 2.0% | 2.6% | 13.1% (907) | 192 |
 | noise at 10 dB | 90.5% | 3.6% | 5.8% | 17.6% (1,221) | 266 |
 | noise at 5 dB | 85.0% | 4.6% | 10.4% | 18.9% (1,307) | 264 |
+| noise at 0 dB | 68.8% | 6.0% | 25.2% | 14.8% (1,024) | 173 |
 
 - **The ten words are recognised well when clean** (97.2%), but not to the 95% of #46 at 10 dB of noise or worse.
 - **Other words are often heard as commands.** A grammar of only ten words has to fit everything into them. On the clean clips, the most common were "nine" heard as "no" (122), "one" as "on" (82), "two" as "go" (79) and "dog" as "down" (66). "Go" starts the device, so this matters most.
 - **A confidence threshold does not fix it.** Vosk gave a confidence of 1.0 to 4,168 of the 4,746 clean clips on which it heard a word. Acting only on 0.9 or more keeps 94.8% right and still leaves 4.5% false activations.
-- **Time:** a median of 46 to 88 ms per clip on this laptop's CPU.
+- **Time:** a median of 46 to 100 ms per clip on this laptop's CPU.
 
 So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
 
