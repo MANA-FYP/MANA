@@ -562,3 +562,63 @@ def test_gps_with_a_walking_speed_counts_as_it_did_with_no_speed():
         walking.on_gps(standing_fix(1.2 * i, 0, float(i), 1.2))
         unknown.on_gps(standing_fix(1.2 * i, 0, float(i), None))
     assert walking.distance_m == unknown.distance_m > 25.0  # 34.8 m walked; the filter lags
+
+
+# ---- a destination picked on the supervisor's map
+
+
+def said_ways(mw):
+    return [d["text"] for d in mw.decisions if d["kind"] == "way"]
+
+
+def test_the_way_to_a_destination_is_said_when_set_on_the_walk_and_on_arrival():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=0)  # facing north
+    text = mw.set_destination(0.0, 30.0, now=1.0)
+    assert text == "Destination set. The destination is 30 metres away, at 12 o'clock."
+    t = walk_legs(mw.nav, [(0, 10)], t0=1.0)  # 7 m: not yet said again
+    mw.tick(t)
+    assert len(said_ways(mw)) == 1
+    t = walk_legs(mw.nav, [(0, 12)], t0=t)  # 15.4 m walked since it was said
+    mw.tick(t)
+    assert said_ways(mw)[-1] == "The destination is 15 metres away, at 12 o'clock."
+    t = walk_legs(mw.nav, [(0, 18)], t0=t)  # 28 m: 2 m from it
+    mw.tick(t)
+    assert said_ways(mw)[-1] == "You have arrived at the destination."
+    assert "destination" not in mw.nav.track.marks
+    mw.tick(t + 1.0)
+    assert said_ways(mw)[-1] == "You have arrived at the destination."  # said once
+
+
+def test_turning_away_from_the_destination_says_the_way_again_but_not_at_once():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=0)
+    mw.set_destination(0.0, 30.0, now=1.0)
+    mw.nav.on_orientation(None, None, None, compass=90)  # now facing east: it is at 9 o'clock
+    mw.tick(8.0)
+    assert len(said_ways(mw)) == 1  # under 10 s since it was said
+    mw.tick(11.5)
+    assert said_ways(mw)[-1] == "The destination is 30 metres away, at 9 o'clock."
+    mw.nav.on_orientation(None, None, None, compass=60)  # 1 hour round: not a turn away
+    mw.tick(30.0)
+    assert len(said_ways(mw)) == 2
+
+
+def test_asking_for_the_destination_and_clearing_it():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.on_heard("Where is the destination?", now=1.0)
+    assert said_ways(mw) == ["No destination yet. The supervisor picks one on the map."]
+    mw.set_destination(40.0, 0.0, now=2.0)  # no compass: a compass direction
+    mw.on_heard("which way to the destination", now=3.0)
+    assert said_ways(mw)[-1] == "The destination is 40 metres to the east."
+    assert mw.inputs[-1]["command"] == "Destination"
+    mw.clear_destination(now=4.0)
+    assert said_ways(mw)[-1] == "Destination cleared." and "destination" not in mw.nav.track.marks
+    mw.tick(5.0)
+    assert len(said_ways(mw)) == 4  # nothing more once cleared

@@ -33,7 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
-from demo.navigation import Fix, Navigator, route_text, way_text
+from demo.navigation import COMPASS, Fix, Navigator, route_text, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -302,6 +302,20 @@ WORD_COMMANDS = {
 }
 
 MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
+# a place picked on the supervisor's map, kept with the marks (so it is drawn and saved with them)
+DESTINATION = "destination"
+ARRIVED_M = 3.0  # nearer than this it is reached: about the error of a phone's GPS fix outdoors
+GUIDE_EVERY_M = 15.0  # the way is said again after this much walking
+# and sooner, but no more often than this, when it moves 2 hours round: indoors the compass can
+# swing that far with the person standing still
+GUIDE_TURN_GAP_S = 10.0
+
+
+def _clock_hour(way: tuple[float, float | None, str]) -> float:
+    """The way's direction in clock hours: from where the person faces, else from the compass."""
+    _, turn, compass = way
+    return round(turn / 30.0) % 12 if turn is not None else COMPASS.index(compass) * 1.5
+
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
 # a siren or a horn heard on the microphone (#47): said, not a decision of its own
@@ -441,6 +455,9 @@ class Middleware:
         self._ever_active: set[str] = set()
         self._available_since: dict[str, float] = {}
         self._said_at: dict[str, float] = {}
+        # when the way to the destination was last said: the time, the distance walked by then and
+        # its clock hour
+        self._guided: tuple[float, float, float] | None = None
         self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
         self.detections: list[dict] = []
         self.sounds: dict[str, tuple[float, float]] = {}  # hazard -> (score, when last heard)
@@ -736,6 +753,53 @@ class Middleware:
         self._decide(now, "way", text, Priority.INFO)
         return text
 
+    def set_destination(self, east: float, north: float, now: float | None = None) -> str:
+        """A place picked on the supervisor's map, in metres east and north of the start: its way
+        is said now, again as the person walks, and "arrived" when they are there."""
+        now = self.clock() if now is None else now
+        self.nav.track.marks[DESTINATION] = (float(east), float(north))
+        return self.say_destination(now, "Destination set. ")
+
+    def clear_destination(self, now: float | None = None) -> None:
+        now = self.clock() if now is None else now
+        if self.nav.track.marks.pop(DESTINATION, None) is not None:
+            self._guided = None
+            self._decide(now, "way", "Destination cleared.", Priority.INFO)
+
+    def say_destination(self, now: float | None = None, lead: str = "") -> str:
+        """Say how far the destination is and its direction, as a clock face."""
+        now = self.clock() if now is None else now
+        track = self.nav.track
+        way = track.way_to(DESTINATION)
+        if way is None:
+            text = "No destination yet. The supervisor picks one on the map."
+        else:
+            text = lead + way_text(way, DESTINATION)
+            self._guided = (now, track.distance_m, _clock_hour(way))
+        self._decide(now, "way", text, Priority.INFO)
+        return text
+
+    def _guide(self, now: float) -> None:
+        """While a destination is set: arrived, or the way again after a stretch of walking, or
+        sooner when it has moved 2 hours round (a turn the wrong way)."""
+        track = self.nav.track
+        way = track.way_to(DESTINATION)
+        if way is None:
+            return
+        if way[0] < ARRIVED_M:
+            track.marks.pop(DESTINATION)
+            self._guided = None
+            self._decide(now, "way", "You have arrived at the destination.", Priority.INFO)
+            return
+        if self._guided is None:
+            self.say_destination(now)
+            return
+        said_t, said_walked, said_hour = self._guided
+        apart = abs(_clock_hour(way) - said_hour) % 12
+        turned = min(apart, 12 - apart) >= 2 and now - said_t >= GUIDE_TURN_GAP_S
+        if turned or track.distance_m - said_walked >= GUIDE_EVERY_M:
+            self.say_destination(now)
+
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
         now = self.clock() if now is None else now
@@ -864,6 +928,9 @@ class Middleware:
         elif "mark" in words and set(words) & {"where", "way", "back", "find"}:
             self.way_back(now)
             found.append("Way back")
+        elif DESTINATION in words and set(words) & {"where", "way", "find", "how"}:
+            self.say_destination(now)
+            found.append("Destination")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )
@@ -1023,6 +1090,7 @@ class Middleware:
                 }
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
+        self._guide(now)
         if self.directions:
             if ahead := direction(self.core, now):
                 self.queue.push(ahead, now)

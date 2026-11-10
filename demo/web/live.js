@@ -218,7 +218,7 @@ const view = { layer: "grid", zoom: 1, panX: 0, panY: 0 };   // zoom 1 fits the 
 try { view.layer = localStorage.getItem("mana.layer") || "grid"; } catch (e) { /* storage off: the grid */ }
 if (!LAYERS[view.layer]) view.layer = "grid";
 const tiles = new Map();   // url -> its Image
-let tilesLoaded = 0, mapKey = "";
+let tilesLoaded = 0, mapKey = "", drawn = null;   // drawn: the last map's scale and centre
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
@@ -267,6 +267,7 @@ function drawMaps(t) {
   set($("stats"), "html",
     "<span>" + icon("footprints") + t.steps + "</span><span>" + icon("person-simple-walk") + t.distance_m.toFixed(1) + " m</span>" +
     (t.heading === null ? "" : "<span>" + icon("compass") + compassWord(t.heading) + "</span>"));
+  $("clearDest").hidden = !(t.marks && t.marks.destination);
   const tiled = view.layer !== "grid";
   set($("credit"), "text", !tiled ? "" : t.origin ? CREDIT[view.layer] : "No GPS fix yet");
 }
@@ -292,6 +293,7 @@ function drawTrack(cv, t) {
   const cx = (view.zoom > 1 ? t.x : (Math.min(...xs) + Math.max(...xs)) / 2) + view.panX;
   const cy = (view.zoom > 1 ? t.y : (Math.min(...ys) + Math.max(...ys)) / 2) + view.panY;
   const X = (x) => w / 2 + (x - cx) * k, Y = (y) => h / 2 - (y - cy) * k;
+  drawn = { w, h, cx, cy, k };
   const tiled = drawTiles(ctx, t, w, h, X(0), Y(0), k);
   const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find((m) => m * k >= 40) || 2000;
   if (!tiled) {
@@ -317,8 +319,9 @@ function drawTrack(cv, t) {
   ctx.font = "600 12px " + css("--body");
   marks.forEach(([name, m]) => {   // marked places
     const mx = X(m[0]), my = Y(m[1]);
-    ctx.fillStyle = css("--stop"); ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx - 7, my - 12); ctx.lineTo(mx + 7, my - 12); ctx.fill();
-    dot(mx, my - 15, 7, css("--stop"), "#fff");
+    const colour = css(name === "destination" ? "--go" : "--stop");
+    ctx.fillStyle = colour; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx - 7, my - 12); ctx.lineTo(mx + 7, my - 12); ctx.fill();
+    dot(mx, my - 15, 7, colour, "#fff");
     ctx.fillStyle = css("--text"); ctx.fillText(name, mx + 11, my - 11);
   });
   const px = X(t.x), py = Y(t.y);
@@ -379,21 +382,27 @@ function build() {
   $("zoomIn").onclick = () => { view.zoom = Math.min(64, view.zoom * 2); redrawMap(); };
   $("zoomOut").onclick = () => { view.zoom = Math.max(1, view.zoom / 2); if (view.zoom === 1) view.panX = view.panY = 0; redrawMap(); };
   $("recentre").onclick = () => { view.panX = view.panY = 0; redrawMap(); };
+  $("clearDest").innerHTML = icon("x");
+  $("clearDest").onclick = () => send({ type: "place", do: "clear" });
   $("map").addEventListener("wheel", (e) => { e.preventDefault(); (e.deltaY < 0 ? $("zoomIn") : $("zoomOut")).click(); }, { passive: false });
+  // drag to move the map; a click (no drag) picks the place the person is guided to
   let drag = null;
-  $("map").onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY }; $("map").setPointerCapture(e.pointerId); };
+  $("map").onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY, moved: 0 }; $("map").setPointerCapture(e.pointerId); };
   $("map").onpointermove = (e) => {
-    if (!drag || !snap) return;
-    const t = snap.position.track, cv = $("map");
-    const pts = t.path.concat([[t.x, t.y]]), xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    const least = view.layer !== "grid" && t.origin ? 60 : 8;
-    const span = Math.max(least, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.3;
-    const k = Math.min(cv.clientWidth, cv.clientHeight) / span * view.zoom;
-    view.panX -= (e.clientX - drag.x) / k; view.panY += (e.clientY - drag.y) / k;
-    drag = { x: e.clientX, y: e.clientY };
+    if (!drag || !drawn) return;
+    drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+    view.panX -= (e.clientX - drag.x) / drawn.k; view.panY += (e.clientY - drag.y) / drawn.k;
+    drag.x = e.clientX; drag.y = e.clientY;
     redrawMap();
   };
-  $("map").onpointerup = () => { drag = null; };
+  $("map").onpointerup = (e) => {
+    if (drag && drag.moved < 6 && drawn) {
+      const r = $("map").getBoundingClientRect(), d = drawn;
+      const x = d.cx + (e.clientX - r.left - d.w / 2) / d.k, y = d.cy - (e.clientY - r.top - d.h / 2) / d.k;
+      send({ type: "place", do: "destination", x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+    }
+    drag = null;
+  };
   $("mapFull").innerHTML = icon("arrows-out");
   const swap = () => {   // the map and the camera change places, as a ground station's video and map do
     const a = $("view"), b = $("mapBox"), mark = document.createElement("i");

@@ -61,13 +61,14 @@
       <ol class="history" id="history" aria-label="What MANA decided last"></ol>
 
       <section class="map card" id="mapBox" aria-label="The path walked">
-        <canvas id="map"></canvas>
+        <canvas id="map" title="Click a place to send the person there"></canvas>
         <div class="stats" id="stats"></div>
         <div class="mapctl top">
           <div class="layers" id="layers" role="group" aria-label="Map layer"></div>
           <button class="mapbtn" id="mapFull" title="Map large"></button>
         </div>
         <div class="mapctl zoom">
+          <button class="mapbtn" id="clearDest" title="Clear the destination" hidden></button>
           <button class="mapbtn" id="recentre" title="Back to the person"></button>
           <div class="stack"><button class="mapbtn" id="zoomIn" title="Zoom in"></button><button class="mapbtn" id="zoomOut" title="Zoom out"></button></div>
         </div>
