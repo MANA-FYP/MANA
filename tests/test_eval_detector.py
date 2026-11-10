@@ -154,3 +154,13 @@ def test_the_near_band_leaves_out_small_boxes_and_what_falls_on_them(tmp_path):
     assert every["objects"] == 2 and every["precision"] == pytest.approx(2 / 3)
     assert close["objects"] == 1 and close["precision"] == 1.0 and close["recall"] == 1.0
     assert "Objects: near (box at least 10% of the frame's height)" in ev.table("x.pt", r)
+
+
+def test_precision_and_recall_at_the_kept_and_the_obstacle_threshold(tmp_path):
+    data = dataset(tmp_path, [("s1", ["1 0.5 0.5 0.4 0.4"]), ("s1", ["1 0.5 0.5 0.4 0.4"])])
+    sees = {0: [("stairs", 0.9, 30, 30, 70, 70)], 1: [("stairs", 0.4, 30, 30, 70, 70)]}
+    r = ev.evaluate(Fake(sees), data, "test", conf=[0.3, 0.5])
+    row = {c["class"]: c for c in r["bands"]["all"]["classes"]}["stairs"]
+    assert row["at"][0.3]["recall"] == 1.0 and row["at"][0.5]["recall"] == 0.5
+    assert row["recall"] == 1.0  # the first threshold
+    assert "| stairs | 2 | 1.00 | 1.00 | 1.00 | 1.00 | 0.50 |" in ev.table("x.pt", r)

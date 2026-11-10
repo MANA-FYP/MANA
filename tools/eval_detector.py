@@ -15,7 +15,9 @@ for it; the others are listed as "not named". A prediction that overlaps a box o
 class (a "person" on a SANPO "rider") is neither right nor wrong and is left out.
 
 For each class: the objects in the test part, AP at IoU 0.5 (all-point, as VOC and Ultralytics
-compute it), and the precision and recall at --conf, the threshold the node uses. For stairs, also
+compute it), and the precision and recall at each --conf: 0.3, the lowest confidence the node
+keeps (and the demo's stairs use), and 0.5, the lowest that becomes an obstacle (the node's
+min_confidence, the core's min_trust). For stairs, at the first of them, also
 the recall per session: the share of each test walk's stairs frames in which a staircase was found,
 averaged over the walks, because neighbouring frames of one walk are near copies. The time per
 frame is the median on this machine, after a warm-up.
@@ -188,21 +190,23 @@ class Tally:
             self.stairs[session][0] += hit
             self.stairs[session][1] += 1
 
-    def rows(self, classes: set[str], conf: float) -> list[dict]:
+    def rows(self, classes: set[str], confs: list[float]) -> list[dict]:
+        """Per class: objects, AP50, and precision and recall at each threshold ("precision" and
+        "recall" alone are at the first)."""
         out = []
         for cls in sorted(classes):
             n = self.positives[cls]
-            at = [r for c, r in self.scored[cls] if c >= conf]
-            tp = sum(at)
-            out.append(
-                {
-                    "class": cls,
-                    "objects": n,
-                    "ap50": average_precision(self.scored[cls], n),
-                    "precision": tp / len(at) if at else float("nan"),
+            row = {"class": cls, "objects": n, "ap50": average_precision(self.scored[cls], n)}
+            row["at"] = {}
+            for conf in confs:
+                kept = [r for c, r in self.scored[cls] if c >= conf]
+                tp = sum(kept)
+                row["at"][conf] = {
+                    "precision": tp / len(kept) if kept else float("nan"),
                     "recall": tp / n if n else float("nan"),
                 }
-            )
+            row.update(row["at"][confs[0]])
+            out.append(row)
         return out
 
     def stairs_by_session(self) -> dict:
@@ -224,12 +228,19 @@ def test_frames(data: Path, part: str):
 
 
 def evaluate(
-    detector, data: Path, part: str, conf: float, limit: int | None = None, min_height: float = 0.0
+    detector,
+    data: Path,
+    part: str,
+    conf: float | list[float],
+    limit: int | None = None,
+    min_height: float = 0.0,
 ) -> dict:
     """Scores over every object, and over the near ones (box at least min_height of the frame's
     height) when min_height is set: what MANA has to react to is near."""
     from PIL import Image
 
+    confs = [conf] if isinstance(conf, int | float) else list(conf)
+    conf = confs[0]  # stairs per walk are counted at the first
     sanpo = json.loads((data / "parts.json").read_text())["names"]
     to_sanpo = mapping(detector.model.names.values(), sanpo)
     classes = set(to_sanpo.values())
@@ -257,7 +268,7 @@ def evaluate(
         for band, tally in tallies.items():
             tally.add(session, preds, truth, classes, conf, bands[band] * image.height)
     result = {
-        "conf": conf,
+        "conf": confs,
         "imgsz": detector.imgsz,
         "frames": frames,
         "not_named": sorted(set(sanpo) - classes),
@@ -265,7 +276,7 @@ def evaluate(
         "bands": {},
     }
     for band, tally in tallies.items():
-        result["bands"][band] = {"classes": tally.rows(classes, conf)}
+        result["bands"][band] = {"classes": tally.rows(classes, confs)}
         if "stairs" in classes:
             result["bands"][band]["stairs"] = tally.stairs_by_session()
     return result
@@ -278,17 +289,22 @@ def table(name: str, r: dict) -> str:
     lines = [
         f"### {name}",
         "",
-        f"{r['frames']} frames, imgsz {r['imgsz']}, precision and recall at conf {r['conf']}, "
+        f"{r['frames']} frames, imgsz {r['imgsz']}, precision (P) and recall (R) at conf "
+        f"{' and '.join(str(c) for c in r['conf'])}, "
         f"{r['ms_per_frame']:.0f} ms per frame on this machine.",
     ]
     for band, b in r["bands"].items():
         lines += ["", f"Objects: {band}", ""]
-        lines += ["| Class | Objects | AP50 | Precision | Recall |", "|---|---:|---:|---:|---:|"]
+        head = "".join(f" P {c} | R {c} |" for c in r["conf"])
+        lines += [
+            f"| Class | Objects | AP50 |{head}",
+            "|---|---:|---:|" + "---:|" * 2 * len(r["conf"]),
+        ]
         for c in b["classes"]:
-            lines.append(
-                f"| {c['class']} | {c['objects']} | {f(c['ap50'])} | "
-                f"{f(c['precision'])} | {f(c['recall'])} |"
+            cells = "".join(
+                f" {f(c['at'][k]['precision'])} | {f(c['at'][k]['recall'])} |" for k in r["conf"]
             )
+            lines.append(f"| {c['class']} | {c['objects']} | {f(c['ap50'])} |{cells}")
         if "stairs" in b:
             s = b["stairs"]
             lines += [
@@ -307,7 +323,13 @@ def main(argv=None) -> int:
     ap.add_argument("--weights", nargs="+", default=["yolo26n.pt"])
     ap.add_argument("--part", default="test")
     ap.add_argument("--imgsz", type=int, default=416)
-    ap.add_argument("--conf", type=float, default=0.3, help="the node's threshold")
+    ap.add_argument(
+        "--conf",
+        type=float,
+        nargs="+",
+        default=[0.3, 0.5],
+        help="thresholds: the node keeps 0.3, and 0.5 becomes an obstacle",
+    )
     ap.add_argument("--limit", type=int, help="score only the first N frames (a quick look)")
     ap.add_argument(
         "--min-height", type=float, default=0.1, help="near band: box height share of the frame"
