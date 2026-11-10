@@ -1,0 +1,183 @@
+<?xml version="1.0"?>
+<!--
+  MANA open test world (#79): a small campus with every hazard, made by mana_sim/campus.py
+  (python -m mana_sim.campus, seed None). Do not edit by hand.
+
+  Steps 0.17 m, curb 0.12 m, entrance ramp 4.8 deg,
+  terrace ramp 7.0 deg, drop 1.0 m, sun 0.9, floor shade 0.0.
+  Heights: street 0, plaza 0.12, building floor 0.63, terrace 1.12.
+
+  Start poses (the chair stands at plaza; the start option of mana_sim.campus picks another):
+    plaza                          x   -2.00  y    2.00  yaw  1.571  ground 0.120
+    street                         x   -4.00  y  -11.00  yaw  1.571  ground 0.000
+    before_curb_cut                x   21.00  y  -11.00  yaw  1.571  ground 0.000
+    before_steps                   x   10.00  y    1.00  yaw  1.571  ground 0.120
+    before_entrance_ramp           x   14.00  y   -3.07  yaw  1.571  ground 0.120
+    lobby                          x   12.00  y    9.00  yaw  1.571  ground 0.630
+    corridor                       x    2.00  y   15.50  yaw  0.000  ground 0.630
+    outside_dark_room              x    8.00  y    9.50  yaw  3.142  ground 0.630
+    hall                           x   18.00  y   21.00  yaw  1.571  ground 0.630
+    behind_building                x   18.00  y   31.00  yaw -1.571  ground 0.120
+    before_terrace_ramp            x  -19.00  y   -5.00  yaw  1.571  ground 0.120
+    terrace                        x  -19.00  y   13.00  yaw  1.571  ground 1.120
+    scenario_level                 x   -2.00  y    2.00  yaw  1.571  ground 0.120
+    scenario_ramp                  x   14.00  y   -3.07  yaw  1.571  ground 0.120
+    scenario_stairs                x   10.00  y    1.00  yaw  1.571  ground 0.120
+    scenario_curb                  x   -4.00  y  -11.00  yaw  1.571  ground 0.000
+    scenario_stop                  x   -2.00  y    2.00  yaw  1.571  ground 0.120
+    scenario_drop                  x  -19.00  y   13.00  yaw  1.571  ground 1.120
+    scenario_manual_drop           x  -19.00  y   13.00  yaw  1.571  ground 1.120
+    scenario_picture               x   -2.00  y    2.00  yaw  1.571  ground 0.120
+    scenario_dark                  x    8.00  y    9.50  yaw  3.142  ground 0.630
+    scenario_imu_lost              x   10.00  y    1.00  yaw  1.571  ground 0.120
+
+  Zones, for the faults (#15) to switch:
+    indoors      x 0 to 24, y 6 to 26
+    dark_room    x 0 to 6, y 6 to 14
+    weak_wifi    x 0 to 24, y 17 to 26
+-->
+<sdf version="1.9">
+  <world name="mana_campus">
+    <physics name="4ms" type="dart">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- the chair's sensors: cameras and lidar need rendering, IMU and GPS do not -->
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-navsat-system" name="gz::sim::systems::NavSat"/>
+
+    <!-- a made-up place, only so that the GPS has a position (as worlds/mana_route.sdf) -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>33.6844</latitude_deg>
+      <longitude_deg>73.0479</longitude_deg>
+      <elevation>540</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+    <gravity>0 0 -9.81</gravity>
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.75 0.85 0.95 1</background>
+      <shadows>true</shadows>
+    </scene>
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 30 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <model name="campus">
+      <static>true</static>
+      <link name="ground">
+        <collision name="street"><pose>0 -11 -0.05 0 0 0</pose><geometry><box><size>70 10 0.1</size></box></geometry></collision>
+        <visual name="street"><pose>0 -11 -0.05 0 0 0</pose><geometry><box><size>70 10 0.1</size></box></geometry><material><ambient>0.256 0.256 0.272 1</ambient><diffuse>0.32 0.32 0.34 1</diffuse></material></visual>
+        <collision name="plaza"><pose>0 14 0.01 0 0 0</pose><geometry><box><size>70 40 0.22</size></box></geometry></collision>
+        <visual name="plaza"><pose>0 14 0.01 0 0 0</pose><geometry><box><size>70 40 0.22</size></box></geometry><material><ambient>0.496 0.48 0.44 1</ambient><diffuse>0.62 0.6 0.55 1</diffuse></material></visual>
+        <visual name="curb_edge"><pose>0 -6.05 0.06 0 0 0</pose><geometry><box><size>70 0.1 0.12</size></box></geometry><material><ambient>0.64 0.64 0.64 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material></visual>
+        <collision name="edge_south"><pose>0 -16.15 0.5 0 0 0</pose><geometry><box><size>70 0.3 1</size></box></geometry></collision>
+        <visual name="edge_south"><pose>0 -16.15 0.5 0 0 0</pose><geometry><box><size>70 0.3 1</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="edge_north"><pose>0 34.15 0.62 0 0 0</pose><geometry><box><size>70 0.3 1</size></box></geometry></collision>
+        <visual name="edge_north"><pose>0 34.15 0.62 0 0 0</pose><geometry><box><size>70 0.3 1</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="edge_west"><pose>-35.15 9 0.56 0 0 0</pose><geometry><box><size>0.3 50 1.12</size></box></geometry></collision>
+        <visual name="edge_west"><pose>-35.15 9 0.56 0 0 0</pose><geometry><box><size>0.3 50 1.12</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="edge_east"><pose>35.15 9 0.56 0 0 0</pose><geometry><box><size>0.3 50 1.12</size></box></geometry></collision>
+        <visual name="edge_east"><pose>35.15 9 0.56 0 0 0</pose><geometry><box><size>0.3 50 1.12</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="building_floor"><pose>12 16 0.375 0 0 0</pose><geometry><box><size>24 20 0.51</size></box></geometry></collision>
+        <visual name="building_floor"><pose>12 16 0.375 0 0 0</pose><geometry><box><size>24 20 0.51</size></box></geometry><material><ambient>0.576 0.544 0.48 1</ambient><diffuse>0.72 0.68 0.6 1</diffuse></material></visual>
+        <collision name="steps_up_1"><pose>10 5.67 0.205 0 0 0</pose><geometry><box><size>4 0.66 0.17</size></box></geometry></collision>
+        <visual name="steps_up_1"><pose>10 5.67 0.205 0 0 0</pose><geometry><box><size>4 0.66 0.17</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="steps_up_2"><pose>10 5.835 0.29 0 0 0</pose><geometry><box><size>4 0.33 0.34</size></box></geometry></collision>
+        <visual name="steps_up_2"><pose>10 5.835 0.29 0 0 0</pose><geometry><box><size>4 0.33 0.34</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="stairs_down_1"><pose>18 26.165 0.29 0 0 0</pose><geometry><box><size>4 0.33 0.34</size></box></geometry></collision>
+        <visual name="stairs_down_1"><pose>18 26.165 0.29 0 0 0</pose><geometry><box><size>4 0.33 0.34</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="stairs_down_2"><pose>18 26.495 0.205 0 0 0</pose><geometry><box><size>4 0.33 0.17</size></box></geometry></collision>
+        <visual name="stairs_down_2"><pose>18 26.495 0.205 0 0 0</pose><geometry><box><size>4 0.33 0.17</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="wall_south_0"><pose>4 6 1.88 0 0 0</pose><geometry><box><size>8 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_south_0"><pose>4 6 1.88 0 0 0</pose><geometry><box><size>8 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_south_1"><pose>20 6 1.88 0 0 0</pose><geometry><box><size>8 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_south_1"><pose>20 6 1.88 0 0 0</pose><geometry><box><size>8 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_north_0"><pose>8 26 1.88 0 0 0</pose><geometry><box><size>16 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_north_0"><pose>8 26 1.88 0 0 0</pose><geometry><box><size>16 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_north_1"><pose>22 26 1.88 0 0 0</pose><geometry><box><size>4 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_north_1"><pose>22 26 1.88 0 0 0</pose><geometry><box><size>4 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_west_0"><pose>0 16 1.88 0 0 0</pose><geometry><box><size>0.2 20 2.5</size></box></geometry></collision>
+        <visual name="wall_west_0"><pose>0 16 1.88 0 0 0</pose><geometry><box><size>0.2 20 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_east_0"><pose>24 16 1.88 0 0 0</pose><geometry><box><size>0.2 20 2.5</size></box></geometry></collision>
+        <visual name="wall_east_0"><pose>24 16 1.88 0 0 0</pose><geometry><box><size>0.2 20 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_dark_room_0"><pose>6 7.5 1.88 0 0 0</pose><geometry><box><size>0.2 3 2.5</size></box></geometry></collision>
+        <visual name="wall_dark_room_0"><pose>6 7.5 1.88 0 0 0</pose><geometry><box><size>0.2 3 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_dark_room_1"><pose>6 12 1.88 0 0 0</pose><geometry><box><size>0.2 4 2.5</size></box></geometry></collision>
+        <visual name="wall_dark_room_1"><pose>6 12 1.88 0 0 0</pose><geometry><box><size>0.2 4 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_dark_corridor_0"><pose>3 14 1.88 0 0 0</pose><geometry><box><size>6 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_dark_corridor_0"><pose>3 14 1.88 0 0 0</pose><geometry><box><size>6 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_room_0"><pose>18 7.5 1.88 0 0 0</pose><geometry><box><size>0.2 3 2.5</size></box></geometry></collision>
+        <visual name="wall_room_0"><pose>18 7.5 1.88 0 0 0</pose><geometry><box><size>0.2 3 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_room_1"><pose>18 12 1.88 0 0 0</pose><geometry><box><size>0.2 4 2.5</size></box></geometry></collision>
+        <visual name="wall_room_1"><pose>18 12 1.88 0 0 0</pose><geometry><box><size>0.2 4 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_room_corridor_0"><pose>21 14 1.88 0 0 0</pose><geometry><box><size>6 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_room_corridor_0"><pose>21 14 1.88 0 0 0</pose><geometry><box><size>6 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_hall_0"><pose>1 17 1.88 0 0 0</pose><geometry><box><size>2 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_hall_0"><pose>1 17 1.88 0 0 0</pose><geometry><box><size>2 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_hall_1"><pose>6.75 17 1.88 0 0 0</pose><geometry><box><size>6.5 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_hall_1"><pose>6.75 17 1.88 0 0 0</pose><geometry><box><size>6.5 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="wall_hall_2"><pose>19 17 1.88 0 0 0</pose><geometry><box><size>10 0.2 2.5</size></box></geometry></collision>
+        <visual name="wall_hall_2"><pose>19 17 1.88 0 0 0</pose><geometry><box><size>10 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="dark_room_roof"><pose>3 10 3.18 0 0 0</pose><geometry><box><size>6 8 0.1</size></box></geometry></collision>
+        <visual name="dark_room_roof"><pose>3 10 3.18 0 0 0</pose><geometry><box><size>6 8 0.1</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="table_room_0"><pose>20.6 8.4 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_room_0"><pose>20.6 8.4 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_room_1"><pose>20.6 11.9 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_room_1"><pose>20.6 11.9 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_room_2"><pose>23.1 8.4 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_room_2"><pose>23.1 8.4 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_hall_0"><pose>3.8 20.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_hall_0"><pose>3.8 20.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="chair_hall_0"><pose>3.75 19.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry></collision>
+        <visual name="chair_hall_0"><pose>3.75 19.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_hall_1"><pose>7.8 20.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_hall_1"><pose>7.8 20.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="chair_hall_1"><pose>7.75 19.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry></collision>
+        <visual name="chair_hall_1"><pose>7.75 19.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_hall_2"><pose>3.8 23.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_hall_2"><pose>3.8 23.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="chair_hall_2"><pose>3.75 22.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry></collision>
+        <visual name="chair_hall_2"><pose>3.75 22.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_hall_3"><pose>7.8 23.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_hall_3"><pose>7.8 23.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="chair_hall_3"><pose>7.75 22.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry></collision>
+        <visual name="chair_hall_3"><pose>7.75 22.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="table_hall_4"><pose>11.8 22.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="table_hall_4"><pose>11.8 22.4 1.005 0 0 0</pose><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="chair_hall_4"><pose>11.75 21.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry></collision>
+        <visual name="chair_hall_4"><pose>11.75 21.65 0.855 0 0 0</pose><geometry><box><size>0.5 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="bench_plaza"><pose>-5 0.25 0.345 0 0 0</pose><geometry><box><size>2 0.5 0.45</size></box></geometry></collision>
+        <visual name="bench_plaza"><pose>-5 0.25 0.345 0 0 0</pose><geometry><box><size>2 0.5 0.45</size></box></geometry><material><ambient>0.4 0.28 0.16 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+        <collision name="planter_plaza"><pose>27 1 0.42 0 0 0</pose><geometry><box><size>2 2 0.6</size></box></geometry></collision>
+        <visual name="planter_plaza"><pose>27 1 0.42 0 0 0</pose><geometry><box><size>2 2 0.6</size></box></geometry><material><ambient>0.24 0.4 0.2 1</ambient><diffuse>0.3 0.5 0.25 1</diffuse></material></visual>
+        <collision name="terrace"><pose>-19 13 0.62 0 0 0</pose><geometry><box><size>14 14 1</size></box></geometry></collision>
+        <visual name="terrace"><pose>-19 13 0.62 0 0 0</pose><geometry><box><size>14 14 1</size></box></geometry><material><ambient>0.496 0.48 0.44 1</ambient><diffuse>0.62 0.6 0.55 1</diffuse></material></visual>
+        <visual name="terrace_edge_stripe"><pose>-19 19.9 1.122 0 0 0</pose><geometry><box><size>14 0.2 0.004</size></box></geometry><material><ambient>0.72 0.08 0.08 1</ambient><diffuse>0.9 0.1 0.1 1</diffuse></material></visual>
+        <collision name="curb_cut"><pose>21 -6.746 0.0102 0.0798 0 0</pose><geometry><box><size>2 1.5048 0.1</size></box></geometry></collision>
+        <visual name="curb_cut"><pose>21 -6.746 0.0102 0.0798 0 0</pose><geometry><box><size>2 1.5048 0.1</size></box></geometry><material><ambient>0.6 0.496 0.2 1</ambient><diffuse>0.75 0.62 0.25 1</diffuse></material></visual>
+        <collision name="entrance_ramp"><pose>14 2.9675 0.3252 0.0838 0 0</pose><geometry><box><size>4 6.0948 0.1</size></box></geometry></collision>
+        <visual name="entrance_ramp"><pose>14 2.9675 0.3252 0.0838 0 0</pose><geometry><box><size>4 6.0948 0.1</size></box></geometry><material><ambient>0.6 0.496 0.2 1</ambient><diffuse>0.75 0.62 0.25 1</diffuse></material></visual>
+        <collision name="terrace_ramp"><pose>-19 1.9339 0.5704 0.1222 0 0</pose><geometry><box><size>4 8.2055 0.1</size></box></geometry></collision>
+        <visual name="terrace_ramp"><pose>-19 1.9339 0.5704 0.1222 0 0</pose><geometry><box><size>4 8.2055 0.1</size></box></geometry><material><ambient>0.6 0.496 0.2 1</ambient><diffuse>0.75 0.62 0.25 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://mana_chair</uri>
+      <name>mana_chair</name>
+      <pose>-2 2 0.5 0 0 1.5708</pose>
+    </include>
+  </world>
+</sdf>
