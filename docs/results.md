@@ -193,6 +193,33 @@ What the runs show:
 
 A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
 
+## The autopilot through MANA (#78)
+
+`tools/autopilot.sh` runs Nav2 in the indoor world, localised by the lidar map (#43). Its commands go through `driver_select` and the host, capped by MANA's decision, the core running. `tools/autopilot_goal.py` sends four goals around the corridor loop: along the south corridor, round the east corner, along the north corridor, and back to the start. Times are simulation seconds; the error is from Gazebo's ground truth. Measured in WSL on 10 November 2026:
+
+| Run | Goal (map frame) | Result | Time | End error | MANA on the way |
+|---|---|---|---|---|---|
+| 1 | 13, 0 | reached | 35.5 s | 0.34 m | 30% of top speed |
+| 1 | 13.9, 6.6 | reached | 20.5 s | 0.23 m | 30%; a stop of 1.6 s, "Obstacle ahead, stopping" |
+| 1 | 7, 7.2 | reached | 23.7 s | 0.17 m | 30%; tracks once, "Wheel slip, changing to tracks" |
+| 1 | 0.5, 0 | reached | 36.6 s | 0.27 m | 30% of top speed |
+| 2 | 13, 0 | reached | 35.4 s | 0.35 m | 30% of top speed |
+| 2 | 13.9, 6.6 | reached | 20.9 s | 0.15 m | 30%; a stop of 1.6 s for an obstacle ahead |
+| 2 | 7, 7.2 | reached | 20.8 s | 0.24 m | 30% of top speed |
+| 2 | 0.5, 0 | **not reached** in 300 s of wall time (91.9 s) | | 0.25 m | 30%; 819 slow-downs for an obstacle ahead in this run, against 268 in run 1 |
+| 3 | 13, 0 | reached | 35.5 s | 0.33 m, 15° | 30% of top speed |
+| 3 | 13.9, 6.6 | reached | 21.0 s | 0.15 m, 2° | 30%; a stop of 1.6 s for an obstacle ahead |
+| 3 | 7, 7.2 | reached | 20.8 s | 0.20 m, 4° | 30% of top speed |
+| 3 | 0.5, 0 | reached | 36.8 s | 0.28 m, 28° | 30% of top speed |
+
+- **11 of the 12 goals were reached,** ending 0.15 to 0.35 m from them. The goal tolerance is 0.35 m and 0.5 rad (29°).
+- **The goal not reached:** in run 2 the chair got to 0.25 m of the last goal, but Nav2 never called it reached. The end heading was not written down then. Run 3 wrote it down: the same goal was reached 28° off, just inside the 29° allowed. So run 2 most likely missed on the heading.
+- **MANA capped Nav2 throughout.** Of the 1,195 drive requests of run 1:
+  - 908 held 30% "waiting for the ground sensors (1 of 2 up: the 3D camera)", since this world runs no camera ground classifier;
+  - 268 slowed for an obstacle ahead;
+  - 16 were stops for an obstacle ahead.
+- **A stop by MANA did not end the goal.** After the 1.6 s stop on the way to the second goal, Nav2 went on and reached it. Its progress checker allows 60 s; a longer stop has not been tried.
+
 ## Camera depth and stairs on real phone frames (#131)
 
 Measured on 9 November 2026 on real iPhone frames from the Hugging Face dataset

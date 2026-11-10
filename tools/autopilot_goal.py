@@ -62,7 +62,9 @@ class Autopilot(Node):
         return False
 
     def on_gt(self, m: Odometry) -> None:
-        self.gt = (m.pose.pose.position.x, m.pose.pose.position.y)
+        q = m.pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        self.gt = (m.pose.pose.position.x, m.pose.pose.position.y, yaw)
 
     def on_request(self, m: DriveRequest) -> None:
         self.requests.append((self.now(), bool(m.stop), float(m.speed_limit), int(m.mode)))
@@ -100,6 +102,12 @@ class Autopilot(Node):
             "result": status,
             "seconds": round(self.now() - start, 1),
             "end_error_m": round(math.hypot(gx - x, gy - y), 2),
+            # the map frame faces as the chair did at the start: +x, as in the world
+            "end_heading_error_deg": round(
+                abs(math.degrees(math.remainder(self.gt[2] - yaw, math.tau)))
+                if self.gt
+                else math.nan
+            ),
             "lowest_speed_limit": round(min((r[2] for r in req if not r[1]), default=math.nan), 2),
             "stop_s": round(stop_s, 1),
             "modes": "".join(sorted({"WT"[r[3]] for r in req if r[3] in (0, 1)})),

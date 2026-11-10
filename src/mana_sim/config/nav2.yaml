@@ -11,7 +11,8 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /odom  # the wheels and the gyro (odom:=wheels)
     bt_loop_duration: 10
-    default_server_timeout: 20
+    default_server_timeout: 1000  # ms: the planner answers late on a busy computer (20 timed out)
+    wait_for_service_timeout: 5000
     navigators: ["navigate_to_pose"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
