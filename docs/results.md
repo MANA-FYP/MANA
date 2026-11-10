@@ -351,3 +351,81 @@ ros2 run mana_core evaluate --world gazebo --rerun       # play again, also thos
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+## Zero-shot detectors on the SANPO test split (#51, #49)
+
+Measured on 10 November 2026 with `tools/eval_detector.py`, on every SANPO test walk that has
+masks (48 of the authors' 141 test sessions), one annotated frame in 10: **2,331 frames**. No
+model was trained on SANPO; this is the baseline that the fine-tuned YOLO26s and YOLOv8s (#49)
+have to beat. Each frame goes through `Detector.detect_image`, the call the ROS node and the phone
+demo make. A box counts as found at IoU 0.5 with a SANPO box of the same class; the model's names
+map to SANPO's by a fixed table (person to pedestrian, car, bus and truck to vehicle, door to
+opening-door, pillar to pole). Precision and recall are given at two thresholds of the node:
+**0.3**, the lowest confidence the detector keeps (and the one the demo's stairs use, #131), and
+**0.5**, the lowest that becomes an obstacle (`min_confidence`, the core's `min_trust`). The
+second is the one that stops the chair.
+Times are the median per frame on an AMD Ryzen 7 7730U laptop CPU (16 GB), with PyTorch 2.15 and
+Ultralytics 8.4.208.
+
+SANPO's boxes come from its masks, so they include objects far down the street a few pixels
+high. MANA reacts to what is near, so **near** keeps only boxes at least 10 % of the frame's
+height (predictions on smaller boxes are left out, as COCO scores its size bands).
+
+Near objects:
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26n, COCO (416, 36 ms) | pedestrian | 2,993 | 0.74 | 0.85 | 0.67 | 0.91 | 0.54 |
+| | vehicle | 1,438 | 0.67 | 0.83 | 0.55 | 0.94 | 0.40 |
+| | stairs, door, pole | | not in COCO | | | | |
+| YOLOE-26n, the demo's 42 names (480, 55 ms) | pedestrian | 2,993 | 0.73 | 0.85 | 0.67 | 0.91 | 0.49 |
+| | vehicle | 1,438 | 0.62 | 0.82 | 0.51 | 0.90 | 0.29 |
+| | stairs | 37 | 0.01 | 0.20 | 0.03 | 0.00 | 0.00 |
+| | opening-door | 175 | 0.01 | 0.00 | 0.00 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.03 | 0.73 | 0.01 | 0.71 | 0.00 |
+| YOLOE-26s, the demo's 42 names (480, 82 ms) | pedestrian | 2,993 | 0.78 | 0.80 | 0.78 | 0.87 | 0.71 |
+| | vehicle | 1,438 | 0.69 | 0.80 | 0.54 | 0.90 | 0.37 |
+| | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.50 | 0.03 |
+| | opening-door | 175 | 0.01 | 0.20 | 0.01 | 0.50 | 0.01 |
+| | pole | 1,942 | 0.02 | 0.62 | 0.01 | 0.50 | 0.00 |
+
+Over every object, far ones included, recall is much lower: people 0.41 to 0.54 at 0.3 and 0.29
+to 0.46 at 0.5, vehicles 0.24 to 0.30 at 0.3 and 0.12 to 0.18 at 0.5. A precision of 0.00 means boxes of that
+class reached the threshold and every one was wrong. The tool prints the full tables, both bands.
+
+**Stairs per walk.** The test split has stairs in only 6 walks (65 frames, 76 staircases; see
+`docs/datasets.md`). Both YOLOE models found stairs in 1 frame of the 65 at confidence 0.3,
+in 1 walk of the 6. Run at confidence 0.01, YOLOE-26s gave no stairs box at all in 58 of the 65
+frames; where it did, near the foot of a staircase that fills the frame, the box was right (IoU
+0.77 to 0.98) but its confidence was 0.02 to 0.67. Many of SANPO's stairs are porch steps far
+off or a single step at the edge of the frame, which MANA does not need, but clear stairs beside
+the path were missed too.
+
+What follows:
+
+- **People near the chair are found zero-shot, but at the obstacle threshold many are missed.**
+  At 0.5, YOLO26n (the node's default) reports about half the people (0.54) and 40 % of the
+  vehicles near the chair, at 91 to 94 % precision. YOLOE-26s reports the most people, 71 %, at
+  87 % precision and 82 ms a frame (about 12 frames a second on this CPU). Lowering the obstacle
+  threshold to 0.3 would catch more (0.67 to 0.78 of people) at 80 to 85 % precision, so more
+  false stops; that is the `min_trust` trade-off of #87 and #175, and it is one frame: on a walk
+  towards a person the detector has many frames to find them in.
+- **Stairs, doors and poles are not found zero-shot on SANPO.** The 6 of 12 stairs YOLOE-26s
+  found on the iPhone frames in #131 were chosen with the stairs straight ahead; SANPO's walks are
+  the harder, everyday case. Stairs must come from fine-tuning (#49, 45 training walks with
+  stairs) and from the 3D camera, as the two-source rule already requires. SANPO's
+  "opening-door" boxes are ordinary doors, closed ones too (checked by eye on four frames: shop
+  doors, a glass door), so the door misses are real misses: doors set into a shop front at the side
+  of the path, where the model sees a wall or a window.
+- **Six walks are too few for a stairs figure against the 0.85 target**, before or after
+  fine-tuning. Stairs from our own recordings (#89) are needed for that.
+
+Run it:
+
+```
+python3 tools/fetch_sanpo.py --root datasets/sanpo-eval --train 6 --test -1 --every 10 --workers 16
+python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-eval-yolo --val 0.5
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --weights yolo26n.pt --imgsz 416
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --imgsz 480 \
+    --weights yoloe-26n-mana.pt yoloe-26s-mana.pt   # built with demo/build_detector.py
+```
