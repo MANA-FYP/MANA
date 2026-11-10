@@ -1,6 +1,7 @@
 """BC-ResNet for the command words (#46): the model's size against the paper, its input and
 output, and the training data helpers on a tiny made-up Speech Commands folder."""
 
+import importlib.util
 import sys
 import wave
 from pathlib import Path
@@ -8,15 +9,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-torch = pytest.importorskip("torch")
-pytest.importorskip("torchaudio")
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-import train_commands as tc  # noqa: E402
+# A mark, not pytest.importorskip at module level: in CI, ROS's launch_testing plugin imports each
+# test module itself, and a skip raised there skipped the whole session (0 tests collected).
+HAVE = all(importlib.util.find_spec(m) for m in ("torch", "torchaudio"))
+pytestmark = pytest.mark.skipif(not HAVE, reason="needs torch and torchaudio")
+if HAVE:
+    import torch
+    import train_commands as tc
 
-from demo import kws  # noqa: E402
+    from demo import kws
 
 
 @pytest.mark.parametrize(("tau", "params"), [(1, 9_232), (8, 321_068)])
