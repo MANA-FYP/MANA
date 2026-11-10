@@ -206,14 +206,14 @@ A jump of a metre that the wheels did not make is what the EKF of D2 can refuse 
 | 2 | 13, 0 | reached | 35.4 s | 0.35 m | 30% of top speed |
 | 2 | 13.9, 6.6 | reached | 20.9 s | 0.15 m | 30%; a stop of 1.6 s for an obstacle ahead |
 | 2 | 7, 7.2 | reached | 20.8 s | 0.24 m | 30% of top speed |
-| 2 | 0.5, 0 | **not reached** in 300 s of wall time (91.9 s) | | 0.25 m | 30%; 819 slow-downs for an obstacle ahead in this run, against 268 in run 1 |
+| 2 | 0.5, 0 | reached by the controller, but **not reported**: the script gave up after 300 s of wall time (91.9 s) | | 0.25 m | 30%; 819 slow-downs for an obstacle ahead in this run, against 268 in run 1 |
 | 3 | 13, 0 | reached | 35.5 s | 0.33 m, 15° | 30% of top speed |
 | 3 | 13.9, 6.6 | reached | 21.0 s | 0.15 m, 2° | 30%; a stop of 1.6 s for an obstacle ahead |
 | 3 | 7, 7.2 | reached | 20.8 s | 0.20 m, 4° | 30% of top speed |
 | 3 | 0.5, 0 | reached | 36.8 s | 0.28 m, 28° | 30% of top speed |
 
-- **11 of the 12 goals were reached,** ending 0.15 to 0.35 m from them. The goal tolerance is 0.35 m and 0.5 rad (29°).
-- **The goal not reached:** in run 2 the chair got to 0.25 m of the last goal, but Nav2 never called it reached. The end heading was not written down then. Run 3 wrote it down: the same goal was reached 28° off, just inside the 29° allowed. So run 2 most likely missed on the heading.
+- **Nav2's controller reached all 12 goals, and 11 came back as reached,** ending 0.15 to 0.35 m from them. The goal tolerance is 0.35 m and 0.5 rad (29°).
+- **The goal not reported:** in run 2 the controller logged "Reached the goal!" for the last goal 152 s of wall time after it was sent, and its goal checker covers the heading too. The navigator never logged the goal as succeeded, so the script waited out its 300 s and wrote it down as timed out, the chair 0.25 m from the goal. Why that result never reached the navigator is not known yet. It did for the other 11 goals.
 - **MANA capped Nav2 throughout.** Of the 1,195 drive requests of run 1:
   - 908 held 30% "waiting for the ground sensors (1 of 2 up: the 3D camera)", since this world runs no camera ground classifier;
   - 268 slowed for an obstacle ahead;
