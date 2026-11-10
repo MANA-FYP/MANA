@@ -43,9 +43,10 @@ def read_wav(path: Path) -> np.ndarray:
         return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
 
 
-def test_clips(sc: Path) -> list[tuple[str, Path]]:
-    """(label, path) of every clip in the test list."""
-    lines = (sc / "testing_list.txt").read_text().split()
+def test_clips(sc: Path, listed: str = "testing_list.txt") -> list[tuple[str, Path]]:
+    """(label, path) of every clip in the test list (or the validation list, to choose a
+    threshold on clips the result is not reported on)."""
+    lines = (sc / listed).read_text().split()
     return [(line.split("/")[0], sc / line) for line in lines]
 
 
@@ -123,11 +124,13 @@ def kws_listener(checkpoint: Path, threshold: float):
     return listen
 
 
-def run(sc: Path, listen, snr: float | None, seed: int = 0) -> list[dict]:
+def run(
+    sc: Path, listen, snr: float | None, seed: int = 0, listed: str = "testing_list.txt"
+) -> list[dict]:
     rng = random.Random(seed)  # the same noise for every recogniser
     noises = [read_wav(p) for p in sorted((sc / "_background_noise_").glob("*.wav"))]
     rows = []
-    for i, (label, path) in enumerate(test_clips(sc)):
+    for i, (label, path) in enumerate(test_clips(sc, listed)):
         clip = read_wav(path)
         if snr is not None:
             noise = rng.choice(noises)
@@ -160,6 +163,8 @@ def main(argv=None) -> int:
     p.add_argument("--snr", type=float, nargs="*", default=[20.0, 10.0, 5.0, 0.0],
                    help="noise levels to test, besides clean (dB)")  # fmt: skip
     p.add_argument("--out", type=Path, default=None, help="where the per-clip CSVs go")
+    p.add_argument("--list", default="testing_list.txt",
+                   help="testing_list.txt, or validation_list.txt for a threshold")  # fmt: skip
     a = p.parse_args(argv)
     out = a.out or a.sc
     if a.vosk:
@@ -170,8 +175,9 @@ def main(argv=None) -> int:
     print("|---|---|---|---|---|---|---|")
     for snr in [None, *a.snr]:
         name = "clean" if snr is None else f"snr{snr:g}"
-        rows = run(a.sc, listen, snr)
-        with open(out / f"{prefix}_{name}.csv", "w", newline="") as f:
+        rows = run(a.sc, listen, snr, listed=a.list)
+        part = "" if a.list == "testing_list.txt" else "val_"
+        with open(out / f"{part}{prefix}_{name}.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
