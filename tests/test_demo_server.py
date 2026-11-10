@@ -414,3 +414,22 @@ def test_the_live_page_and_its_scripts_are_served_and_the_root_opens_it():
             await client.close()
 
     run(go())
+
+
+def test_a_destination_picked_on_the_map_is_checked_kept_and_cleared():
+    from demo.server import metres
+
+    assert metres(3, -4.5) == (3.0, -4.5)
+    for bad in [("3", 4), (True, 0), (float("nan"), 0), (float("inf"), 0), (None, 1), (30_000, 0)]:
+        assert metres(*bad) is None
+
+    async def go(client, phone, dash):
+        await dash.send_json({"type": "place", "do": "destination", "x": "north", "y": 1})
+        await dash.send_json({"type": "place", "do": "destination", "x": 12.5, "y": -3})
+        s = await snapshot_where(dash, lambda s: "destination" in s["position"]["track"]["marks"])
+        assert s["position"]["track"]["marks"]["destination"] == [12.5, -3.0]
+        assert any(e["text"].startswith("Destination set.") for e in s["decisions"])
+        await dash.send_json({"type": "place", "do": "clear"})
+        await snapshot_where(dash, lambda s: not s["position"]["track"]["marks"])
+
+    run(with_clients(go))

@@ -285,6 +285,14 @@ not a turn. Without a compass it gives compass directions. If the path back to t
 longer kept (a very long walk), it gives the straight line instead: "The mark is 14 metres away,
 at 6 o'clock." The mark shows as a flag on the path.
 
+**A destination picked on the map.** On the live page, click a place on the map (a drag still
+moves the map). A green flag marks it, and the phone says "Destination set. The destination is
+30 metres away, at 12 o'clock." It says the way again after each 15 m walked, and sooner (but no
+more than once in 10 s) when the direction moves two hours round, as after a wrong turn. Within
+3 m it says "You have arrived at the destination." and clears it. Say "where is the destination"
+to hear it at any time; the X on the map clears it. It is the straight line, not a route: streets
+and walls are not known.
+
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
 fix, otherwise in metres from the start (it says so).
