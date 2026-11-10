@@ -586,9 +586,9 @@ def test_the_stairs_window_uses_the_cameras_distance_not_the_cores_from_the_fron
     app = build_app(mw, mount=MOUNT)
     stairs_seen(app, [stairs_box(300)], 480, 360, mw.clock())
     from_camera = dz.floor_at(MOUNT.camera(480, 360, PITCH), 300)
-    assert app["stairs"].distance_m == pytest.approx(from_camera, abs=0.05)
+    assert app["live"]["stairs"].distance_m == pytest.approx(from_camera, abs=0.05)
     assert mw.core.ground[Source.DETECTOR].distance_m == pytest.approx(from_camera - 0.12, abs=0.05)
     # a riser 1.45 m past where the stairs start, from the camera: inside the window
-    assert the_stairs(app["stairs"], from_camera + 1.45, mw.clock())
+    assert the_stairs(app["live"]["stairs"], from_camera + 1.45, mw.clock())
     # the core's copy, 0.12 m less, would have put it outside: an obstacle, as before this change
     assert not the_stairs(mw.core.ground[Source.DETECTOR], from_camera + 1.45, mw.clock())

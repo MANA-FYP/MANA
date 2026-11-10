@@ -77,7 +77,7 @@ def test_a_video_file_reaches_the_server_like_the_phone_camera(tmp_path):
             url = str(server.make_url("")).rstrip("/")
             sent = await camera.stream(url, camera.open_source(str(path)), 30.0, fps=50)
             for _ in range(40):  # the server's loop makes the snapshot a few times a second
-                snap = app["snapshot"]
+                snap = app["live"]["snapshot"]
                 if (
                     snap
                     and next(s for s in snap["sensors"] if s["id"] == "camera")["state"] == "active"

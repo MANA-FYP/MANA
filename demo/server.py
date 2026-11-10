@@ -116,15 +116,21 @@ def build_app(
     app["depth_ground"] = depth_ground
     app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
-    app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
+    # what changes while the server runs lives in these dicts: aiohttp deprecates setting the
+    # app's own keys once it has started
+    app["live"] = {
+        "audio_rate": 48000,
+        "busy": False,
+        "phone_seen": None,
+        "snapshot": None,  # the last tick's state, for /api/status
+        "stairs": None,  # the detector's last stairs, measured from the camera (#159)
+    }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
-    app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
     )
-    app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
     app.router.add_get("/live", live_page)
@@ -416,8 +422,8 @@ def the_stairs(report, ahead_m: float, now: float) -> bool:
     from where they start to STAIRS_RISE_M past it. Not an obstacle, so the stairs rule handles
     them; something nearer than the stairs, or further past them, still is. Stairs without a
     distance (no tilt) cannot be placed, and the obstacle stays. Both distances are from the
-    camera: the report is the one the server made (app["stairs"]), not the core's copy, which
-    counts from the device's front (Waqas, #160)."""
+    camera: the report is the one the server made (app["live"]["stairs"]), not the core's copy,
+    which counts from the device's front (Waqas, #160)."""
     return (
         report is not None
         and report.ground == Ground.STAIRS_UP
@@ -441,7 +447,9 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
     stamp = mw.clock()
-    app["stairs"] = GroundReport(stamp, box.confidence, Source.DETECTOR, Ground(ground), distance)
+    app["live"]["stairs"] = GroundReport(
+        stamp, box.confidence, Source.DETECTOR, Ground(ground), distance
+    )
     mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
@@ -493,7 +501,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     r = seen.reading
     if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
-    stairs = seen.ahead_m is not None and the_stairs(app["stairs"], seen.ahead_m, now)
+    stairs = seen.ahead_m is not None and the_stairs(app["live"]["stairs"], seen.ahead_m, now)
     if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     d = app["depth"]
@@ -576,9 +584,10 @@ async def ws_caregiver(request: web.Request) -> web.WebSocketResponse:
 async def status(request: web.Request) -> web.Response:
     """The caregiver's status once, as JSON, from the last tick (it does not tick the core)."""
     app = request.app
-    if app["snapshot"] is None:
+    snap = app["live"]["snapshot"]
+    if snap is None:
         raise web.HTTPServiceUnavailable(text="starting up")
-    return web.json_response(caregiver_view(app, app["snapshot"]))
+    return web.json_response(caregiver_view(app, snap))
 
 
 async def frame_jpg(request: web.Request) -> web.Response:
@@ -623,7 +632,7 @@ async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
     snap["models"] = models_status(app)
-    app["snapshot"] = snap
+    app["live"]["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
     snap["depth"] = app["depth"].get("view")
