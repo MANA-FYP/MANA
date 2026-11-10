@@ -433,3 +433,16 @@ def test_a_destination_picked_on_the_map_is_checked_kept_and_cleared():
         await snapshot_where(dash, lambda s: not s["position"]["track"]["marks"])
 
     run(with_clients(go))
+
+
+def test_the_live_page_starts_the_walk_again():
+    async def go(client, phone, dash):
+        await dash.send_json({"type": "place", "do": "mark"})
+        await dash.send_json({"type": "place", "do": "destination", "x": 5, "y": 5})
+        await snapshot_where(dash, lambda s: len(s["position"]["track"]["marks"]) == 2)
+        await dash.send_json({"type": "place", "do": "restart"})
+        s = await snapshot_where(dash, lambda s: not s["position"]["track"]["marks"])
+        assert any(e["text"] == "Starting again from here." for e in s["decisions"])
+        assert not any(e["text"].startswith("Destination set") for e in s["decisions"])
+
+    run(with_clients(go))
