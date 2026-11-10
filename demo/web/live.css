@@ -87,6 +87,10 @@ button { font: inherit; color: inherit; }
 .ahead[data-level="stop"] { border-color: var(--stop); } .ahead[data-level="stop"] .n { color: var(--stop-ink); }
 .ahead[data-level="slow"] { border-color: var(--slow); } .ahead[data-level="slow"] .n { color: var(--slow-ink); }
 .ahead[data-level="info"] { border-color: var(--info); } .ahead[data-level="info"] .n { color: var(--info); }
+.heardsound { position: absolute; right: 14px; top: 14px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-radius: 12px; background: var(--slow-tint); color: var(--slow-ink); border: 1px solid var(--slow-line); box-shadow: var(--float);
+  font: 700 1.15rem/1 var(--display); }
+.heardsound .ico { width: 22px; height: 22px; }
 .depth { position: absolute; right: 14px; bottom: 66px; width: clamp(130px, 17%, 230px); margin: 0; border-radius: 12px; overflow: hidden;
   border: 3px solid #fff; box-shadow: var(--float); cursor: pointer; }
 .depth img { display: block; width: 100%; }
@@ -213,5 +217,6 @@ button { font: inherit; color: inherit; }
   .side > .card { order: 5; min-height: 300px; }
   .caption { font-size: 1.02rem; }
   .depth { width: 26%; top: 14px; bottom: auto; }
+  .heardsound { right: auto; left: 14px; top: 76px; }
   .history li:nth-child(n + 4) { display: none; }
 }

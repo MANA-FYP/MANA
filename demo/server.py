@@ -44,10 +44,20 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
+import numpy as np  # noqa: E402
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E402
 
-from demo import access, caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
+from demo import (  # noqa: E402
+    access,
+    caregiver,
+    navigation,
+    recording,
+    sounds,
+    speech,
+    tiles,
+    vision,
+)
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -90,12 +100,14 @@ def build_app(
     recorder=None,
     tile_cache=None,
     key=None,
+    listener=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=checks)
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
+    app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -104,15 +116,21 @@ def build_app(
     app["depth_ground"] = depth_ground
     app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
-    app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
+    # what changes while the server runs lives in these dicts: aiohttp deprecates setting the
+    # app's own keys once it has started
+    app["live"] = {
+        "audio_rate": 48000,
+        "busy": False,
+        "phone_seen": None,
+        "snapshot": None,  # the last tick's state, for /api/status
+        "stairs": None,  # the detector's last stairs, measured from the camera (#159)
+    }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
-    app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
     )
-    app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
     app.router.add_get("/live", live_page)
@@ -261,10 +279,30 @@ async def on_binary(app: web.Application, data: bytes) -> None:
         samples = array("f")
         samples.frombytes(payload[: len(payload) // 4 * 4])
         mw.on_microphone(now)
+        hear(app, samples, now)
         if app["recognizer"] is not None:
             pcm = speech.to_pcm16_16k(list(samples), app["live"]["audio_rate"])
             for word, confidence in app["recognizer"].feed(pcm):
                 mw.on_word(word, confidence, now)
+
+
+def hear(app: web.Application, samples, now: float) -> None:
+    """Keep the sound, and once a second score the last 10 s for sirens and horns, off the loop."""
+    listener = app["listener"]
+    if listener is None:
+        return
+    listener.feed(np.frombuffer(samples, dtype=np.float32), app["live"]["audio_rate"])
+    if listener.due(now) and not app["live"].get("hearing"):
+        app["live"]["hearing"] = True
+        asyncio.get_running_loop().create_task(hear_task(app, now))
+
+
+async def hear_task(app: web.Application, now: float) -> None:
+    try:
+        heard = await asyncio.get_running_loop().run_in_executor(None, app["listener"].hear, now)
+        app["mw"].on_sounds(heard)
+    finally:
+        app["live"]["hearing"] = False
 
 
 async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
@@ -384,8 +422,8 @@ def the_stairs(report, ahead_m: float, now: float) -> bool:
     from where they start to STAIRS_RISE_M past it. Not an obstacle, so the stairs rule handles
     them; something nearer than the stairs, or further past them, still is. Stairs without a
     distance (no tilt) cannot be placed, and the obstacle stays. Both distances are from the
-    camera: the report is the one the server made (app["stairs"]), not the core's copy, which
-    counts from the device's front (Waqas, #160)."""
+    camera: the report is the one the server made (app["live"]["stairs"]), not the core's copy,
+    which counts from the device's front (Waqas, #160)."""
     return (
         report is not None
         and report.ground == Ground.STAIRS_UP
@@ -409,7 +447,9 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
     stamp = mw.clock()
-    app["stairs"] = GroundReport(stamp, box.confidence, Source.DETECTOR, Ground(ground), distance)
+    app["live"]["stairs"] = GroundReport(
+        stamp, box.confidence, Source.DETECTOR, Ground(ground), distance
+    )
     mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
@@ -461,7 +501,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     r = seen.reading
     if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
-    stairs = seen.ahead_m is not None and the_stairs(app["stairs"], seen.ahead_m, now)
+    stairs = seen.ahead_m is not None and the_stairs(app["live"]["stairs"], seen.ahead_m, now)
     if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     d = app["depth"]
@@ -544,9 +584,10 @@ async def ws_caregiver(request: web.Request) -> web.WebSocketResponse:
 async def status(request: web.Request) -> web.Response:
     """The caregiver's status once, as JSON, from the last tick (it does not tick the core)."""
     app = request.app
-    if app["snapshot"] is None:
+    snap = app["live"]["snapshot"]
+    if snap is None:
         raise web.HTTPServiceUnavailable(text="starting up")
-    return web.json_response(caregiver_view(app, app["snapshot"]))
+    return web.json_response(caregiver_view(app, snap))
 
 
 async def frame_jpg(request: web.Request) -> web.Response:
@@ -583,6 +624,7 @@ def models_status(app: web.Application) -> dict:
         "classifier": app["classifier"] is not None,
         "speech": app["recognizer"] is not None,
         "depth": app["depth_model"] is not None,
+        "sounds": app["listener"] is not None,
     }
 
 
@@ -590,7 +632,7 @@ async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
     snap["models"] = models_status(app)
-    app["snapshot"] = snap
+    app["live"]["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
     snap["depth"] = app["depth"].get("view")
@@ -644,6 +686,8 @@ def main(argv=None) -> None:
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--sounds", metavar="EFFICIENTAT",
+                   help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
     p.add_argument("--depth-size", type=int, default=266, help="depth model input; 518 is finer")
@@ -675,6 +719,7 @@ def main(argv=None) -> None:
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
+    listener = sounds.Listener(sounds.load(a.sounds)) if a.sounds else None
     mount = dz.Mount(a.camera_height, a.camera_fov)
     key = access.load_or_make()  # the server can drive the device: no answer without it
     app = build_app(
@@ -688,6 +733,7 @@ def main(argv=None) -> None:
         recorder=recorder,
         tile_cache=tiles.TileCache(a.tile_cache),
         key=key,
+        listener=listener,
     )
     if a.record:
         print(f"recording the phone into {a.record}")

@@ -354,6 +354,7 @@ The server starts without any model and says which ones are missing.
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
 | Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included**: train one on StairNet with `tools/train_ground.py` (#38). |
+| Sirens and horns | `pip install torch torchvision torchaudio`, a checkout of [EfficientAT](https://github.com/fschmid56/EfficientAT) with `resources/mn10_as_mAP_471.pt`, then `--sounds <checkout>` | a siren or a horn in the last 10 s of the phone's microphone, said once and shown on the live page. On UrbanSound8K: sirens F1 0.86, horns F1 0.74 (docs/results.md, #47) |
 | Depth from the camera | `pip install torch transformers`, then `--depth` | distances in metres from the camera image, and where stairs the detector sees are and which way they go (see above) |
 
 ## Known limits
