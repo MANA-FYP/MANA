@@ -157,7 +157,7 @@ Not tested in this world: the switch from GPS to the lidar map, which needs the 
 
 ### GPS to the lidar map (#42)
 
-`tools/gps_lidar_switch.sh` tests that switch in the indoor world, with a GPS added (the NavSat system and a place on the earth, as in `mana_route.sdf`). It uses wheel odometry, slam_toolbox localising on a saved map, and the lidar gate of #43. The chair drives one lap of the corridor loop while `fault_script` drops the GPS twice for 30 s (`gps_two_outages`). `mana_sim.switching` scores the position node's reports. The source must leave GPS within 2 s of each loss and change at most twice per outage (away and back). Measured in WSL on 10 November 2026, with the map from #43:
+`tools/gps_lidar_switch.sh` tests that switch in the indoor world, with a GPS added (the NavSat system and a place on the earth, as in `mana_route.sdf`). It uses wheel odometry, slam_toolbox localising on a saved map, and the lidar gate of #43. The chair drives one lap of the corridor loop while `fault_script` drops the GPS twice for 30 s (`gps_two_outages`). `mana_sim.switching` scores the position node's reports. The source must leave GPS within 2 s of each loss and change at most twice per outage (away and back). Measured in WSL on 10 November 2026, with the map from #43; 7 of 8 runs pass:
 
 | Run | Outage 1: left GPS after / changes / GPS back after its end | Outage 2 | Result |
 |---|---|---|---|
@@ -165,9 +165,13 @@ Not tested in this world: the switch from GPS to the lidar map, which needs the 
 | 2 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
 | 3 | 1.6 s / 2 / 5.3 s | 1.5 s / 2 / 5.2 s | pass |
 | 4 | 1.4 s / 2 / 5.3 s | 1.4 s / 2 / 5.3 s | pass |
+| 5 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.1 s | pass |
+| 6 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
+| 7 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.3 s | pass |
+| 8 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
 
-- **Leaving GPS:** 1.4 to 1.6 s after each loss. That is the position node's 1.5 s, timed from the last good fix.
-- **Coming back:** 5.2 to 5.3 s after each outage ended, its `back_s` of 5 s.
+- **Leaving GPS:** 1.4 to 1.6 s after each loss, in all 16 outages. That is the position node's 1.5 s, timed from the last good fix.
+- **Coming back:** 5.1 to 5.3 s after each outage ended, its `back_s` of 5 s.
 - **The failure in run 1:** the extra two changes were not in the outage. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
 - **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Runs 1, 3 and 4 all ran alongside other CPU-heavy jobs on the laptop, so load alone does not explain it.
 
