@@ -229,6 +229,29 @@ percent **too far**, the unsafe side):
 - The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
   that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
 
+## Offline command words on Speech Commands (#46)
+
+`tools/command_words.py` tests a recogniser on the 11,005 test clips of Speech Commands v2 (`testing_list.txt`). Each clip is 1 s of one spoken word.
+- 4,074 clips are one of the ten command words. Each is right, wrong (another command word) or missed (no command word).
+- The other 6,931 are the dataset's 25 other words (bed, bird, two, nine, ...). If one of these gives a command word, that is a false activation: the device would act on a word not said to it.
+- Every clip is tested clean, and with the dataset's own background noise mixed in at 20, 10, 5 and 0 dB below the speech (white and pink noise, a tap, an exercise bike, dishes, a cat), with a fixed seed.
+
+**Vosk** (`vosk-model-small-en-us-0.15`) is the demo's offline recogniser (`--vosk-model`), limited to the ten words plus "[unk]". Each clip is given as the demo gives sound (16 kHz, 16-bit), with 0.3 s of silence after it. Measured on 10 November 2026:
+
+| Sound | Right | Wrong | Missed | False activations (of 6,931) | of which "go" |
+|---|---|---|---|---|---|
+| clean | 97.2% (3,960) | 0.9% | 1.9% | 10.8% (750) | 195 |
+| noise at 20 dB | 95.3% | 2.0% | 2.6% | 13.1% (907) | 192 |
+| noise at 10 dB | 90.5% | 3.6% | 5.8% | 17.6% (1,221) | 266 |
+| noise at 5 dB | 85.0% | 4.6% | 10.4% | 18.9% (1,307) | 264 |
+
+- **The ten words are recognised well when clean** (97.2%), but not to the 95% of #46 at 10 dB of noise or worse.
+- **Other words are often heard as commands.** A grammar of only ten words has to fit everything into them. On the clean clips, the most common were "nine" heard as "no" (122), "one" as "on" (82), "two" as "go" (79) and "dog" as "down" (66). "Go" starts the device, so this matters most.
+- **A confidence threshold does not fix it.** Vosk gave a confidence of 1.0 to 4,168 of the 4,746 clean clips on which it heard a word. Acting only on 0.9 or more keeps 94.8% right and still leaves 4.5% false activations.
+- **Time:** a median of 46 to 88 ms per clip on this laptop's CPU.
+
+So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
