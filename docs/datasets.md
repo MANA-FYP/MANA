@@ -59,7 +59,7 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
   | opening-door | 46 (34) | 0 |
   | **stairs** | **61 (61)** | **7 (7)** |
 
-  **Stairs are rare.** Seven stairs in the test split is far too few to report a stairs recall against the 0.85 target with any confidence: one miss moves it by 14 points. So we scanned the masks of every session (10 November 2026, one annotated frame in 10, 11,383 masks, about 190 MB):
+  **Stairs are rare.** Seven stairs in the default subset's test sessions is far too few to report a stairs recall against the 0.85 target with any confidence: one miss moves it by 14 points. So we scanned the masks of every session (10 November 2026, one annotated frame in 10, 11,383 masks, about 190 MB):
 
   ```
   python3 tools/fetch_sanpo.py --root datasets/sanpo-masks --train -1 --test -1 --every 10 \
