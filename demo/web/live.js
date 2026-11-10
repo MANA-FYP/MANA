@@ -382,6 +382,12 @@ function build() {
   $("zoomIn").onclick = () => { view.zoom = Math.min(64, view.zoom * 2); redrawMap(); };
   $("zoomOut").onclick = () => { view.zoom = Math.max(1, view.zoom / 2); if (view.zoom === 1) view.panX = view.panY = 0; redrawMap(); };
   $("recentre").onclick = () => { view.panX = view.panY = 0; redrawMap(); };
+  $("restart").innerHTML = icon("arrow-counter-clockwise");
+  $("restart").onclick = () => {
+    if (!confirm("Start again from here? The path, the marks and the messages are cleared.")) return;
+    view.zoom = 1; view.panX = view.panY = 0;
+    send({ type: "place", do: "restart" });
+  };
   $("clearDest").innerHTML = icon("x");
   $("clearDest").onclick = () => send({ type: "place", do: "clear" });
   $("map").addEventListener("wheel", (e) => { e.preventDefault(); (e.deltaY < 0 ? $("zoomIn") : $("zoomOut")).click(); }, { passive: false });

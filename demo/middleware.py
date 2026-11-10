@@ -800,6 +800,19 @@ class Middleware:
         if turned or track.distance_m - said_walked >= GUIDE_EVERY_M:
             self.say_destination(now)
 
+    def start_again(self, now: float | None = None) -> None:
+        """Forget the walk so far: the path, the steps, the marks and the destination, and what was
+        said and decided. The track starts again where the person is now, tied to the map at the
+        next GPS fix. The sensors, the core and the link are kept."""
+        now = self.clock() if now is None else now
+        self.nav = Navigator()
+        self._guided = None
+        for kept in (self.decisions, self.heard, self.log, self.inputs):
+            kept.clear()
+        self._said_at.clear()
+        self._decision_key = None  # the current decision is written again, at the top
+        self._decide(now, "way", "Starting again from here.", Priority.INFO)
+
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
         now = self.clock() if now is None else now

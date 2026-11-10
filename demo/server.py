@@ -568,6 +568,8 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                     app["mw"].set_destination(*where)
             elif d.get("type") == "place" and d.get("do") == "clear":
                 app["mw"].clear_destination()
+            elif d.get("type") == "place" and d.get("do") == "restart":
+                app["mw"].start_again()
     finally:
         app["dashboards"].discard(ws)
     return ws

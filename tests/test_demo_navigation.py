@@ -622,3 +622,23 @@ def test_asking_for_the_destination_and_clearing_it():
     assert said_ways(mw)[-1] == "Destination cleared." and "destination" not in mw.nav.track.marks
     mw.tick(5.0)
     assert len(said_ways(mw)) == 4  # nothing more once cleared
+
+
+def test_starting_again_forgets_the_walk_and_counts_from_here():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.track.mark()
+    walk_legs(mw.nav, [(0, 20)])
+    mw.set_destination(0.0, 40.0, now=12.0)
+    mw.tick(12.5)
+    assert mw.nav.track.steps == 20 and mw.decisions
+    mw.start_again(now=13.0)
+    v = mw.nav.view(13.0)
+    assert (v["steps"], v["distance_m"], v["marks"], v["x"], v["y"]) == (0, 0.0, {}, 0.0, 0.0)
+    assert [d["text"] for d in mw.decisions] == ["Starting again from here."]
+    assert not mw.heard and not mw.inputs
+    mw.tick(14.0)  # the current decision is written again, and no way to the old destination
+    assert [d["kind"] for d in mw.decisions][-1] == "decision"
+    walk_legs(mw.nav, [(90, 10)], t0=14.0)
+    assert mw.nav.view(30.0)["x"] == pytest.approx(7.0, abs=0.01)  # 7 m east of the new start
