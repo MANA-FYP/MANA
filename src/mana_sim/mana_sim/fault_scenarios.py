@@ -52,6 +52,14 @@ FAULT_SCENARIOS = {
             on_off("gps", "dropout"),
         ),
         FaultScenario(
+            "gps_two_outages",
+            "The GPS is lost twice for 30 s, 30 s apart (#42).",
+            "Each time the position source switches to the lidar map within 2 s, once, and back to "
+            "GPS once it has been good for back_s.",
+            on_off("gps", "dropout", on_s=25.0, off_s=55.0)
+            + on_off("gps", "dropout", on_s=85.0, off_s=115.0),
+        ),
+        FaultScenario(
             "wifi_fade",
             "The Wi-Fi link fades to nothing in 10 s.",
             "The Wi-Fi link is reported gone and the alerts change to Bluetooth. MANA does not "
