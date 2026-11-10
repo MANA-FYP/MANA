@@ -48,6 +48,7 @@ setup(
             "driver_select = mana_sim.driver_select_node:main",
             "keyboard = mana_sim.keyboard_node:main",
             "panel_node = mana_sim.panel_node:main",
+            "zone_node = mana_sim.zone_node:main",
         ]
     },
 )
