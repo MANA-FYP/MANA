@@ -12,12 +12,13 @@ from mana_core import scenarios as sc
 from mana_sim import gazebo_scenarios as gs
 
 WORLD = (Path(__file__).parents[1] / "worlds" / "mana_route.sdf").read_text()
-ORIGINAL_TEN = [
+ON_THE_ROUTE = [
     "level",
     "ramp",
     "stairs",
     "curb",
     "stop",
+    "stairs_down",
     "drop",
     "manual_drop",
     "picture",
@@ -26,12 +27,12 @@ ORIGINAL_TEN = [
 ]
 
 
-def test_the_ten_original_scenarios_are_all_there():
-    assert list(gs.RUNS) == ORIGINAL_TEN
+def test_the_scenarios_on_the_route_are_all_there():
+    assert list(gs.RUNS) == ON_THE_ROUTE
     assert set(gs.RUNS) <= set(sc.SCENARIOS)
 
 
-@pytest.mark.parametrize("name", ORIGINAL_TEN)
+@pytest.mark.parametrize("name", ON_THE_ROUTE)
 def test_a_run_lies_on_the_route_and_has_marks(name):
     run = gs.RUNS[name]
     assert -2.0 <= run.start_x < run.end_x <= gs.DROP_X
@@ -39,7 +40,7 @@ def test_a_run_lies_on_the_route_and_has_marks(name):
     assert run.scenario().marks == run.marks and run.scenario().name == name
 
 
-@pytest.mark.parametrize("name", ORIGINAL_TEN)
+@pytest.mark.parametrize("name", ON_THE_ROUTE)
 def test_the_marks_can_be_met_on_this_geometry_by_the_scripted_core(name):
     # the scripted world with the camera route of the run: the marks are not out of reach
     scenario = gs.RUNS[name].scenario()

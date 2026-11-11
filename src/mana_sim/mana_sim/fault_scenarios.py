@@ -3,7 +3,7 @@
     ros2 run mana_sim fault_script gps_loss        # while the simulation and the core run
 
 The times are simulation seconds from the start of the script. The pass marks come with the
-scenario runner (the ten scenarios in Gazebo); here each scenario says in words what to expect.
+scenario runner (the scenarios in Gazebo); here each scenario says in words what to expect.
 """
 
 from dataclasses import dataclass

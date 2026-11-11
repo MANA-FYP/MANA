@@ -127,3 +127,17 @@ def test_the_cores_travel_after_a_stop_is_the_hosts():
     assert float(core["top_mps"]) == TOP_SPEED
     assert float(core["decel_mps2"]) == float(braking)
     assert float(core["reaction_s"]) > 0
+
+
+def test_the_lidar_is_used_only_while_the_chair_is_about_level():
+    assert c.scan_is_level(0.1, 0.0, 0.17)  # a ramp
+    assert not c.scan_is_level(0.5, 0.0, 0.17)  # nose down on the stairs (#52)
+    assert not c.scan_is_level(-0.5, 0.0, 0.17)  # nose up
+    assert not c.scan_is_level(0.0, 0.3, 0.17)  # rolled
+    assert c.scan_is_level(None, None, 0.17)  # no IMU report yet
+
+
+def test_a_tilt_from_an_imu_gone_quiet_is_not_used():
+    assert c.fresh_tilt((0.5, 0.0, 10.0), 10.2) == (0.5, 0.0)
+    assert c.fresh_tilt((0.5, 0.0, 10.0), 11.0) == (None, None)  # the lidar is back
+    assert c.fresh_tilt(None, 11.0) == (None, None)
