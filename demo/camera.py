@@ -77,8 +77,13 @@ async def stream(
     """Send frames to the server's phone socket until the source ends; returns how many."""
     import aiohttp
 
+    from demo import access
+
     sent, period = 0, 1.0 / fps
-    async with aiohttp.ClientSession() as session, session.ws_connect(url + "/ws/phone") as ws:
+    async with (
+        aiohttp.ClientSession() as session,
+        session.ws_connect(access.with_key(url + "/ws/phone", access.read())) as ws,
+    ):
 
         async def drain():  # the server sends its state; read it so its sends do not back up
             async for _ in ws:

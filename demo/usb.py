@@ -25,6 +25,8 @@ import argparse
 import shutil
 import subprocess
 
+from demo import access
+
 
 def find_adb() -> str | None:
     return shutil.which("adb")
@@ -92,7 +94,8 @@ def connect(
     how = "over Wi-Fi" if wifi is not None else "by cable"
     return (
         True,
-        f"Phone {phone} is connected {how}. On the phone open http://localhost:{port}/phone",
+        f"Phone {phone} is connected {how}. On the phone open "
+        + access.with_key(f"http://localhost:{port}/phone", access.read()),
     )
 
 
