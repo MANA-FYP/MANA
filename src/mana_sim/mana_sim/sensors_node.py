@@ -1,7 +1,9 @@
 """ROS 2 node: the simulated sensors, as the frames and the reports the rest of MANA reads.
 
 - Transforms: map > odom (identity), odom > base_link (from the ground truth of the simulation) and
-  base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry).
+  base_link > each sensor frame (frames.SENSORS). Also publishes `odom` (nav_msgs/Odometry). With
+  `odom_from: wheels` odom > base_link comes from the wheels and the gyro instead, and drifts as on
+  a real chair; map > odom is then left to a localiser (slam_toolbox, #43).
 - `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode:
   the speed of the wheels against the chair's speed, and their turn against the gyro).
 - `obstacle` from the nearest echo of the lidar in front of the chair. (`position` is made by
@@ -31,6 +33,13 @@ class SensorsNode(Node):
         self.cone_rad = p("obstacle_cone_rad", 0.35).value
         self.obstacle_max_m = p("obstacle_max_m", 4.0).value
         self.obstacle_trust = p("obstacle_trust", 0.9).value
+        # odom from the simulation's ground truth (exact), or from the wheels and the gyro
+        # (drifts, as on a real chair: what a lidar localisation must correct, #43)
+        self.odom_from = p("odom_from", "ground_truth").value
+        if self.odom_from not in ("ground_truth", "wheels"):
+            raise ValueError(f"odom_from is ground_truth or wheels, not {self.odom_from!r}")
+        self.pose = (0.0, 0.0, 0.0)  # x, y, yaw of the dead reckoning
+        self.imu_t: float | None = None
 
         self.mode = WHEELS
         self.left_rad_s: list[float] = []
@@ -53,8 +62,9 @@ class SensorsNode(Node):
 
     def send_static(self) -> None:
         now = self.get_clock().now().to_msg()
-        out = [self.transform(now, MAP, ODOM, (0.0,) * 6)]
-        out += [self.transform(now, BASE, name, pose) for name, pose in SENSORS.items()]
+        out = [self.transform(now, BASE, name, pose) for name, pose in SENSORS.items()]
+        if self.odom_from == "ground_truth":  # exact odom: the map is odom
+            out.append(self.transform(now, MAP, ODOM, (0.0,) * 6))  # else a localiser gives it
         self.static_tf.sendTransform(out)
 
     @staticmethod
@@ -71,6 +81,8 @@ class SensorsNode(Node):
 
     def on_ground_truth(self, m: Odometry) -> None:
         self.speed_mps = m.twist.twist.linear.x
+        if self.odom_from != "ground_truth":
+            return
         t = TransformStamped()
         t.header.stamp, t.header.frame_id, t.child_frame_id = m.header.stamp, ODOM, BASE
         t.transform.translation.x = m.pose.pose.position.x
@@ -87,6 +99,8 @@ class SensorsNode(Node):
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
         pitch, roll = conv.tilt(q.x, q.y, q.z, q.w)
+        if self.odom_from == "wheels":
+            self.dead_reckon(m)
         wheels = self.left_rad_s + self.right_rad_s
         slip = self.mode == WHEELS and (
             conv.wheel_slip(wheels, self.speed_mps)
@@ -96,6 +110,24 @@ class SensorsNode(Node):
         r.header.stamp, r.header.frame_id = m.header.stamp, BASE
         r.trust, r.pitch_rad, r.roll_rad, r.wheel_slip = 1.0, pitch, roll, slip
         self.motion.publish(r)
+
+    def dead_reckon(self, m: Imu) -> None:
+        """odom and odom > base_link from the wheels' speed and the gyro's turn rate."""
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        dt, self.imu_t = (0.0 if self.imu_t is None else t - self.imu_t), t
+        wheels = self.left_rad_s + self.right_rad_s
+        speed = sum(wheels) / len(wheels) * conv.WHEEL_RADIUS_M if wheels else 0.0
+        if 0 < dt < 0.5:
+            self.pose = conv.dead_reckon(*self.pose, speed, m.angular_velocity.z, dt)
+        x, y, yaw = self.pose
+        tf = self.transform(m.header.stamp, ODOM, BASE, (x, y, 0.0, 0.0, 0.0, yaw))
+        self.tf.sendTransform(tf)
+        o = Odometry()
+        o.header.stamp, o.header.frame_id, o.child_frame_id = m.header.stamp, ODOM, BASE
+        o.pose.pose.position.x, o.pose.pose.position.y = x, y
+        o.pose.pose.orientation = tf.transform.rotation
+        o.twist.twist.linear.x, o.twist.twist.angular.z = speed, m.angular_velocity.z
+        self.odom.publish(o)
 
     def on_scan(self, m: LaserScan) -> None:
         found = conv.nearest_ahead(
