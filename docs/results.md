@@ -229,6 +229,32 @@ percent **too far**, the unsafe side):
 - The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
   that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
 
+## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
+
+`tools/sound_hazards.py` scores both AudioSet taggers as they come, with no training, on all 8,732 clips of UrbanSound8K.
+- A clip's siren score is the highest score of AudioSet's siren classes over the clip: Siren, Civil defense siren, Emergency vehicle, and the police car, ambulance and fire engine sirens. Its horn score is the same over Vehicle horn, Toot and Air horn.
+- The `siren` and `car_horn` clips are the positives; every other clip is a negative.
+- Each threshold is the best F1 on folds 1 to 5. Precision and recall are reported on folds 6 to 10, so the threshold was not fitted to the clips it is scored on.
+- Code and weights: EfficientAT at commit a425fdc (`mn10_as`, mAP 0.471 on AudioSet), and YAMNet from tensorflow/models at commit c14bf9a. Both are kept outside the repository.
+
+Measured on 10 November 2026:
+
+| Model | Hazard | Positives (folds 6-10) | Threshold (folds 1-5) | Precision | Recall | F1 | TP / FP / FN | Average precision |
+|---|---|---|---|---|---|---|---|---|
+| EfficientAT-mn10 | siren | 396 | 0.22 | 95% | 79% | 0.86 | 311 / 15 / 85 | 0.93 |
+| EfficientAT-mn10 | horn | 151 | 0.08 | 73% | 75% | 0.74 | 114 / 43 / 37 | 0.83 |
+| YAMNet | siren | 396 | 0.60 | 87% | 68% | 0.76 | 270 / 41 / 126 | 0.78 |
+| YAMNet | horn | 151 | 0.18 | 57% | 66% | 0.61 | 100 / 76 / 51 | 0.65 |
+
+What the runs show:
+- **EfficientAT is better on both hazards:** average precision 0.93 against 0.78 for sirens, and 0.83 against 0.65 for horns.
+- **Horns are harder than sirens for both models.**
+- **Thresholds are low for EfficientAT** (0.22 and 0.08). At 0.5 its precision is 97% for both hazards, but recall falls to 51% for sirens and 37% for horns. The threshold has to be set for the model; 0.5 is not a safe default.
+- **EfficientAT needs 10 s of sound.** It was trained on AudioSet's 10 s clips. A shorter clip given as it is gets nonsense: every clip under 2 s (982 of them) scored over 0.9 for both siren and horn. In that first run, siren average precision was 0.22. Clips are now padded with silence to 10 s, as AudioSet's shorter clips were (`ten_seconds`). On a microphone stream, the model has to be given a 10 s window.
+- **Time:** a median 79 ms per clip for EfficientAT and 132 ms for YAMNet, on this laptop's CPU. Other heavy jobs ran at the same time, so these are upper bounds. Either keeps up with a microphone heard once a second.
+
+Not done here: the model on the phone's microphone stream, and the hazard report to the core.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
