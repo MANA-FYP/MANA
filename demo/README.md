@@ -301,7 +301,8 @@ The server starts without any model and says which ones are missing.
 |---|---|---|
 | Object detector (COCO) | `pip install ultralytics`, then `--weights yolo26n.pt` (or `yolo26s.pt`, slower and finds more) | the 80 COCO classes: person, chair, bottle, laptop and so on; obstacles get an **estimated** distance |
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
-| Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
+| Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline. On Speech Commands it also takes other words for commands, such as "two" for "go" (docs/results.md, #46) |
+| Offline voice commands, trained | `pip install torch torchaudio`, train with `tools/train_commands.py` (or use a trained `model.pt`), then `--kws <model.pt>` | the ten command words with BC-ResNet, which also knows "some other word" and "silence" (#46); `--kws-threshold` is the least probability acted on |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included**: train one on StairNet with `tools/train_ground.py` (#38). |
 | Depth from the camera | `pip install torch transformers`, then `--depth` | distances in metres from the camera image, and where stairs the detector sees are and which way they go (see above) |
 
