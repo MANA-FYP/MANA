@@ -20,6 +20,11 @@ ros2 run mana_perception detector_node --ros-args \
   -p weights:=yolo26n.pt -p imgsz:=416
 ```
 
+In Gazebo, `ros2 launch mana_sim world.launch.py detector:=true` starts it on the simulated camera.
+`tools/detector_in_gazebo.sh` puts a standing person at set distances in front of the chair and counts
+the reports: it is found from about 5 m out, and closer the camera's tilt cuts off the person's head
+and shoulders (`docs/results.md`, #40).
+
 The detector and its maths are in `mana_perception/detection.py`, which the phone demo also uses
 (`demo/vision.py` imports it), so the phone and ROS 2 give the same obstacles from the same picture.
 For each frame the node runs the detector, keeps the classes with a typical height
