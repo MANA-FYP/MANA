@@ -12,12 +12,14 @@ let audioRate = 48000;
 let laptopHasVoiceModel = false;   // when the laptop recognises speech itself, the phone streams audio
 
 // The data path is the USB cable (adb reverse), so the page is opened as localhost.
-document.getElementById("path").textContent = "data path: USB cable";
+document.getElementById("path").textContent =
+  location.hostname === "localhost" ? "data path: adb tunnel (cable or Wi-Fi)" : "data path: " + location.host;
 
 // ---- connection
 
 function connect() {
-  ws = new WebSocket("ws://" + location.host + "/ws/phone");
+  const scheme = location.protocol === "https:" ? "wss" : "ws"; // an https page may not use ws
+  ws = new WebSocket(scheme + "://" + location.host + "/ws/phone");
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     conn.textContent = "connected";
@@ -40,8 +42,12 @@ function send(obj) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
 }
 
+// what may wait in the socket before more is sent, by kind: about one camera frame, and voice under
+// a second at 16 kHz, so a slow link drops old data rather than delaying new
+const MAX_QUEUED = { 1: 32000, 2: 64000 };
+
 function sendBinary(tag, payload) {
-  if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 400000) return;  // never queue up old data
+  if (!ws || ws.readyState !== 1 || ws.bufferedAmount > MAX_QUEUED[tag]) return;
   const out = new Uint8Array(1 + payload.byteLength);
   out[0] = tag;
   out.set(new Uint8Array(payload), 1);
@@ -207,7 +213,13 @@ async function startMicrophone() {
   // one of them is used: the laptop's model when it has one, otherwise the browser's recogniser.
   if (!laptopHasVoiceModel) return startBrowserRecognition();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx;
+  try {
+    ctx = new AC({ sampleRate: 16000 });  // what the recogniser uses: a third of 48 kHz to send
+  } catch (e) {
+    ctx = new AC();  // a browser that cannot: the laptop resamples
+  }
   audioRate = ctx.sampleRate;
   send({ type: "hello", caps: capabilities(), audio_rate: audioRate });
   const src = ctx.createMediaStreamSource(stream);
@@ -322,5 +334,15 @@ document.querySelectorAll("[data-button]").forEach((b) => {
 });
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// Keep the screen on: with the screen off or the page behind another, Chrome runs its timers once a
+// second or less, so the camera drops to a frame a second and the laptop sees the world late.
+async function keepAwake() {
+  try {
+    if (navigator.wakeLock && document.visibilityState === "visible") await navigator.wakeLock.request("screen");
+  } catch (_) {}  // refused (battery saver): the page still works, the screen may sleep
+}
+document.addEventListener("visibilitychange", keepAwake);  // the lock ends when the page is hidden
+keepAwake();
 
 connect();

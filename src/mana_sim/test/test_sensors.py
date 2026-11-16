@@ -141,3 +141,13 @@ def test_a_tilt_from_an_imu_gone_quiet_is_not_used():
     assert c.fresh_tilt((0.5, 0.0, 10.0), 10.2) == (0.5, 0.0)
     assert c.fresh_tilt((0.5, 0.0, 10.0), 11.0) == (None, None)  # the lidar is back
     assert c.fresh_tilt(None, 11.0) == (None, None)
+
+
+def test_dead_reckoning_drives_straight_and_turns():
+    x, y, yaw = c.dead_reckon(0.0, 0.0, 0.0, 1.0, 0.0, 2.0)
+    assert (x, y, yaw) == pytest.approx((2.0, 0.0, 0.0))
+    pose = (0.0, 0.0, 0.0)
+    for _ in range(1000):  # a quarter circle of radius 1 m at 1 m/s
+        pose = c.dead_reckon(*pose, 1.0, 1.0, math.pi / 2 / 1000)
+    assert pose == pytest.approx((1.0, 1.0, math.pi / 2), abs=1e-4)
+    assert c.dead_reckon(0.0, 0.0, 3.1, 0.0, 1.0, 0.1)[2] < 0  # yaw wraps to -pi..pi

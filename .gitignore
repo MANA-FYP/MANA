@@ -36,3 +36,4 @@ gazebo_traces/
 recordings/
 # street map tiles kept by demo.server (#161): they show where the person has been
 tile-cache/
+certs/
