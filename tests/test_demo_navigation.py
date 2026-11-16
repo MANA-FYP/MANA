@@ -562,3 +562,30 @@ def test_gps_with_a_walking_speed_counts_as_it_did_with_no_speed():
         walking.on_gps(standing_fix(1.2 * i, 0, float(i), 1.2))
         unknown.on_gps(standing_fix(1.2 * i, 0, float(i), None))
     assert walking.distance_m == unknown.distance_m > 25.0  # 34.8 m walked; the filter lags
+
+
+def test_held_fixes_do_not_stop_gps_correcting_the_steps():
+    """Waqas's case (#180): fixes keep coming at the start, slow, while steps walk 42 m east, then
+    30 s standing, then 10 m at 1 m/s. Held fixes used to keep the source GPS, so GPS never put
+    the steps right: 42 m off, and the distance jumped from 42 to 86.4 m on moving again."""
+    lat0, lon0 = 31.5204, 74.3587
+    nav = Navigator()
+    track = nav.track
+    nav.on_orientation(None, None, None, compass=90)
+    track.on_gps(Fix(0.0, lat0, lon0, 4.0, 0.2))
+    t, worst = 0.0, 0.0
+    for i in range(60):  # 60 steps of 0.7 m east, a fix at the start every 1.2 s
+        t += 0.6
+        track.on_step(Step(t, 0.7), t)
+        if i % 2:
+            track.on_gps(Fix(t, lat0, lon0, 4.0, 0.2))
+        worst = max(worst, abs(track.x))
+    assert worst < 20.0  # GPS keeps putting the steps right (it was 42 m off)
+    for _ in range(25):  # 30 s standing
+        t += 1.2
+        track.on_gps(Fix(t, lat0, lon0, 4.0, 0.1))
+    for k in range(10):  # then 10 m east at 1 m/s
+        t += 1.0
+        east = (k + 1) / (111320 * math.cos(math.radians(lat0)))
+        track.on_gps(Fix(t, lat0, lon0 + east, 4.0, 1.0))
+    assert track.distance_m == pytest.approx(45.0, abs=2.0)  # was 86.4

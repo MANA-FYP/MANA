@@ -124,7 +124,9 @@ class StepCounter:
         return None
 
     def _give(self) -> Step | None:
-        """The pending step, unless the phone turned fast just before it: a hand, not a step."""
+        """The pending step, unless the phone turned fast just before it: a hand, not a step.
+        Turning a corner can be as fast (about 90 degrees a second, for a second), so a step or two
+        there is dropped too: a short undercount, never an extra step (Waqas, #180)."""
         step = self._confirm()
         w = [r for when, r in self.turns if step.t - self.turn_window_s <= when <= step.t]
         if w and sum(w) / len(w) >= self.max_turn_dps:
@@ -264,10 +266,11 @@ class Track:
             # it nor makes the filter surer of it. With no limit on the distance: indoors our
             # phone's fixes wandered 10 to 25 m from a person sitting still, with an accuracy of 3
             # to 5 m and a speed of 0.03 to 0.3 m/s, and once 6 m against the steps just taken.
-            # Steps move the position themselves. Where the position came from steps alone (out
-            # of a building) the source is steps, and GPS puts it right (below)
+            # Steps move the position themselves. A held fix is not counted as GPS in use: after
+            # 3 s of steps the source is steps, and GPS then puts the position right (below), not
+            # walked. Counting it kept the source GPS indoors while fixes kept coming, so GPS
+            # never corrected the steps, and the jump back later counted as walked (Waqas, #180)
             self.last_fix = fix
-            self.last_gps_t = fix.t
             return True
         if math.hypot(e - self.x, n - self.y) > self.gate_sigmas * math.sqrt(self.var + r):
             self.refused.append((e, n, fix.accuracy_m))
@@ -308,7 +311,9 @@ class Track:
         GPS says the person is not moving, so a GPS move is wandering, not travel. Standing still
         indoors our phone gave 0.03 to 0.17 m/s while its fixes drifted 10 to 15 m; walking is
         about 1.2. Steps are not asked: a hand shaking the phone can still make one, and steps
-        move the position themselves. With no speed from the phone, nothing changes."""
+        move the position themselves. With no speed from the phone, nothing changes.
+        Limit: on GPS speed alone, a device rolling slowly indoors (under still_mps, with no
+        steps) does not move on the map while its fixes are held (Waqas, #180)."""
         return fix.speed is not None and fix.speed < self.still_mps
 
     # -- what it shows
