@@ -155,6 +155,26 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 
 Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
 
+## Lidar localisation indoors (#43)
+
+`tools/indoor_localisation.sh` maps the indoor world (`worlds/mana_indoor.sdf`: a 16 by 10 m floor, a corridor loop round a central block, five cabinets and a pillar, no GPS) with slam_toolbox, then starts the world again and localises on the saved map. The chair drives the corridor loop by its ground truth (`mana_sim.loop_driver`), and its odometry comes from the wheels and the gyro (`odom:=wheels`), so it drifts as a real chair's would. Once a second the map pose (slam_toolbox) and the odom pose (the wheels) are compared with Gazebo's ground truth, both taken from the first row, which the driver writes at rest before it moves, where the map and odom frames begin; map and odom are looked up at the ground truth's own time. Measured in WSL on 9 November 2026.
+
+| Run | Driven | Map pose (slam_toolbox): mean / 95th / max | Wheel odometry: mean / 95th / max |
+|---|---|---|---|
+| Mapping, one lap (2 runs, maps A and B) | 47.7, 47.7 m | 0.17 / 0.42 / 0.66 m, 0.24 / 0.62 / 0.68 m | 0.28 / 0.76 / 0.76 m, 0.28 / 0.74 / 0.74 m |
+| Localisation, two laps, run 1 (map A) | 88.9 m | 0.19 / 0.93 / 1.02 m | 0.61 / 1.48 / 1.48 m |
+| Localisation, two laps, run 2 (map B) | 88.9 m | 0.22 / 1.18 / 1.27 m | 0.61 / 1.47 / 1.47 m |
+| Localisation, two laps, run 3 (map B again) | 89.0 m | 0.23 / 1.20 / 1.28 m | 0.62 / 1.50 / 1.51 m |
+
+An earlier set of runs took the first row only after the chair had started moving, so every error included that move (Waqas, #179). Its localisation means were 0.15 to 0.21 m, against 0.19 to 0.23 m here: in these runs the bias was smaller than the spread from run to run.
+
+What the runs show:
+- **Wheel odometry drifts, the map pose does not.** Odometry ended 1.47 to 1.51 m off after two laps; the map pose ended 0.06 to 0.11 m off.
+- **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
+- **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
+
+A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+
 ## Camera depth and stairs on real phone frames (#131)
 
 Measured on 9 November 2026 on real iPhone frames from the Hugging Face dataset
@@ -228,6 +248,30 @@ percent **too far**, the unsafe side):
   alone and 15 for the depth alone. The demo now keeps the nearer (D12).
 - The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
   that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
+
+## The object detector on Gazebo's camera (#40)
+
+Measured on 9 November 2026 with `tools/detector_in_gazebo.sh`, `yolo26n.pt` at 416. Gazebo
+Fuel's "Standing person" (OpenRobotics, CC0) stands on the level start of the route, facing across
+the path, at a set distance from the RGB camera. The chair stands still. The world is launched
+with `detector:=true`, and the detector's `ObstacleReport`s on `/obstacle` are counted for 20 s.
+
+| Person from the camera | Camera frames a second | Detector reports in 20 s | Distance reported |
+|---|---|---|---|
+| 2, 3 and 4 m | 2.0 to 3.2 | none | |
+| 5 m | 2.3 | 5 | 4.18 m (trust 0.72) |
+| 7 m | 0.8 | 5 | 5.34 m (trust 0.69) |
+
+- **The detector's obstacles reach the core's topic in Gazebo**, from 5 m out. They read nearer
+  than the truth (16 and 24 percent here), the safe side.
+- **Closer than about 5 m it sends nothing.** The camera is 0.65 m up and tilted 0.3 rad down,
+  so the person's head and shoulders leave the picture. On the 3 m frame the detector names
+  only a person at 0.16, under the node's `min_confidence` of 0.5. Closer in, the lidar stops the
+  chair (`dark`: 0.92 m before the person).
+- **Gazebo renders the camera at 0.8 to 3.2 frames a second on this laptop** (WSL, no GPU; the
+  model asks for 10), so the reports are sparse. The core lets a report age out after 0.5 s.
+- Before #170 the detector found **nothing** here. It was given the camera's RGB array, which
+  Ultralytics reads as BGR, and on the 5 m frame it found no person even at confidence 0.3.
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
@@ -377,3 +421,81 @@ ros2 run mana_core evaluate --world gazebo --rerun       # play again, also thos
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+## Zero-shot detectors on the SANPO test split (#51, #49)
+
+Measured on 10 November 2026 with `tools/eval_detector.py`, on every SANPO test walk that has
+masks (48 of the authors' 141 test sessions), one annotated frame in 10: **2,331 frames**. No
+model was trained on SANPO; this is the baseline that the fine-tuned YOLO26s and YOLOv8s (#49)
+have to beat. Each frame goes through `Detector.detect_image`, the call the ROS node and the phone
+demo make. A box counts as found at IoU 0.5 with a SANPO box of the same class; the model's names
+map to SANPO's by a fixed table (person to pedestrian, car, bus and truck to vehicle, door to
+opening-door, pillar to pole). Precision and recall are given at two thresholds of the node:
+**0.3**, the lowest confidence the detector keeps (and the one the demo's stairs use, #131), and
+**0.5**, the lowest that becomes an obstacle (`min_confidence`, the core's `min_trust`). The
+second is the one that stops the chair.
+Times are the median per frame on an AMD Ryzen 7 7730U laptop CPU (16 GB), with PyTorch 2.15 and
+Ultralytics 8.4.208.
+
+SANPO's boxes come from its masks, so they include objects far down the street a few pixels
+high. MANA reacts to what is near, so **near** keeps only boxes at least 10 % of the frame's
+height (predictions on smaller boxes are left out, as COCO scores its size bands).
+
+Near objects:
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26n, COCO (416, 36 ms) | pedestrian | 2,993 | 0.74 | 0.85 | 0.67 | 0.91 | 0.54 |
+| | vehicle | 1,438 | 0.67 | 0.83 | 0.55 | 0.94 | 0.40 |
+| | stairs, door, pole | | not in COCO | | | | |
+| YOLOE-26n, the demo's 42 names (480, 55 ms) | pedestrian | 2,993 | 0.73 | 0.85 | 0.67 | 0.91 | 0.49 |
+| | vehicle | 1,438 | 0.62 | 0.82 | 0.51 | 0.90 | 0.29 |
+| | stairs | 37 | 0.01 | 0.20 | 0.03 | 0.00 | 0.00 |
+| | opening-door | 175 | 0.01 | 0.00 | 0.00 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.03 | 0.73 | 0.01 | 0.71 | 0.00 |
+| YOLOE-26s, the demo's 42 names (480, 82 ms) | pedestrian | 2,993 | 0.78 | 0.80 | 0.78 | 0.87 | 0.71 |
+| | vehicle | 1,438 | 0.69 | 0.80 | 0.54 | 0.90 | 0.37 |
+| | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.50 | 0.03 |
+| | opening-door | 175 | 0.01 | 0.20 | 0.01 | 0.50 | 0.01 |
+| | pole | 1,942 | 0.02 | 0.62 | 0.01 | 0.50 | 0.00 |
+
+Over every object, far ones included, recall is much lower: people 0.41 to 0.54 at 0.3 and 0.29
+to 0.46 at 0.5, vehicles 0.24 to 0.30 at 0.3 and 0.12 to 0.18 at 0.5. A precision of 0.00 means boxes of that
+class reached the threshold and every one was wrong. The tool prints the full tables, both bands.
+
+**Stairs per walk.** The test split has stairs in only 6 walks (65 frames, 76 staircases; see
+`docs/datasets.md`). Both YOLOE models found stairs in 1 frame of the 65 at confidence 0.3,
+in 1 walk of the 6. Run at confidence 0.01, YOLOE-26s gave no stairs box at all in 58 of the 65
+frames; where it did, near the foot of a staircase that fills the frame, the box was right (IoU
+0.77 to 0.98) but its confidence was 0.02 to 0.67. Many of SANPO's stairs are porch steps far
+off or a single step at the edge of the frame, which MANA does not need, but clear stairs beside
+the path were missed too.
+
+What follows:
+
+- **People near the chair are found zero-shot, but at the obstacle threshold many are missed.**
+  At 0.5, YOLO26n (the node's default) reports about half the people (0.54) and 40 % of the
+  vehicles near the chair, at 91 to 94 % precision. YOLOE-26s reports the most people, 71 %, at
+  87 % precision and 82 ms a frame (about 12 frames a second on this CPU). Lowering the obstacle
+  threshold to 0.3 would catch more (0.67 to 0.78 of people) at 80 to 85 % precision, so more
+  false stops; that is the `min_trust` trade-off of #87 and #175, and it is one frame: on a walk
+  towards a person the detector has many frames to find them in.
+- **Stairs, doors and poles are not found zero-shot on SANPO.** The 6 of 12 stairs YOLOE-26s
+  found on the iPhone frames in #131 were chosen with the stairs straight ahead; SANPO's walks are
+  the harder, everyday case. Stairs must come from fine-tuning (#49, 45 training walks with
+  stairs) and from the 3D camera, as the two-source rule already requires. SANPO's
+  "opening-door" boxes are ordinary doors, closed ones too (checked by eye on four frames: shop
+  doors, a glass door), so the door misses are real misses: doors set into a shop front at the side
+  of the path, where the model sees a wall or a window.
+- **Six walks are too few for a stairs figure against the 0.85 target**, before or after
+  fine-tuning. Stairs from our own recordings (#89) are needed for that.
+
+Run it:
+
+```
+python3 tools/fetch_sanpo.py --root datasets/sanpo-eval --train 6 --test -1 --every 10 --workers 16
+python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-eval-yolo --val 0.5
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --weights yolo26n.pt --imgsz 416
+python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --imgsz 480 \
+    --weights yoloe-26n-mana.pt yoloe-26s-mana.pt   # built with demo/build_detector.py
+```
