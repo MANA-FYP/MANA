@@ -301,6 +301,10 @@ async def hear_task(app: web.Application, now: float) -> None:
     try:
         heard = await asyncio.get_running_loop().run_in_executor(None, app["listener"].hear, now)
         app["mw"].on_sounds(heard)
+    except Exception as e:  # a broken model: said once, not as an unhandled task every second
+        if not app["live"].get("hear_failed"):
+            app["live"]["hear_failed"] = True
+            print(f"sounds: the model failed ({e!r}); sirens and horns are not heard", flush=True)
     finally:
         app["live"]["hearing"] = False
 
@@ -737,6 +741,12 @@ def main(argv=None) -> None:
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
     listener = sounds.Listener(sounds.load(a.sounds)) if a.sounds else None
+    if listener is not None and recognizer is None:
+        print(
+            "sounds: the phone now streams its microphone for sirens and horns, so its own voice "
+            "recognition is off; add --vosk-model for voice commands",
+            flush=True,
+        )
     mount = dz.Mount(a.camera_height, a.camera_fov)
     key = access.load_or_make()  # the server can drive the device: no answer without it
     app = build_app(
