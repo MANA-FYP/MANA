@@ -259,15 +259,21 @@ obstacles 228 (0.074). People and vehicles are under-confident from 0.4 up (a pe
 was right 81 percent of the time, 36 boxes); the other obstacles are right about half the time at
 0.4 to 0.6 and do not follow their confidence above it (2 to 12 boxes a bin).
 
-- **The confidence is close to calibrated overall, and under-confident from 0.3 to 0.6.** The error
-  is 0.07: on average a bin's confidence and its share right are 7 points apart. A confidence of 0.4
-  to 0.5 was right 77 to 80 percent of the time, of 0.5 to 0.6, 80 to 88 percent.
-- **A map fitted on the train split did not carry over where the core decides.** Platt scaling (a
-  logistic map of the confidence's logit) and isotonic regression lowered the test error to 0.028
-  and 0.027. Both put a trust of 0.5 at a confidence of 0.30. But on the test split their trusts of
-  0.5 to 0.6 were right 39 percent of the time: worse than the confidence itself, at the trust
-  where the core decides.
-- So the detector's trust stays its confidence, times the light factor (D14). The ground
+- **The confidence is under-confident from 0.3 to 0.8, though its overall error is low.** The error
+  is 0.07, low because most detections sit in the well-calibrated bins under 0.2 (1189 of the 1803
+  on the test split). A confidence of 0.4 to 0.5 was right 77 to 80 percent of the time, of 0.5 to
+  0.6 80 to 88 percent, and of 0.6 to 0.8 89 to 95 percent: 18 to 24 points over the confidence.
+- **What a map does is move the core's gate.** Platt scaling (a logistic map of the confidence's
+  logit) and isotonic regression lowered the test error to 0.028 and 0.027. Both put a trust of 0.5
+  at a confidence of 0.30. Near the gate neither is exact: their trusts of 0.5 to 0.6 were right 39
+  percent of the time on the test split (about 16 points under), where the raw confidence of 0.5 to
+  0.6 was right 80 percent (about 25 points over). So a map does not make the gate more accurate;
+  it lowers it, from a confidence of 0.5 to 0.30: more objects passed to the core, at a lower share
+  right. Waqas's run on 2,331 SANPO test frames shows the trade: the raw gate passed 2,857 boxes,
+  89 percent right (2,554 of the 5,802 right ones); Platt passed 5,314, 76 percent right (4,025).
+- So the detector's trust stays its confidence, times the light factor (D14): that keeps the core's
+  operating point where it is until min_trust itself is chosen (below), rather than moving it as a
+  side effect of calibration. The ground
   classifier's calibration needs the trained model (#38), and the light factor needs dark frames
   (#89); both are still open.
 - **What it means for min_trust (0.5):** the core drops every report under 0.5, and a confidence
