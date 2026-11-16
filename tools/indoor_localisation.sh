@@ -72,24 +72,24 @@ run() {  # one step: the world from the start, slam_toolbox in a mode, then the 
   start "$OUT/$name-slam.log" ros2 run slam_toolbox "$executable" \
     --ros-args --params-file "$SHARE/config/$config" "$@"
   # slam_toolbox on Jazzy is a lifecycle node: it neither maps nor localises until activated. On a
-  # fresh ROS domain it can take a while to be found, so wait for it first
-  local deadline=$((SECONDS + 60))
-  until timeout 5 ros2 lifecycle get /slam_toolbox >/dev/null 2>&1; do
+  # fresh ROS domain it can take a while to be found, and the ros2 command line itself can take
+  # more than 5 s to start on a busy computer (as in tools/autopilot.sh), so wait for it first
+  local deadline=$((SECONDS + 120))
+  until timeout 20 ros2 lifecycle get /slam_toolbox >/dev/null 2>&1; do
     [ $SECONDS -ge $deadline ] && { echo "FAIL slam_toolbox was not found"; return 1; }
     sleep 2
   done
-  timeout 20 ros2 lifecycle set /slam_toolbox configure >/dev/null \
-    && timeout 20 ros2 lifecycle set /slam_toolbox activate >/dev/null \
+  timeout 40 ros2 lifecycle set /slam_toolbox configure >/dev/null \
+    && timeout 40 ros2 lifecycle set /slam_toolbox activate >/dev/null \
     || { echo "FAIL slam_toolbox did not activate"; return 1; }
   if [ "$name" = localisation ] && [ "$EKF" = 1 ]; then
-    start "$OUT/$name-gate.log" ros2 run mana_position lidar_gate --ros-args -p use_sim_time:=true
+    start "$OUT/$name-gate.log" ros2 run mana_position lidar_gate --ros-args \
+      -p use_sim_time:=true -r pose:=/pose -r odom:=/odom
     start "$OUT/$name-ekf.log" ros2 run robot_localization ekf_node --ros-args \
       -r __node:=ekf_global --params-file "$POSITION/config/localisation.yaml" -p use_sim_time:=true \
-      -r wheel/odometry:=/odom -r imu/data:=/imu -r odometry/filtered:=odometry/global
-    local until=$((SECONDS + 60))  # the EKF's map > odom, before the drive's first row
-    until timeout 5 ros2 run tf2_ros tf2_echo map odom 2>/dev/null | grep -q Translation; do
-      [ $SECONDS -ge $until ] && { echo "FAIL ekf_global gave no map > odom"; return 1; }
-    done
+      -r wheel/odometry:=/odom -r imu/data:=/imu -r odometry/filtered:=/odometry/global \
+      -r lidar/pose:=/lidar/pose
+    # the drive's first row waits for map > odom itself (loop_driver), so nothing is polled here
   fi
   echo "--- $name"
   ros2 run mana_sim loop_driver --laps "$laps" --csv "$OUT/$name.csv"

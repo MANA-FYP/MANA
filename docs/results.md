@@ -181,10 +181,15 @@ What the runs show:
 |---|---|---|---|
 | Offline, 2 earlier recorded runs with a jump | | max 1.26 m to 0.59 m, and 1.13 m to 0.33 m | |
 | Offline, 2 earlier recorded runs with no jump | | max unchanged (0.35, 0.40 m) | |
-| Gazebo, EKF with the gated lidar, two laps, run 1 | 88.8 m | 0.17 / 0.37 / 0.57 m | 0 |
-| Gazebo, EKF with the gated lidar, two laps, run 2 | 88.7 m | 0.17 / 0.38 / 0.64 m | 0 |
+| Gazebo, map C: slam_toolbox alone, two laps | 88.9 m | 0.18 / 0.42 / 0.62 m | |
+| Gazebo, map C: the EKF with the gated lidar, two laps | 88.8 m | 0.17 / 0.37 / 0.60 m | 1 (1.47 m) |
+| Gazebo, map D: slam_toolbox alone, two laps | 88.9 m | 0.22 / 0.81 / 0.90 m | |
+| Gazebo, map D: the EKF with the gated lidar, two laps | 88.9 m | 0.18 / 0.39 / 0.58 m | 0 |
 
-slam_toolbox did not jump in either Gazebo run, so the gate had nothing to refuse there; these two runs show only that the gate and the EKF do not make the map pose worse (mean 0.17 m, against 0.15 to 0.21 m before). Taking a jump out is shown offline, on the four runs recorded before the start-pose fix of the loop driver. Wheel odometry ended 1.48 and 1.51 m off; the EKF's map pose ended 0.05 and 0.04 m off.
+The Gazebo rows are from `tools/indoor_localisation.sh` (plain) and `--ekf` (the gate and `ekf_global`, slam_toolbox's map > odom off, the wheels the only odom > base_link), measured on 16 November 2026 on two new maps, each driven both ways, after the loop driver's start-pose fix. The plain runs (means 0.18 and 0.22 m) sit with the remeasured ones above (0.19 to 0.23 m).
+- **A jump taken out in Gazebo.** In the EKF run on map C, slam_toolbox jumped 1.47 m and the gate took it out: the EKF's pose was never more than 0.60 m off. In the plain run on map D, slam_toolbox jumped on the south corridor (its worst, 0.90 m, at (14.4, 1.6)); the EKF run on that map had no jump, so these runs do not show the same jump both ways.
+- **No worse where nothing jumped.** On both maps the EKF's mean and 95th were at or under slam_toolbox's alone (0.17 and 0.18 m mean, 0.37 and 0.39 m 95th). Wheel odometry ended 1.54 and 1.55 m off; the EKF's pose ended 0.13 and 0.03 m off.
+- The gate's settings (0.5 m, 60 s) were tuned on the four offline runs, recorded before the start-pose fix; they were not tuned again. A jump back now clears the offset (Waqas, #181): before, a 1.2 m jump undone 15 s later left 0.26 m the other way.
 
 ## Camera depth and stairs on real phone frames (#131)
 
