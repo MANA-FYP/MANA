@@ -264,10 +264,11 @@ class Track:
             # it nor makes the filter surer of it. With no limit on the distance: indoors our
             # phone's fixes wandered 10 to 25 m from a person sitting still, with an accuracy of 3
             # to 5 m and a speed of 0.03 to 0.3 m/s, and once 6 m against the steps just taken.
-            # Steps move the position themselves. Where the position came from steps alone (out
-            # of a building) the source is steps, and GPS puts it right (below)
+            # Steps move the position themselves. A held fix is not counted as GPS in use: after
+            # 3 s of steps the source is steps, and GPS then puts the position right (below), not
+            # walked. Counting it kept the source GPS indoors while fixes kept coming, so GPS
+            # never corrected the steps, and the jump back later counted as walked (Waqas, #180)
             self.last_fix = fix
-            self.last_gps_t = fix.t
             return True
         if math.hypot(e - self.x, n - self.y) > self.gate_sigmas * math.sqrt(self.var + r):
             self.refused.append((e, n, fix.accuracy_m))
