@@ -149,8 +149,11 @@ def test_darkness_keeps_a_share_of_the_light():
 def test_every_scenario_switches_its_fault_on_and_then_off():
     f_check = f.Faults()
     for s in FAULT_SCENARIOS.values():
-        assert len(s.steps) == 2 and s.steps[0].active and not s.steps[1].active
-        assert s.steps[0].at_s < s.steps[1].at_s
+        # on, off, and again for a scenario with more than one outage (gps_two_outages, #42)
+        assert len(s.steps) % 2 == 0 and len(s.steps) >= 2, s.name
+        assert [st.active for st in s.steps] == [True, False] * (len(s.steps) // 2), s.name
+        times = [st.at_s for st in s.steps]
+        assert times == sorted(times) and len(set(times)) == len(times), s.name
         for step in s.steps:
             ok, why = f_check.set(step.sensor, step.kind, step.active, step.value, 0.0)
             assert ok, (s.name, why)
