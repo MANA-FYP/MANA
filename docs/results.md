@@ -229,6 +229,30 @@ percent **too far**, the unsafe side):
 - The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
   that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
 
+## The object detector on Gazebo's camera (#40)
+
+Measured on 9 November 2026 with `tools/detector_in_gazebo.sh`, `yolo26n.pt` at 416. Gazebo
+Fuel's "Standing person" (OpenRobotics, CC0) stands on the level start of the route, facing across
+the path, at a set distance from the RGB camera. The chair stands still. The world is launched
+with `detector:=true`, and the detector's `ObstacleReport`s on `/obstacle` are counted for 20 s.
+
+| Person from the camera | Camera frames a second | Detector reports in 20 s | Distance reported |
+|---|---|---|---|
+| 2, 3 and 4 m | 2.0 to 3.2 | none | |
+| 5 m | 2.3 | 5 | 4.18 m (trust 0.72) |
+| 7 m | 0.8 | 5 | 5.34 m (trust 0.69) |
+
+- **The detector's obstacles reach the core's topic in Gazebo**, from 5 m out. They read nearer
+  than the truth (16 and 24 percent here), the safe side.
+- **Closer than about 5 m it sends nothing.** The camera is 0.65 m up and tilted 0.3 rad down,
+  so the person's head and shoulders leave the picture. On the 3 m frame the detector names
+  only a person at 0.16, under the node's `min_confidence` of 0.5. Closer in, the lidar stops the
+  chair (`dark`: 0.92 m before the person).
+- **Gazebo renders the camera at 0.8 to 3.2 frames a second on this laptop** (WSL, no GPU; the
+  model asks for 10), so the reports are sparse. The core lets a report age out after 0.5 s.
+- Before #170 the detector found **nothing** here. It was given the camera's RGB array, which
+  Ultralytics reads as BGR, and on the 5 m frame it found no person even at confidence 0.3.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
