@@ -67,3 +67,25 @@ def test_a_lasting_offset_fades_so_a_real_correction_is_taken_in_the_end():
     xs = drive(f, 0.0, 600, lidar_offset=-1.0, step_m=0.0)  # standing, 5 minutes, slam 1 m off
     assert xs[0] == pytest.approx(0.0, abs=0.01)  # taken out at first
     assert xs[-1] == pytest.approx(-1.0, abs=0.01)  # after 5 minutes the lidar's is kept
+
+
+def test_a_jump_undone_after_the_offset_faded_leaves_no_error_the_other_way():
+    """Waqas's case (#181): a 1.2 m jump, slam right again 15 s later. With the fade, the offset
+    is down to about 0.94 m by then; taking the full 1.2 m back off left 0.26 m the other way."""
+    f = JumpFilter(fade_s=60.0)
+    f.on_odom((0.0, 0.0, 0.0))
+    f.correct(0.0, (0.0, 0.0, 0.0))
+    drive(f, 0.0, 5)  # to 1 m by 2.5 s
+    drive(f, 1.0, 30, lidar_offset=-1.2, t0=2.5)  # jumped 1.2 m back for 15 s
+    assert 0.8 < f.offset[0] * -1 < 1.0  # faded, not gone
+    back = drive(f, 7.0, 5, t0=17.5)  # slam right again
+    assert back == pytest.approx([7.2, 7.4, 7.6, 7.8, 8.0], abs=1e-6)
+    assert f.offset == [0.0, 0.0] and f.jumps == 2
+
+
+def test_a_second_jump_the_same_way_is_not_cleared():
+    f = started()
+    drive(f, 0.0, 5)
+    drive(f, 1.0, 3, lidar_offset=-0.8, t0=2.5)
+    out = drive(f, 1.6, 3, lidar_offset=-1.6, t0=4.0)  # another 0.8 m the same way
+    assert out == pytest.approx([1.8, 2.0, 2.2], abs=1e-6) and f.offset[0] == pytest.approx(-1.6)

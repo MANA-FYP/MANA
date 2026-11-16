@@ -220,6 +220,10 @@ class Detector:
 
     def detect_image(self, image, conf: float = 0.3) -> list[Detection]:
         """Detections in a decoded frame: an RGB PIL image or an HxWx3 RGB array."""
+        if not hasattr(image, "convert"):  # Ultralytics reads an array as BGR, as OpenCV gives it
+            from PIL import Image
+
+            image = Image.fromarray(image)
         result = self.model(image, imgsz=self.imgsz, conf=conf, verbose=False)[0]
         names = result.names
         found = []

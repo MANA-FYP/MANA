@@ -857,3 +857,12 @@ def test_marks_are_understood_with_the_recognisers_punctuation(heard, done):
     m = Middleware()
     m.on_heard(heard, now=1.0)
     assert m.inputs[-1]["command"] == done
+
+
+def test_the_phones_round_trip_is_kept_for_the_dashboard():
+    m = Middleware()
+    m.on_heartbeat(None, 1.0)  # a ping with no round trip yet
+    assert "phone_rtt_ms" not in m.latency
+    m.on_heartbeat(12.34, 1.5)
+    assert m.latency["phone_rtt_ms"] == 12.3
+    assert m.tick(2.0)["latency"]["phone_rtt_ms"] == 12.3

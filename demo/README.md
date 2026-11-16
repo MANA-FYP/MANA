@@ -35,10 +35,83 @@ the data, so you can show the alert link changing.
    ```bash
    python -m demo.usb
    ```
-3. On the phone open **http://localhost:8000/phone** in Chrome.
+3. On the phone open in Chrome the phone address the server printed: **http://localhost:8000/phone?k=...**
+   (the key, below).
 
 `localhost` counts as a secure page, so the phone gives the camera, motion, location and
 microphone with no certificate.
+
+### Connect the phone: Wi-Fi, no cable (Android 11 and later)
+
+The same tunnel, over Wi-Fi: the page is still on `localhost`, so it keeps the camera and the
+sensors. The phone and the laptop must be on the same network; the laptop's own hotspot works,
+with no internet.
+
+1. On the phone: Developer options, *Wireless debugging*, turn it on.
+2. The first time on a laptop, tap *Pair device with pairing code* and give the pairing address
+   and the code it shows, with the address shown on the Wireless debugging page itself:
+
+   ```bash
+   python -m demo.usb --pair 192.168.1.23:37011 482915 --wifi 192.168.1.23:41235
+   ```
+
+   After that, `python -m demo.usb --wifi 192.168.1.23:41235` is enough. Android may change that
+   port when wireless debugging is turned off and on again.
+3. On the phone open in Chrome the phone address the server printed:
+   **http://localhost:8000/phone?k=...** (the key, below).
+4. Turn *Wireless debugging* off after the demo: pairing gives the laptop the same control over
+   the phone (adb) as the cable.
+
+The dashboard shows the round trip to the phone under *Inputs from the phone*. Compare it with the
+cable before a demo. The phone's Wi-Fi then carries the data, so use the cable to show the alert
+link changing (switching Wi-Fi off would cut the demo).
+
+### The key
+
+The server can drive the device, so it answers only requests that carry its key (`demo/access.py`,
+#178). The key is made once and kept in `certs/access-key.txt` (not in git), and the server prints
+every address with it (`.../phone?k=...`). A page opened with it keeps the key in a cookie and
+reloads without it, so the key does not stay in the address bar or in screenshots. Share an address
+with its key with no one; delete `certs/access-key.txt` for a new key. `demo.camera`, `demo.replay`
+and `tools/phone_e2e.py` read the key from that file.
+
+### Connect the phone over the network: no cable, no adb
+
+Chrome gives the camera, the motion sensors and GPS only to a secure page: `localhost` (the cable),
+or https. Two ways to an https page:
+
+**Same Wi-Fi (the fastest):** the laptop serves https itself.
+
+```bash
+python -m demo.server --https          # prints the phone's address, https://192.168.1.2:8000/phone?k=...
+```
+
+Open that address on the phone and, the first time, tap *Advanced*, then *Proceed*: the certificate
+is the laptop's own (`demo/certs.py`, kept in `certs/`, not in git). The data stays on the local
+network. If the server lists more than one address, the first is the Wi-Fi's; the others can be
+virtual adapters (WSL, VirtualBox) that the phone cannot reach.
+
+**Anywhere with internet:** a Cloudflare quick tunnel gives the laptop a public https address, so
+the phone can be on mobile data, with no warning.
+
+```bash
+python -m demo.server                  # as usual
+python -m demo.tunnel                  # prints https://<random words>.trycloudflare.com/phone?k=...
+```
+
+It needs Cloudflare's `cloudflared`, from Cloudflare's release page. Every message goes through
+Cloudflare, so the round trip is longer than on the same Wi-Fi: from Pakistan the tunnel goes
+through Singapore, and our phone's round trip was about 230 to 250 ms. Watch the dashboard on the
+laptop at the `localhost` address the server printed, not through the tunnel, or every frame makes
+that trip twice. Anyone with the tunnel's address and its key can drive the device and see the
+camera: share it with no one, and stop the tunnel (Ctrl+C) when the demo ends. The tunnel does not
+start before the server has made its key.
+
+Keep the phone page open on the screen. Chrome slows a page in the background or with the screen
+off to a frame a second or less, so the page asks to keep the screen on. On a slow link the page
+drops old camera frames and voice rather than sending them late.
+
+The dashboard shows the round trip to the phone under *Inputs from the phone*, for any of these ways.
 
 ### Or any other camera
 
@@ -98,7 +171,8 @@ python -m demo.field recordings/road-1 --distance 120 --steps 160 --place "campu
 `--loop`: the walk ended where it started, so the gap between the track's end and start is its
 error. `--distance`: the real length (a tape, or a route measured on a map). `--steps`: the steps
 you counted. It prints the steps and the distance against those, the gap, and a row for the table
-in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS).
+in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS). The six walks
+that give the field numbers, with what to note on the spot, are in `docs/field-walks.md`.
 
 ## The phone screen
 
@@ -227,7 +301,8 @@ runs). The first run downloads it (about 100 MB) from Hugging Face; after that i
 With the detector it gives the camera what it could not measure before (#131):
 
 - **Distances in metres**: to each obstacle the detector finds (the depth in the middle of its
-  box), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
+  box, or the box height's estimate when that is nearer: under 2 m the depth read people 1.5
+  times too far on real walks, `docs/decisions.md` D12), and to the nearest thing standing in the path, whatever it is (a wall, a door, a pole).
   Stairs up rise into that from their second or third step, so while the detector sees stairs up,
   something from where they start to 1.5 m past it is taken to be the stairs, not an obstacle
   (#159). The stairs rule handles them, and the dashboard says "the stairs rise at ...".

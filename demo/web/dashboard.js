@@ -56,6 +56,8 @@ function render(s) {
   if (chips !== chipsKey) { chipsKey = chips; $("chips").innerHTML = chips; }
 
   updateTiles($("inputs"), s.sensors);
+  const rtt = s.latency && s.latency.phone_rtt_ms;
+  setText($("rtt"), rtt == null ? "" : " Round trip to the phone: " + Math.round(rtt) + " ms.");
   drawTrack(s.position.track);
   onFoot = s.on_foot;
   setText($("carried"), onFoot ? "Carried on foot" : "On the device");

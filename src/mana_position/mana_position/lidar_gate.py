@@ -7,13 +7,17 @@ that implies a very large one; a jump shows as an abrupt change of pose that the
 make. So each lidar pose is compared with the one before it (half a second apart, slam_toolbox
 gives about two a second while moving): the wheels' move over that time, turned into the map's
 heading, is where it should be. Over half a second the wheels hardly drift, so a difference over
-`jump_m` is a jump. It is added to an offset that is taken off every pose after it; when the lidar
-jumps back, the offset returns. The offset fades with a time constant of `fade_s`, so a lasting
-correction (the lidar was right after all) is taken in the end.
+`jump_m` is a jump. It is added to an offset that is taken off every pose after it. The offset
+fades with a time constant of `fade_s`, so a lasting correction (the lidar was right after all) is
+taken in the end. When the lidar jumps back, the jump cancels the offset: if what is left is under
+`jump_m`, the lidar is where it was before the first jump, so the offset is cleared, not left as a
+fraction of a metre the other way (Waqas, #181: a 1.2 m jump undone 15 s later left 0.26 m).
 
 The settings come from four runs on the indoor loop (two laps each): with 0.5 m and 60 s the worst
 error went from 1.26 to 0.59 m and from 1.13 to 0.33 m in the two with a jump, and stayed the same
 (0.35 and 0.40 m) in the two without. Any jump_m from 0.35 to 0.8 m left those two unchanged.
+Those four runs were recorded before the loop driver's start-pose fix (#179), so the settings were
+tuned on logs with that bias; they were not tuned again after it.
 """
 
 from __future__ import annotations
@@ -49,6 +53,8 @@ class JumpFilter:
                 self.offset[0] += ex
                 self.offset[1] += ey
                 self.jumps += 1
+                if math.hypot(*self.offset) < self.jump_m:  # a jump back: the lidar is right again
+                    self.offset = [0.0, 0.0]
             fade = math.exp(-max(0.0, t - t0) / self.fade_s)
             self.offset[0] *= fade
             self.offset[1] *= fade
