@@ -51,12 +51,14 @@ from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E4
 from demo import (  # noqa: E402
     access,
     caregiver,
+    floors,
     navigation,
     recording,
     sounds,
     speech,
     tiles,
     vision,
+    wifi,
 )
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
@@ -101,6 +103,7 @@ def build_app(
     tile_cache=None,
     key=None,
     listener=None,
+    laptop_wifi=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
@@ -127,6 +130,8 @@ def build_app(
     }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
+    app["floors"] = floors.FloorTracker()  # which floor, from motion and the camera's stairs
+    app["wifi"] = laptop_wifi  # the laptop's own Wi-Fi signal (demo.wifi), or None
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
@@ -134,6 +139,8 @@ def build_app(
 
     app.router.add_get("/", index)
     app.router.add_get("/live", live_page)
+    app.router.add_get("/indoor", indoor_page)
+    app.router.add_get("/api/imagery", imagery)
     app.router.add_get("/dashboard", dashboard_page)
     app.router.add_get("/phone", phone_page)
     app.router.add_get("/caregiver", caregiver_page)
@@ -164,6 +171,41 @@ async def index(request: web.Request) -> web.Response:
 async def live_page(request: web.Request) -> web.FileResponse:
     """The screen to show: the camera, the decision and the sensors at a glance."""
     return web.FileResponse(WEB / "live.html")
+
+
+async def indoor_page(request: web.Request) -> web.FileResponse:
+    """The second screen: which floor, the height travelled, the newest map and the Wi-Fi."""
+    return web.FileResponse(WEB / "indoor.html")
+
+
+async def imagery(request: web.Request) -> web.Response:
+    """When the satellite picture at a point was taken (Esri), kept per ~100 m. 503 offline."""
+    try:
+        lat, lon = float(request.query["lat"]), float(request.query["lon"])
+    except (KeyError, ValueError) as e:
+        raise web.HTTPBadRequest(text="lat and lon") from e
+    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+        raise web.HTTPBadRequest(text="lat and lon")
+    kept = request.app["live"].setdefault("imagery", {})
+    key = (round(lat, 3), round(lon, 3))
+    if key not in kept:
+        import aiohttp
+
+        url = tiles.IMAGERY_INFO.format(
+            lat=lat, lon=lon, lat0=lat - 0.01, lat1=lat + 0.01, lon0=lon - 0.01, lon1=lon + 0.01
+        )
+        try:
+            async with (
+                aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s,
+                s.get(url) as r,
+            ):
+                info = tiles.imagery_info(await r.json(content_type=None))
+        except (aiohttp.ClientError, TimeoutError, ValueError):
+            raise web.HTTPServiceUnavailable(text="no answer from the imagery service") from None
+        kept[key] = info
+    if kept[key] is None:
+        raise web.HTTPNotFound(text="no date for the imagery here")
+    return web.json_response(kept[key])
 
 
 async def dashboard_page(request: web.Request) -> web.FileResponse:
@@ -227,11 +269,17 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
             phone_t,
             None if rot is None else float(rot),
         )
+        app["floors"].on_motion(
+            now if phone_t is None else phone_t, float(d["ax"]), float(d["ay"]), float(d["az"]), now
+        )
     elif kind == "gps":
         acc, lat, lon, speed, heading = (
             number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")
         )
         mw.on_gps(acc, now, lat, lon, speed, heading)
+        app["floors"].on_gps_altitude(
+            now, number(d.get("altitude")), number(d.get("altitude_accuracy"))
+        )
     elif kind == "orientation":
         mw.on_orientation(*(number(d.get(k)) for k in ("alpha", "beta", "gamma", "compass")))
     elif kind == "word":
@@ -570,6 +618,14 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 app["mw"].clear_destination()
             elif d.get("type") == "place" and d.get("do") == "restart":
                 app["mw"].start_again()
+                old = app["floors"]  # the floor stays; its history and height trace go
+                app["floors"] = floors.FloorTracker(floor=old.floor, floor_h=old.floor_h)
+            elif (
+                d.get("type") == "floor" and isinstance(d.get("set"), int) and -5 <= d["set"] <= 60
+            ):
+                app["floors"].set_floor(app["mw"].clock(), d["set"])
+            elif d.get("type") == "floor" and (h := number(d.get("height"))) and 2.4 <= h <= 6.0:
+                app["floors"].floor_h = h
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -645,10 +701,36 @@ def models_status(app: web.Application) -> dict:
     }
 
 
+def floor_step(app: web.Application, snap: dict) -> dict:
+    """Feed the floor tracker what the tick knows: the steps, and stairs the camera placed ahead
+    (each report once); then its view for the pages."""
+    tr, mw = app["floors"], app["mw"]
+    now = mw.clock()
+    tr.on_steps(now, mw.nav.track.steps)
+    tr.on_position_source(now, snap["position"]["track"]["source"])
+    seen = app["live"]["stairs"]
+    if seen is not None and seen.stamp != app["live"].get("stairs_fed"):
+        app["live"]["stairs_fed"] = seen.stamp
+        ahead = not math.isfinite(seen.distance_m) or seen.distance_m <= 4.0
+        way = {Ground.STAIRS_UP: 1, Ground.STAIRS_DOWN: -1}.get(seen.ground)
+        if way and ahead:
+            tr.on_stairs(now, way)
+    tr.tick(now)
+    return tr.view(now)
+
+
 async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
     snap["models"] = models_status(app)
+    snap["floors"] = floor_step(app, snap)
+    snap["phone_online"] = bool(app["phones"])
+    wifi_now = app["wifi"]
+    if wifi_now is not None:
+        if mw.clock() - app["live"].get("wifi_read", -9.0) >= 0.5:  # two reads a second
+            app["live"]["wifi_read"] = mw.clock()
+            wifi_now.sample(mw.clock())
+        snap["wifi_laptop"] = wifi_now.view()
     app["live"]["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
@@ -751,6 +833,7 @@ def main(argv=None) -> None:
         tile_cache=tiles.TileCache(a.tile_cache),
         key=key,
         listener=listener,
+        laptop_wifi=wifi.LaptopWifi(),
     )
     if a.record:
         print(f"recording the phone into {a.record}")

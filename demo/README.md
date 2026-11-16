@@ -293,6 +293,28 @@ more than once in 10 s) when the direction moves two hours round, as after a wro
 to hear it at any time; the X on the map clears it. It is the straight line, not a route: streets
 and walls are not known.
 
+**The indoor screen (`/indoor`).** A second screen beside `/live`, on the same server and the same
+phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
+- **Which floor.** A web page gets no barometer (Chrome has no web API for one), so the floor comes
+  from what the page can read. A lift: the phone, held still, feels the lift speed up and slow down,
+  and the vertical acceleration integrated twice is the height. Stairs: the camera's detector
+  (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down ahead, and the steps climbed
+  after it are risers (0.17 m). Motion only measures changes, so the floor is "?" until there is a
+  reason: walking in from outside (GPS good, then lost at the door) sets the ground floor, as an
+  assumption the page states; or the supervisor sets it with one tap. Until then the floors moved
+  since the start are counted. GPS altitude is shown beside it only as a reference: a phone's GPS
+  height is often 10 m or more off indoors.
+- **The newest map.** The satellite layer is Esri World Imagery, whose current release is the
+  newest it has; the map shows the date the picture at that point was taken and by what satellite
+  (`/api/imagery`, from Esri's imagery metadata). For the FAST campus it is 28 Aug 2025, 0.46 m a
+  pixel. Tiles are kept a week, then fetched again.
+- **Wi-Fi.** The laptop's own Wi-Fi signal, read twice a second. Windows gives only the RSSI, in
+  whole dBm, refreshed rarely (it did not change once in 20 s here), which is too coarse to sense
+  people. Wi-Fi sensing needs the channel state (CSI), from hardware such as two ESP32 boards.
+- Tested on synthetic lift rides (up one floor, down two), a bump, walking, a stairs flight of 19
+  steps and a few steps, and a lift taken right after a walk (`tests/test_demo_floors.py`). Not yet
+  measured on real lifts and stairs.
+
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
 fix, otherwise in metres from the start (it says so).
