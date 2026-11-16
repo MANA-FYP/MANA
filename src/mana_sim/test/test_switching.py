@@ -43,3 +43,26 @@ def test_the_logs_are_read(tmp_path):
         "[INFO] [fault_script]: at 55.0 s (clock 155.10): gps dropout off\n"
     )
     assert read_outages(str(log)) == [(125.0, 155.1)]
+
+
+def test_an_outage_covered_by_odometry_is_a_fail_not_a_switch_to_the_lidar_map():
+    """Waqas's case (#182): GPS until 26.5 s, odometry to 61 s, then GPS. Away from GPS after
+    1.5 s with 2 changes, which passed before; but the lidar map was never used."""
+    ODOMETRY = 2
+    r = reports((GPS, 0, 26.5), (ODOMETRY, 26.5, 61), (GPS, 61, 80))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.switch_s == pytest.approx(1.5) and o.changes == 2 and o.away_source == ODOMETRY
+    assert o.on_s[ODOMETRY] == pytest.approx(28.5) and not o.passed
+
+
+def test_time_on_each_source_and_a_clean_switch_passes():
+    ODOMETRY = 2
+    r = reports((GPS, 0, 26.5), (LIDAR, 26.5, 61), (GPS, 61, 80))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.on_s[GPS] == pytest.approx(1.5) and o.on_s[LIDAR] == pytest.approx(28.5)
+    assert o.on_s.get(ODOMETRY, 0.0) == 0.0 and o.passed
+    r = reports(
+        (GPS, 0, 26.5), (LIDAR, 26.5, 40), (ODOMETRY, 40, 41), (LIDAR, 41, 61), (GPS, 61, 80)
+    )
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.on_s[ODOMETRY] == pytest.approx(1.0) and not o.passed  # a moment on odometry fails
