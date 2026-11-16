@@ -87,9 +87,14 @@ async def play(url: str, folder: Path | str, speed: float = 1.0) -> int:
     fast). Returns how many messages were sent."""
     import aiohttp
 
+    from demo import access
+
     folder, sent = Path(folder), 0
     lines = read(folder)
-    async with aiohttp.ClientSession() as session, session.ws_connect(url + "/ws/phone") as ws:
+    async with (
+        aiohttp.ClientSession() as session,
+        session.ws_connect(access.with_key(url + "/ws/phone", access.read())) as ws,
+    ):
 
         async def drain():  # read what the server sends, or its sends back up
             async for _ in ws:

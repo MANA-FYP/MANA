@@ -754,6 +754,11 @@ class Middleware:
         if rtt_ms is not None:  # shown on the dashboard: cable and Wi-Fi compared live
             self.latency["phone_rtt_ms"] = round(rtt_ms, 1)
 
+    def on_phone_gone(self) -> None:
+        """The last phone disconnected: its round trip is no longer measured, so not shown."""
+        self.link.rtt_ms = None
+        self.latency.pop("phone_rtt_ms", None)
+
     def on_radio(self, wifi: bool | None, bluetooth: bool | None, now: float | None = None) -> None:
         """What the phone's browser says about its radios. None means it cannot tell."""
         now = self.clock() if now is None else now
