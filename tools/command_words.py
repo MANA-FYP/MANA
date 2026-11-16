@@ -13,7 +13,21 @@ returns is the answer.
 
 Each condition is run clean and with Speech Commands' own background noise (_background_noise_:
 white and pink noise, a running tap, an exercise bike, dishes, a cat) mixed in at a given
-signal-to-noise ratio, a random stretch of a random noise file per clip, with a fixed seed.
+signal-to-noise ratio, a random stretch of a random noise file per clip, with a fixed seed. The
+stretch comes from the last quarter of each file, which tools/train_commands.py never mixes in,
+so a trained model is not tested on noise it was trained with (Waqas, #185).
+
+The clips: the dataset's testing_list.txt, or with --official the authors' separate test set
+(speech_commands_test_set_v0.02: the ten words, _unknown_ and _silence_, 1 s each). Its silence
+clips measure false activations from noise alone, as when the device listens all day; they count
+as other words.
+
+Stop gets its own line: a missed stop is the unsafe case, and "stop heard as go" the worst one.
+With --held-out WORDS, the false activations on those words are given apart: words a trained model
+never saw (tools/train_commands.py --hold-out), against the ones it was trained to reject.
+
+The clips are aligned 1 s recordings with the word in them; the demo's Spotter listens every
+0.25 s to a running stream, which these numbers do not cover.
 """
 
 from __future__ import annotations
@@ -34,6 +48,13 @@ sys.path.insert(0, str(ROOT))
 from demo.speech import COMMAND_WORDS, TARGET_RATE, grammar, parse_result  # noqa: E402
 
 SILENCE = np.zeros(int(0.3 * TARGET_RATE), dtype=np.int16)
+NOISE_TEST_SHARE = 0.25  # the last quarter of each noise file: for tests only, never in training
+
+
+def noise_part(noise: np.ndarray, part: str) -> np.ndarray:
+    """The training or the test part of a background noise file (#185: none of it in both)."""
+    cut = int(noise.size * (1 - NOISE_TEST_SHARE))
+    return noise[:cut] if part == "train" else noise[cut:]
 
 
 def read_wav(path: Path) -> np.ndarray:
@@ -48,6 +69,12 @@ def test_clips(sc: Path, listed: str = "testing_list.txt") -> list[tuple[str, Pa
     threshold on clips the result is not reported on)."""
     lines = (sc / listed).read_text().split()
     return [(line.split("/")[0], sc / line) for line in lines]
+
+
+def official_clips(folder: Path) -> list[tuple[str, Path]]:
+    """(label, path) of the authors' test set: a folder per command word, _unknown_ and _silence_.
+    Unknown clips are labelled "_unknown_" and silences "_silence_", both other words here."""
+    return [(wav.parent.name, wav) for wav in sorted(folder.glob("*/*.wav"))]
 
 
 def mix(speech: np.ndarray, noise: np.ndarray, snr_db: float) -> np.ndarray:
@@ -69,9 +96,11 @@ def outcome(label: str, heard: list[tuple[str, float]]) -> str:
     return "quiet" if word is None else "false"
 
 
-def summary(rows: list[dict]) -> dict:
+def summary(rows: list[dict], held_out: frozenset = frozenset()) -> dict:
     said = [r for r in rows if r["label"] in COMMAND_WORDS]
     other = [r for r in rows if r["label"] not in COMMAND_WORDS]
+    stop = [r for r in said if r["label"] == "stop"]
+    held = [r for r in other if r["label"] in held_out]
     count = lambda rs, o: sum(r["outcome"] == o for r in rs)  # noqa: E731
     return {
         "said": len(said),
@@ -80,6 +109,16 @@ def summary(rows: list[dict]) -> dict:
         "missed": count(said, "missed"),
         "other": len(other),
         "false": count(other, "false"),
+        "silence": sum(r["label"] == "_silence_" for r in other),
+        "silence_false": sum(r["label"] == "_silence_" and r["outcome"] == "false" for r in other),
+        # the unsafe case: a stop not heard, or heard as another word (go above all)
+        "stop": len(stop),
+        "stop_missed": count(stop, "missed"),
+        "stop_as_go": sum(r["heard"] == "go" for r in stop),
+        "stop_as_other": sum(r["outcome"] == "wrong" and r["heard"] != "go" for r in stop),
+        "go_as_stop": sum(r["label"] == "go" and r["heard"] == "stop" for r in said),
+        "held": len(held),
+        "held_false": count(held, "false"),
     }
 
 
@@ -125,12 +164,21 @@ def kws_listener(checkpoint: Path, threshold: float):
 
 
 def run(
-    sc: Path, listen, snr: float | None, seed: int = 0, listed: str = "testing_list.txt"
+    sc: Path,
+    listen,
+    snr: float | None,
+    seed: int = 0,
+    listed: str = "testing_list.txt",
+    official: Path | None = None,
 ) -> list[dict]:
     rng = random.Random(seed)  # the same noise for every recogniser
-    noises = [read_wav(p) for p in sorted((sc / "_background_noise_").glob("*.wav"))]
+    noises = [
+        noise_part(read_wav(p), "test") for p in sorted((sc / "_background_noise_").glob("*.wav"))
+    ]
+    clips = official_clips(official) if official else test_clips(sc, listed)
+    root = official or sc
     rows = []
-    for i, (label, path) in enumerate(test_clips(sc, listed)):
+    for i, (label, path) in enumerate(clips):
         clip = read_wav(path)
         if snr is not None:
             noise = rng.choice(noises)
@@ -140,7 +188,7 @@ def run(
         heard = listen(clip)
         ms = (time.perf_counter() - t) * 1000
         rows.append({
-            "clip": path.relative_to(sc).as_posix(),
+            "clip": path.relative_to(root).as_posix(),
             "label": label,
             "heard": heard[0][0] if heard else "",
             "conf": round(heard[0][1], 3) if heard else "",
@@ -165,30 +213,52 @@ def main(argv=None) -> int:
     p.add_argument("--out", type=Path, default=None, help="where the per-clip CSVs go")
     p.add_argument("--list", default="testing_list.txt",
                    help="testing_list.txt, or validation_list.txt for a threshold")  # fmt: skip
+    p.add_argument("--official", type=Path,
+                   help="the authors' test set, speech_commands_test_set_v0.02")  # fmt: skip
+    p.add_argument("--held-out", nargs="*", default=[],
+                   help="words left out of training (train_commands.py --hold-out)")  # fmt: skip
     a = p.parse_args(argv)
     out = a.out or a.sc
     if a.vosk:
         listen, prefix = vosk_listener(a.vosk), "vosk"
     else:
         listen, prefix = kws_listener(a.kws, a.threshold), f"kws_{a.threshold:g}"
+    held = frozenset(a.held_out)
+    part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
+    pct = lambda n, d: f"{n} ({n / d:.1%})" if d else "-"  # noqa: E731
+    results = []
     print("| Sound | Command clips | Right | Wrong | Missed | Other words | False activations |")
     print("|---|---|---|---|---|---|---|")
     for snr in [None, *a.snr]:
         name = "clean" if snr is None else f"snr{snr:g}"
-        rows = run(a.sc, listen, snr, listed=a.list)
-        part = "" if a.list == "testing_list.txt" else "val_"
+        sound = "clean" if snr is None else f"noise at {snr:g} dB"
+        rows = run(a.sc, listen, snr, listed=a.list, official=a.official)
         with open(out / f"{part}{prefix}_{name}.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
-        s = summary(rows)
-        pct = lambda n, d: f"{n} ({n / d:.1%})"  # noqa: E731
+        s = summary(rows, held)
+        results.append((sound, s))
         print(
-            f"| {'clean' if snr is None else f'noise at {snr:g} dB'} | {s['said']} "
+            f"| {sound} | {s['said']} "
             f"| {pct(s['right'], s['said'])} | {pct(s['wrong'], s['said'])} "
             f"| {pct(s['missed'], s['said'])} | {s['other']} | {pct(s['false'], s['other'])} |",
             flush=True,
         )
+    print(
+        "\n| Sound | Stop clips | Missed | Heard as go | Heard as another word | Go heard as stop |"
+    )
+    print("|---|---|---|---|---|---|")
+    for sound, s in results:
+        print(f"| {sound} | {s['stop']} | {pct(s['stop_missed'], s['stop'])} "
+              f"| {pct(s['stop_as_go'], s['stop'])} | {pct(s['stop_as_other'], s['stop'])} "
+              f"| {s['go_as_stop']} |")  # fmt: skip
+    if any(s["silence"] for _, s in results):
+        said = [f"{sound} {pct(s['silence_false'], s['silence'])}" for sound, s in results]
+        print("\nNoise alone (_silence_ clips): " + "; ".join(said))
+    if held:
+        said = [f"{sound} {pct(s['held_false'], s['held'])}" for sound, s in results]
+        print("\nWords left out of training: " + "; ".join(said))
     return 0
 
 

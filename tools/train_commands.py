@@ -13,6 +13,12 @@ of 100. The paper trains for 200 epochs on a GPU; on this laptop's CPU an epoch 
 takes about 35 minutes, so fewer are run and the number is reported.
 
 The model with the best validation accuracy is kept as <out>/model.pt, with a log per epoch.
+
+Noise for training comes only from the first three quarters of each background noise file; the
+last quarter is for tests (tools/command_words.py), so a model is never tested on noise it was
+trained with (#185). --hold-out WORDS leaves some of the other words out of training and
+validation altogether, so the false activations on them (command_words.py --held-out WORDS) show
+how the model does with words it never learnt to reject, as with real speech.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from command_words import read_wav  # noqa: E402
+from command_words import noise_part, read_wav  # noqa: E402
 
 from demo import kws  # noqa: E402
 
@@ -41,14 +47,15 @@ WORDS = kws.LABELS[:10]
 UNKNOWN, SILENCE = kws.LABELS.index("unknown"), kws.LABELS.index("silence")
 
 
-def splits(sc: Path) -> dict[str, list[tuple[int, Path]]]:
-    """(class, path) of every clip, by split. Background noise is not a word."""
+def splits(sc: Path, hold_out: frozenset = frozenset()) -> dict[str, list[tuple[int, Path]]]:
+    """(class, path) of every clip, by split. Background noise is not a word, and the held-out
+    words are in no split: they are only tested on."""
     val = set((sc / "validation_list.txt").read_text().split())
     test = set((sc / "testing_list.txt").read_text().split())
     out = {"train": [], "val": [], "test": []}
     for wav in sorted(sc.glob("*/*.wav")):
         label = wav.parent.name
-        if label.startswith("_"):
+        if label.startswith("_") or label in hold_out:
             continue
         rel = f"{label}/{wav.name}"
         cls = WORDS.index(label) if label in WORDS else UNKNOWN
@@ -136,12 +143,20 @@ def main(argv=None) -> int:
     p.add_argument("--batch", type=int, default=100)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--hold-out", nargs="*", default=[],
+                   help="other words to leave out of training, such as backward forward follow "
+                        "learn visual")  # fmt: skip
     a = p.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
     rng, torch_rng = random.Random(a.seed), torch.manual_seed(a.seed)
     del torch_rng
-    data = splits(a.sc)
-    noises = [read_wav(n) for n in sorted((a.sc / "_background_noise_").glob("*.wav"))]
+    if set(a.hold_out) & set(WORDS):
+        p.error("--hold-out takes other words, not command words")
+    data = splits(a.sc, frozenset(a.hold_out))
+    noises = [  # never the test part (command_words.noise_part)
+        noise_part(read_wav(n), "train")
+        for n in sorted((a.sc / "_background_noise_").glob("*.wav"))
+    ]
     aug = Augment(noises, rng)
     words = [x for x in data["train"] if x[0] != UNKNOWN]
     unknown = [x for x in data["train"] if x[0] == UNKNOWN]

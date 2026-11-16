@@ -45,11 +45,48 @@ def test_a_clip_is_right_wrong_missed_quiet_or_a_false_activation(label, heard, 
 
 def test_the_summary_counts_command_clips_and_other_words_apart():
     rows = [
-        {"label": "stop", "outcome": "right"},
-        {"label": "go", "outcome": "missed"},
-        {"label": "bed", "outcome": "false"},
-        {"label": "cat", "outcome": "quiet"},
+        {"label": "stop", "heard": "stop", "outcome": "right"},
+        {"label": "go", "heard": "", "outcome": "missed"},
+        {"label": "bed", "heard": "go", "outcome": "false"},
+        {"label": "cat", "heard": "", "outcome": "quiet"},
     ]
-    assert cw.summary(rows) == {
+    s = cw.summary(rows)
+    assert {k: s[k] for k in ("said", "right", "wrong", "missed", "other", "false")} == {
         "said": 2, "right": 1, "wrong": 0, "missed": 1, "other": 2, "false": 1,
     }  # fmt: skip
+
+
+def test_stop_gets_its_own_counts_and_held_out_words_theirs():
+    rows = [
+        {"label": "stop", "heard": "", "outcome": "missed"},
+        {"label": "stop", "heard": "go", "outcome": "wrong"},
+        {"label": "stop", "heard": "up", "outcome": "wrong"},
+        {"label": "stop", "heard": "stop", "outcome": "right"},
+        {"label": "go", "heard": "stop", "outcome": "wrong"},
+        {"label": "_silence_", "heard": "off", "outcome": "false"},
+        {"label": "_silence_", "heard": "", "outcome": "quiet"},
+        {"label": "visual", "heard": "on", "outcome": "false"},
+        {"label": "bed", "heard": "", "outcome": "quiet"},
+    ]
+    s = cw.summary(rows, frozenset({"visual", "learn"}))
+    assert (s["stop"], s["stop_missed"], s["stop_as_go"], s["stop_as_other"]) == (4, 1, 1, 1)
+    assert s["go_as_stop"] == 1
+    assert (s["silence"], s["silence_false"]) == (2, 1)
+    assert (s["held"], s["held_false"]) == (1, 1)
+
+
+def test_the_test_noise_is_never_the_training_noise():
+    noise = np.arange(1000)
+    train, test = cw.noise_part(noise, "train"), cw.noise_part(noise, "test")
+    assert train.size == 750 and test.size == 250
+    assert not set(train.tolist()) & set(test.tolist())
+    assert np.array_equal(np.concatenate([train, test]), noise)
+
+
+def test_the_official_test_set_is_read_by_folder(tmp_path):
+    for label in ("stop", "_unknown_", "_silence_"):
+        (tmp_path / label).mkdir()
+        (tmp_path / label / "a.wav").write_bytes(b"")
+    clips = cw.official_clips(tmp_path)
+    assert sorted(label for label, _ in clips) == ["_silence_", "_unknown_", "stop"]
+    assert cw.outcome("_silence_", [("go", 0.9)]) == "false"
