@@ -97,3 +97,34 @@ def test_the_server_feeds_the_phones_sound_to_the_listener():
             await client.close()
 
     asyncio.run(go())
+
+
+def test_the_phone_streams_its_microphone_when_the_laptop_hears_sounds():
+    """With --sounds and no speech model the phone must still send its audio (#184): Android
+    Chrome cannot run its own recogniser beside the stream, so the stream wins, at 32 kHz."""
+    from pathlib import Path
+
+    js = (Path(__file__).parents[1] / "demo" / "web" / "phone.js").read_text(encoding="utf-8")
+    assert "laptopHearsSounds = !!(m.models && m.models.sounds);" in js
+    assert "if (!laptopHasVoiceModel && !laptopHearsSounds) return startBrowserRecognition();" in js
+    assert "sampleRate: laptopHearsSounds ? 32000 : 16000" in js
+
+
+def test_a_broken_sound_model_is_reported_once_not_every_second(capsys):
+    pytest.importorskip("aiohttp")
+    from demo.server import build_app, hear_task
+
+    def broken(window):
+        raise RuntimeError("no weights")
+
+    listener = sounds.Listener(broken)
+    listener.feed(np.zeros(32000, dtype=np.float32), 32000)
+    app = build_app(listener=listener)
+
+    async def go():
+        await hear_task(app, 1.0)
+        await hear_task(app, 2.0)
+
+    asyncio.run(go())
+    out = capsys.readouterr().out
+    assert out.count("the model failed") == 1 and not app["live"]["hearing"]
