@@ -310,10 +310,36 @@ phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
   pixel. Tiles are kept a week, then fetched again.
 - **Wi-Fi.** The laptop's own Wi-Fi signal, read twice a second. Windows gives only the RSSI, in
   whole dBm, refreshed rarely (it did not change once in 20 s here), which is too coarse to sense
-  people. Wi-Fi sensing needs the channel state (CSI), from hardware such as two ESP32 boards.
+  people. Wi-Fi sensing needs the channel state (CSI), from hardware such as two ESP32 boards: the
+  Wi-Fi screen below.
 - Tested on synthetic lift rides (up one floor, down two), a bump, walking, a stairs flight of 19
   steps and a few steps, and a lift taken right after a walk (`tests/test_demo_floors.py`). Not yet
   measured on real lifts and stairs.
+
+**The Wi-Fi screen (`/wifi`): people from Wi-Fi.** Whether someone is in a room, and in which
+zone, from how their body changes the Wi-Fi signal between two ESP32 boards, with no camera.
+- The receiving ESP32 runs esp-csi's console firmware and prints one `CSI_DATA` line per packet on
+  USB, about 200 a second: the amplitude of 56 subcarriers. `demo/csi.py` cuts them into windows of
+  one second and gives each window to a small linear model (`demo/csi_model/wifi_csi_office.npz`), run
+  with numpy. The screen shows the verdict and the model's share for each label, the 56
+  subcarriers over the last 10 s, the movement against the empty room's level, and how the model
+  scored on sessions it never saw.
+- With no ESP32 yet, `--csi-replay` plays recorded sessions of two ESP32-C6 boards in an office
+  (the Office Localization set, CC BY 4.0) at their own pace: the room empty, then a person in
+  zone 1, 2 and 5, 20 s each, or one picked on the screen. They are the authors' test sessions, not
+  the ones the model was fitted on, so the screen marks each verdict right or wrong as it plays.
+  ```bash
+  python tools/wifi_csi.py --data datasets/office_csi --fetch       # the recordings, about 950 MB
+  python -m demo.server --csi-replay datasets/office_csi            # then open /wifi
+  python -m demo.server --csi-serial COM5     # or a live ESP32 (pyserial); --csi-baud: its rate
+  ```
+- The model holds for the room and the placement of the boards it was fitted in. A new place needs
+  its own recordings (a few minutes empty and with a person in each zone) and `tools/wifi_csi.py`
+  run on them. A person standing still is found by the shape of the subcarriers, not by movement:
+  in two of the three zones the movement stayed at the empty room's level.
+- Not yet an input to the decision core. The use proposed: a person sensed by Wi-Fi but not seen by
+  the camera (round a corner, behind a door) slows the device and is said; one source, so it never
+  stops it.
 
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a

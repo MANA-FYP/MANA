@@ -351,3 +351,43 @@ ros2 run mana_core evaluate --world gazebo --rerun       # play again, also thos
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+## People from Wi-Fi: ESP32 channel state, on held-out sessions (#194)
+
+Measured on 16 November 2026 with `tools/wifi_csi.py` on the Office Localization recordings
+(`datasets.md`): two ESP32-C6 boards 3 m apart in an office, about 200 packets a second. Each
+one-second window gets a label from a linear model (logistic regression on how much each of the 56
+subcarriers flickers and the shape of their mean strength), fitted on each label's first session
+and scored on sessions it never saw: the authors' second sessions and three more empty ones. For
+comparison, the same with the RSSI alone (its mean and spread over the window), which is all a
+laptop or a phone can read.
+
+| Session | Windows | Labelled right, CSI | Labelled right, RSSI alone |
+|---|---:|---:|---:|
+| Empty (session 2) | 999 | 1.00 | 1.00 |
+| Person in zone 1 | 997 | 0.99 | 0.56 |
+| Person in zone 2 | 997 | 0.76 (0.24 as zone 5) | 0.73 (0.11 as empty) |
+| Person in zone 5 | 423 | 0.98 | 0.90 |
+| Empty (session 3) | 999 | 1.00 | 1.00 |
+| Empty (session 4) | 998 | 1.00 | 1.00 |
+| Empty (session 5) | 982 | 0.99 | 0.99 |
+
+What follows:
+
+- **Empty or not was right in 99.8 % of the windows** (RSSI alone: 98.2 %). No window with a
+  person was called empty; 10 of the 2,979 windows of the three extra empty sessions were called
+  occupied. With RSSI alone, 108 windows with a person were called empty, 107 of them in zone 2.
+- **Which zone needs the subcarriers.** Zone 1 goes from 0.56 with RSSI to 0.99. Zones 2 and 5 are
+  confused in a quarter of zone 2's windows; where the zones are in the room is not published.
+- **Movement is not presence.** The movement level (the median flicker) went over the empty room's
+  99th percentile in 77 % of zone 2's windows but only 2 % of zone 5's and 13 % of zone 1's: those
+  people were mostly still. They are found by the shape of the subcarriers, not by flicker.
+- Limits: one office, one placement of the boards, sessions from one month, a person per session,
+  line of sight. A model fitted in one room does not carry over to another; each place needs a few
+  minutes of its own recordings. Not yet tried on our own boards, and not yet an input to the
+  decision core: the screen (`/wifi`) shows the proposed use, a person sensed but not seen slows
+  the device and never stops it.
+
+```
+python tools/wifi_csi.py --data datasets/office_csi --fetch --out demo/csi_model/wifi_csi_office.npz
+```

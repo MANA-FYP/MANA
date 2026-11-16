@@ -84,6 +84,13 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Contents:** 8,732 labelled clips of up to 4 seconds in 10 classes (6.0 GB). MANA uses `siren` and `car_horn` against the other eight.
 - **Split:** the 10 official folds. The authors ask that results are reported with 10-fold cross-validation on these folds and never with a random split (clips from the same recording sit in the same fold). We report the mean over the 10 folds.
 
+## Office Localization (Wi-Fi CSI)
+
+- **Source:** Gad, Batool, Fouda, Verma and Fadlullah, *WiFi Sensing-Based Human Activity Recognition For Smart Home Applications Using Commodity Access Points*, IEEE, 2026; [Hugging Face: gadgadgad/OfficeLocalization](https://huggingface.co/datasets/gadgadgad/OfficeLocalization).
+- **Licence:** CC BY 4.0: free to use, with credit.
+- **Contents:** two ESP32-C6 boards 3 m apart in an office (one sending, one receiving), 802.11n at 20 MHz, about 200 packets a second, each one esp-csi `CSI_DATA` row: RSSI and 64 subcarriers as I/Q pairs. Sessions of 7 to 17 minutes with the room empty (5 sessions) or a person in zone 1, 2 or 5 (2 each); about 950 MB. Where the zones are in the room is not published.
+- **Split:** the authors' own, by session: `*_1` to fit, `*_2` to test. MANA also uses `empty_3` to `empty_5` as test sessions, to count false alarms. `tools/wifi_csi.py --fetch` downloads it to `datasets/office_csi/` (not in git); the fitted model, a few kilobytes, is in `demo/csi_model/`.
+
 ## Our own phone recordings
 
 Walks recorded with `python -m demo.server --record` (#89, see [`demo/README.md`](../demo/README.md#record-a-walk-and-play-it-again)) are kept out of git in `recordings/`. They hold camera frames of real places and the people in them, and GPS positions, so they stay with the team. Before a frame from one goes into a report or a slide, the faces must be blurred, the GPS left out, and anyone recorded asked first.
