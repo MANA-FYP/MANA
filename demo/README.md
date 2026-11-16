@@ -301,7 +301,7 @@ phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
   (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down ahead, and the steps climbed
   after it are risers (0.17 m). Motion only measures changes, so the floor is "?" until there is a
   reason: walking in from outside (GPS good, then lost at the door) sets the ground floor, as an
-  assumption the page states; or the supervisor sets it with one tap. Until then the floors moved
+  assumption the page states; the user says it ("floor two"); or the supervisor taps it. Until then the floors moved
   since the start are counted. GPS altitude is shown beside it only as a reference: a phone's GPS
   height is often 10 m or more off indoors.
 - **The newest map.** The satellite layer is Esri World Imagery, whose current release is the
@@ -408,7 +408,7 @@ The server starts without any model and says which ones are missing.
 |---|---|---|
 | Object detector (COCO) | `pip install ultralytics`, then `--weights yolo26n.pt` (or `yolo26s.pt`, slower and finds more) | the 80 COCO classes: person, chair, bottle, laptop and so on; obstacles get an **estimated** distance |
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
-| Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
+| Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline, and the phrases: "mark this place", "where is the destination", "floor two" (or "second floor", "ground floor", "basement"), which sets the floor on the indoor screen. In a sentence only "stop" acts, so "where do I go" does not start the device; that holds for the browser's recogniser too |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included**: train one on StairNet with `tools/train_ground.py` (#38). |
 | Sirens and horns | `pip install torch torchvision torchaudio`, a checkout of [EfficientAT](https://github.com/fschmid56/EfficientAT) with `resources/mn10_as_mAP_471.pt`, then `--sounds <checkout>`, with `--vosk-model` for voice commands | a siren or a horn in the last 10 s of the phone's microphone, said once and shown on the live page. The phone then streams its microphone at 32 kHz, and Android Chrome cannot run its own speech recognition beside that stream, so without `--vosk-model` voice commands are off (the server says so). On UrbanSound8K: sirens F1 0.86, horns F1 0.74 (docs/results.md, #47) |
 | Depth from the camera | `pip install torch transformers`, then `--depth` | distances in metres from the camera image, and where stairs the detector sees are and which way they go (see above) |

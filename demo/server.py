@@ -34,6 +34,7 @@ import contextlib
 import io
 import json
 import math
+import re
 import sys
 import warnings
 from array import array
@@ -62,7 +63,7 @@ from demo import (  # noqa: E402
     wifi,
 )
 from demo import depth as dz  # noqa: E402
-from demo.middleware import Middleware  # noqa: E402
+from demo.middleware import Middleware, in_sentence  # noqa: E402
 
 warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)  # plain string keys are fine here
 
@@ -342,10 +343,16 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
     elif kind == "orientation":
         mw.on_orientation(*(number(d.get(k)) for k in ("alpha", "beta", "gamma", "compass")))
     elif kind == "word":
-        # the phone sends the whole phrase first ("heard"), so a word is not written down twice
-        mw.on_word(str(d.get("word", "")), float(d.get("confidence", 0.8)), now, record=False)
+        # the phone sends the whole phrase first ("heard"), so a word is not written down twice;
+        # and in a sentence only "stop" acts: "where do I go" is not "go"
+        word = str(d.get("word", ""))
+        if not app["live"].get("in_sentence") or re.sub(r"[^a-z]", "", word.lower()) == "stop":
+            mw.on_word(word, float(d.get("confidence", 0.8)), now, record=False)
     elif kind == "heard":
-        mw.on_heard(str(d.get("text", "")), now, final=bool(d.get("final", True)))
+        text, final = str(d.get("text", "")), bool(d.get("final", True))
+        if final:
+            app["live"]["in_sentence"] = in_sentence(text)
+        mw.on_heard(text, now, final=final)
     elif kind == "button":
         command = BUTTONS.get(str(d.get("name", "")).lower())
         if command is not None:
@@ -389,7 +396,12 @@ async def on_binary(app: web.Application, data: bytes) -> None:
         hear(app, samples, now)
         if app["recognizer"] is not None:
             pcm = speech.to_pcm16_16k(list(samples), app["live"]["audio_rate"])
-            for word, confidence in app["recognizer"].feed(pcm):
+            words = app["recognizer"].feed(pcm)
+            phrase = app["recognizer"].last_phrase
+            if phrase:  # "mark this place", "floor two": in a sentence only "stop" acts, so
+                mw.on_heard(phrase, now)  # "on the first floor" does not switch modes
+                words = [(w, c) for w, c in words if w == "stop"]
+            for word, confidence in words:
                 mw.on_word(word, confidence, now)
 
 
@@ -778,6 +790,10 @@ def floor_step(app: web.Application, snap: dict) -> dict:
         way = {Ground.STAIRS_UP: 1, Ground.STAIRS_DOWN: -1}.get(seen.ground)
         if way and ahead:
             tr.on_stairs(now, way)
+    said = mw.floor_said
+    if said is not None and said[1] != app["live"].get("floor_said_t"):
+        app["live"]["floor_said_t"] = said[1]
+        tr.set_floor(now, said[0], "said by the user", "voice")
     tr.tick(now)
     return tr.view(now)
 

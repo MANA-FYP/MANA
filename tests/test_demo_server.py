@@ -87,6 +87,30 @@ def test_the_spoken_word_stop_stops_the_chair_and_go_resumes():
     run(with_clients(go))
 
 
+def test_in_a_spoken_sentence_only_stop_acts():
+    """The browser sends the phrase, then each of its words: "where do I go" must not start the
+    device, "stop, there is a wall" must stop it, and a lone "go" still works."""
+
+    async def go(client, phone, dash):
+        async def say(text):
+            await phone.send_json({"type": "heard", "text": text, "final": True})
+            for w in text.split():
+                await phone.send_json({"type": "word", "word": w, "confidence": 0.9})
+
+        await say("Stop, there is a wall.")
+        await snapshot_where(dash, lambda s: s["decision"]["stop"])
+        await say("where do I go")
+        await say("I am on the second floor")
+        for _ in range(5):  # still stopped a few ticks later
+            snap = await snapshot_where(dash, lambda s: True)
+            assert snap["decision"]["stop"]
+        snap = await snapshot_where(dash, lambda s: s["floors"]["label"] == "2")
+        await say("go")
+        await snapshot_where(dash, lambda s: not s["decision"]["stop"])
+
+    run(with_clients(go))
+
+
 def test_the_dashboard_can_stop_the_chair_too():
     async def go(client, phone, dash):
         await dash.send_json({"type": "button", "name": "stop"})
