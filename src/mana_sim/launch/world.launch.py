@@ -8,6 +8,7 @@
     ros2 launch mana_sim world.launch.py sensors:=false   # no cameras and lidar (no GPU, as in CI)
     ros2 launch mana_sim world.launch.py driver:=true     # steer with cmd_vel, capped by MANA
     ros2 launch mana_sim world.launch.py panel:=true      # the supervisor's panel, localhost:8090
+    ros2 launch mana_sim world.launch.py odom:=wheels     # odom from the wheels and gyro (drifts)
 
 The launch file sets the model path, starts Gazebo, bridges the chair's topics to ROS 2
 (config/bridge.yaml) and starts the host node, the sensors node, MANA's position and link nodes
@@ -91,6 +92,11 @@ def generate_launch_description():
                 "weights", default_value="yolo26n.pt", description="the object detector's weights"
             ),
             DeclareLaunchArgument(
+                "odom",
+                default_value="ground_truth",
+                description="ground_truth, or wheels: from the wheels and the gyro (#43)",
+            ),
+            DeclareLaunchArgument(
                 "driver",
                 default_value="false",
                 description="follow cmd_vel (forward and turn) from a driver, capped by MANA",
@@ -171,7 +177,7 @@ def generate_launch_description():
                 package="mana_sim",
                 executable="sensors_node",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[{"use_sim_time": True, "odom_from": LaunchConfiguration("odom")}],
             ),
             # MANA's own position source (GPS, then the lidar map) and alert link. The simulated GPS
             # gives no covariance, so its error is the 1.5 m of a good fix

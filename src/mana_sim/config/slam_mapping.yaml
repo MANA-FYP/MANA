@@ -1,0 +1,18 @@
+# slam_toolbox making a map of the indoor world from the lidar and wheel odometry (#43).
+# tools/indoor_localisation.sh uses it; slam_toolbox on Jazzy is a lifecycle node, so it has to be
+# configured and activated before it maps.
+slam_toolbox:
+  ros__parameters:
+    use_sim_time: true
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    mode: mapping
+    resolution: 0.05
+    max_laser_range: 11.5
+    minimum_travel_distance: 0.2
+    minimum_travel_heading: 0.2
+    map_update_interval: 2.0
+    transform_publish_period: 0.05
+    do_loop_closing: true
