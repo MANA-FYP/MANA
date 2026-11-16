@@ -83,8 +83,8 @@ class Autopilot(Node):
         sent = self.client.send_goal_async(goal)
         rclpy.spin_until_future_complete(self, sent, timeout_sec=30)
         handle = sent.result()
-        if handle is None or not handle.accepted:
-            return {"goal": f"{x} {y}", "result": "refused", "seconds": 0}
+        if handle is None or not handle.accepted:  # every field, so the CSV keeps its columns
+            return {k: "" for k in FIELDS} | {"goal": f"{x:g} {y:g}", "result": "refused"}
         result = handle.get_result_async()
         wall = time.time()
         while not result.done() and time.time() - wall < timeout_s:
@@ -101,17 +101,36 @@ class Autopilot(Node):
             "goal": f"{x:g} {y:g}",
             "result": status,
             "seconds": round(self.now() - start, 1),
-            "end_error_m": round(math.hypot(gx - x, gy - y), 2),
+            "end_error_m": nan_round(math.hypot(gx - x, gy - y), 2),
             # the map frame faces as the chair did at the start: +x, as in the world
-            "end_heading_error_deg": round(
+            "end_heading_error_deg": nan_round(
                 abs(math.degrees(math.remainder(self.gt[2] - yaw, math.tau)))
                 if self.gt
                 else math.nan
             ),
-            "lowest_speed_limit": round(min((r[2] for r in req if not r[1]), default=math.nan), 2),
+            "lowest_speed_limit": nan_round(
+                min((r[2] for r in req if not r[1]), default=math.nan), 2
+            ),
             "stop_s": round(stop_s, 1),
             "modes": "".join(sorted({"WT"[r[3]] for r in req if r[3] in (0, 1)})),
         }
+
+
+FIELDS = [
+    "goal",
+    "result",
+    "seconds",
+    "end_error_m",
+    "end_heading_error_deg",
+    "lowest_speed_limit",
+    "stop_s",
+    "modes",
+]
+
+
+def nan_round(v: float, digits: int = 0):
+    """round(), except that NaN (no ground truth, no request) stays NaN instead of raising."""
+    return v if math.isnan(v) else round(v, digits)
 
 
 def main(argv=None) -> int:
@@ -132,7 +151,7 @@ def main(argv=None) -> int:
         rows.append(row)
     if a.out:
         with open(a.out, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0]))
+            w = csv.DictWriter(f, fieldnames=FIELDS)
             w.writeheader()
             w.writerows(rows)
     node.destroy_node()

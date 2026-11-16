@@ -14,6 +14,10 @@ bt_navigator:
     default_server_timeout: 1000  # ms: the planner answers late on a busy computer (20 timed out)
     wait_for_service_timeout: 5000
     navigators: ["navigate_to_pose"]
+    # the tree is navigate_no_recovery.xml (the launch file gives its path): replanning and the
+    # path follower, no recoveries or retries, so a goal that makes no progress for 60 s (a long
+    # MANA stop) is aborted and has to be given again, rather than kept alive by spins and
+    # back-ups that would set the chair off by itself when the stop lifts (Waqas, #187)
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
 
@@ -69,8 +73,12 @@ local_costmap:
       width: 4
       height: 4
       resolution: 0.05
-      # the chair: 0.9 m long, about 0.8 m wide with its tracks, base_link at its centre
-      footprint: "[[0.47, 0.4], [0.47, -0.4], [-0.45, -0.4], [-0.45, 0.4]]"
+      # the chair with its tracks, base_link at its centre: the chassis and wheels are 0.92 m long,
+      # but each track's sloped ends reach about 1.08 m out (models/mana_chair/model.sdf; core.yaml
+      # front_tracks_m 1.1). In wheels mode the tracks are lifted 15 cm, which still leaves their
+      # ends 0.25 to 0.5 m above the floor, under any wall, so the footprint is the tracks' length:
+      # 2.2 m by 0.8 m (Waqas, #187)
+      footprint: "[[1.1, 0.4], [1.1, -0.4], [-1.1, -0.4], [-1.1, 0.4]]"
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -85,7 +93,7 @@ local_costmap:
           obstacle_max_range: 7.5
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.6
+        inflation_radius: 1.2  # at least the footprint's circumscribed radius, 1.17 m
         cost_scaling_factor: 4.0
 
 global_costmap:
@@ -98,7 +106,7 @@ global_costmap:
       robot_base_frame: base_link
       resolution: 0.05
       track_unknown_space: true
-      footprint: "[[0.47, 0.4], [0.47, -0.4], [-0.45, -0.4], [-0.45, 0.4]]"
+      footprint: "[[1.1, 0.4], [1.1, -0.4], [-1.1, -0.4], [-1.1, 0.4]]"
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -117,7 +125,7 @@ global_costmap:
           obstacle_max_range: 7.5
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.6
+        inflation_radius: 1.2  # at least the footprint's circumscribed radius, 1.17 m
         cost_scaling_factor: 4.0
 
 planner_server:

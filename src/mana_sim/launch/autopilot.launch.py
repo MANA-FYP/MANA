@@ -5,9 +5,12 @@ the lidar gate and ekf_global (tools/autopilot.sh does all of it), then:
 
     ros2 launch mana_sim autopilot.launch.py
 
-Nav2's controller and its recovery behaviours publish on cmd_vel/autopilot, so driver_select passes
-them on below the supervisor's keyboard, and the host caps them with MANA's decision like any
-driver's. Pick a goal with "2D Goal Pose" in RViz, or send one with tools/autopilot_goal.py.
+Nav2's controller publishes on cmd_vel/autopilot, so driver_select passes it on below the
+supervisor's keyboard, and the host caps it with MANA's decision like any driver's. The
+behaviour tree has no recoveries (config/navigate_no_recovery.xml): a goal that makes no progress
+for 60 s is aborted. The behaviour server still runs (remapped to cmd_vel/autopilot too) for a
+tree that asks for one. Pick a goal with "2D Goal Pose" in RViz, or send one with
+tools/autopilot_goal.py.
 """
 
 import os
@@ -21,7 +24,10 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     params = LaunchConfiguration("params")
-    default = os.path.join(get_package_share_directory("mana_sim"), "config", "nav2.yaml")
+    config = os.path.join(get_package_share_directory("mana_sim"), "config")
+    default = os.path.join(config, "nav2.yaml")
+    # no recoveries: a goal stalled by a long MANA stop is aborted, not retried (#187)
+    tree = {"default_nav_to_pose_bt_xml": os.path.join(config, "navigate_no_recovery.xml")}
     to_mana = [("cmd_vel", "cmd_vel/autopilot")]
     return LaunchDescription(
         [
@@ -53,7 +59,7 @@ def generate_launch_description():
                 executable="bt_navigator",
                 name="bt_navigator",
                 output="screen",
-                parameters=[params],
+                parameters=[params, tree],
             ),
             Node(
                 package="nav2_lifecycle_manager",

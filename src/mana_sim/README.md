@@ -122,7 +122,7 @@ For each goal it writes down:
 - how far from the goal the chair stopped, by Gazebo's ground truth;
 - what MANA did on the way: its lowest speed limit, its stops and its modes.
 
-**When MANA stops or slows the chair mid-goal**, Nav2 keeps its goal. A stop is a cap on Nav2's command, not a new command: the chair stands, and Nav2 goes on once the stop is lifted. Nav2's progress checker would abort a goal that makes no progress, so it allows 60 s (`config/nav2.yaml`). A longer stop (MANA deactivated by the user, a question about stairs) should end the goal, so it has to be given again; that has not been tried yet. That is chosen so that the chair does not set off again by itself long after a stop.
+**When MANA stops or slows the chair mid-goal**, Nav2 keeps its goal. A stop is a cap on Nav2's command, not a new command: the chair stands, and Nav2 goes on once the stop is lifted. Nav2's progress checker would abort a goal that makes no progress, so it allows 60 s (`config/nav2.yaml`). A longer stop (MANA deactivated by the user, a question about stairs) ends the goal: the behaviour tree (`config/navigate_no_recovery.xml`) has no recoveries and no retries, so when the progress checker fails the goal is aborted and has to be given again. Nav2's default tree would instead clear the costmaps, spin, wait and back up, up to 6 times, and the chair could set off by itself if the stop lifted meanwhile (Waqas, #187). That the abort happens has not been measured in a run yet.
 
 Limits of this first version:
 - Nav2 plans in 2D on the lidar's map. Stairs, curbs and drops are walls to it or are not seen at all, so goals are on routes without them. MANA's own rules still stop the chair at them.

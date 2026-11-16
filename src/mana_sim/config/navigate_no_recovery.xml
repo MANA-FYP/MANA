@@ -1,0 +1,14 @@
+<!-- Nav2's NavigateToPose for MANA's autopilot (#78, #187): replan once a second and follow the
+     path, with no recovery behaviours and no retries. When the controller fails (the progress
+     checker after 60 s without progress, as during a long MANA stop) the goal is aborted, and the
+     supervisor gives it again; nothing moves the chair by itself after a stop. -->
+<root BTCPP_format="4" main_tree_to_execute="NavigateNoRecovery">
+  <BehaviorTree ID="NavigateNoRecovery">
+    <PipelineSequence name="NavigateWithReplanning">
+      <RateController hz="1.0">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+      </RateController>
+      <FollowPath path="{path}" controller_id="FollowPath"/>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>
