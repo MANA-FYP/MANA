@@ -124,7 +124,9 @@ class StepCounter:
         return None
 
     def _give(self) -> Step | None:
-        """The pending step, unless the phone turned fast just before it: a hand, not a step."""
+        """The pending step, unless the phone turned fast just before it: a hand, not a step.
+        Turning a corner can be as fast (about 90 degrees a second, for a second), so a step or two
+        there is dropped too: a short undercount, never an extra step (Waqas, #180)."""
         step = self._confirm()
         w = [r for when, r in self.turns if step.t - self.turn_window_s <= when <= step.t]
         if w and sum(w) / len(w) >= self.max_turn_dps:
@@ -309,7 +311,9 @@ class Track:
         GPS says the person is not moving, so a GPS move is wandering, not travel. Standing still
         indoors our phone gave 0.03 to 0.17 m/s while its fixes drifted 10 to 15 m; walking is
         about 1.2. Steps are not asked: a hand shaking the phone can still make one, and steps
-        move the position themselves. With no speed from the phone, nothing changes."""
+        move the position themselves. With no speed from the phone, nothing changes.
+        Limit: on GPS speed alone, a device rolling slowly indoors (under still_mps, with no
+        steps) does not move on the map while its fixes are held (Waqas, #180)."""
         return fix.speed is not None and fix.speed < self.still_mps
 
     # -- what it shows
