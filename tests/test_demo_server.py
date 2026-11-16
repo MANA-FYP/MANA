@@ -110,6 +110,27 @@ def test_a_ping_is_answered_with_a_pong_and_the_round_trip_is_recorded():
     run(with_clients(go))
 
 
+def test_a_round_trip_below_zero_or_not_a_number_is_not_taken_as_it_comes():
+    async def go(client, phone, dash):
+        await phone.send_json({"type": "rtt", "ms": -5000})
+        await snapshot_where(dash, lambda s: s["link"]["rtt_ms"] == 0.0)
+        await phone.send_json({"type": "rtt", "ms": "fast"})
+        await phone.send_json({"type": "rtt", "ms": 30})
+        await snapshot_where(dash, lambda s: s["link"]["rtt_ms"] == 30.0)
+
+    run(with_clients(go))
+
+
+def test_the_round_trip_is_cleared_when_the_phone_goes():
+    async def go(client, phone, dash):
+        await phone.send_json({"type": "rtt", "ms": 12.0})
+        await snapshot_where(dash, lambda s: s["link"]["rtt_ms"] == 12.0)
+        await phone.close()
+        await snapshot_where(dash, lambda s: s["link"]["rtt_ms"] is None)
+
+    run(with_clients(go))
+
+
 def test_the_phone_receives_the_sensor_states_and_the_decision():
     async def go(client, phone, dash):
         while True:
