@@ -155,6 +155,26 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 
 Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
 
+## Lidar localisation indoors (#43)
+
+`tools/indoor_localisation.sh` maps the indoor world (`worlds/mana_indoor.sdf`: a 16 by 10 m floor, a corridor loop round a central block, five cabinets and a pillar, no GPS) with slam_toolbox, then starts the world again and localises on the saved map. The chair drives the corridor loop by its ground truth (`mana_sim.loop_driver`), and its odometry comes from the wheels and the gyro (`odom:=wheels`), so it drifts as a real chair's would. Once a second the map pose (slam_toolbox) and the odom pose (the wheels) are compared with Gazebo's ground truth, both taken from the first row, which the driver writes at rest before it moves, where the map and odom frames begin; map and odom are looked up at the ground truth's own time. Measured in WSL on 9 November 2026.
+
+| Run | Driven | Map pose (slam_toolbox): mean / 95th / max | Wheel odometry: mean / 95th / max |
+|---|---|---|---|
+| Mapping, one lap (2 runs, maps A and B) | 47.7, 47.7 m | 0.17 / 0.42 / 0.66 m, 0.24 / 0.62 / 0.68 m | 0.28 / 0.76 / 0.76 m, 0.28 / 0.74 / 0.74 m |
+| Localisation, two laps, run 1 (map A) | 88.9 m | 0.19 / 0.93 / 1.02 m | 0.61 / 1.48 / 1.48 m |
+| Localisation, two laps, run 2 (map B) | 88.9 m | 0.22 / 1.18 / 1.27 m | 0.61 / 1.47 / 1.47 m |
+| Localisation, two laps, run 3 (map B again) | 89.0 m | 0.23 / 1.20 / 1.28 m | 0.62 / 1.50 / 1.51 m |
+
+An earlier set of runs took the first row only after the chair had started moving, so every error included that move (Waqas, #179). Its localisation means were 0.15 to 0.21 m, against 0.19 to 0.23 m here: in these runs the bias was smaller than the spread from run to run.
+
+What the runs show:
+- **Wheel odometry drifts, the map pose does not.** Odometry ended 1.47 to 1.51 m off after two laps; the map pose ended 0.06 to 0.11 m off.
+- **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
+- **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
+
+A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+
 ## Camera depth and stairs on real phone frames (#131)
 
 Measured on 9 November 2026 on real iPhone frames from the Hugging Face dataset
@@ -228,6 +248,30 @@ percent **too far**, the unsafe side):
   alone and 15 for the depth alone. The demo now keeps the nearer (D12).
 - The depth here is the model's own metres. The demo scales it to the floor first (D12 has why
   that is not measured here). Each frame took about 0.5 s on the laptop's CPU for each model.
+
+## The object detector on Gazebo's camera (#40)
+
+Measured on 9 November 2026 with `tools/detector_in_gazebo.sh`, `yolo26n.pt` at 416. Gazebo
+Fuel's "Standing person" (OpenRobotics, CC0) stands on the level start of the route, facing across
+the path, at a set distance from the RGB camera. The chair stands still. The world is launched
+with `detector:=true`, and the detector's `ObstacleReport`s on `/obstacle` are counted for 20 s.
+
+| Person from the camera | Camera frames a second | Detector reports in 20 s | Distance reported |
+|---|---|---|---|
+| 2, 3 and 4 m | 2.0 to 3.2 | none | |
+| 5 m | 2.3 | 5 | 4.18 m (trust 0.72) |
+| 7 m | 0.8 | 5 | 5.34 m (trust 0.69) |
+
+- **The detector's obstacles reach the core's topic in Gazebo**, from 5 m out. They read nearer
+  than the truth (16 and 24 percent here), the safe side.
+- **Closer than about 5 m it sends nothing.** The camera is 0.65 m up and tilted 0.3 rad down,
+  so the person's head and shoulders leave the picture. On the 3 m frame the detector names
+  only a person at 0.16, under the node's `min_confidence` of 0.5. Closer in, the lidar stops the
+  chair (`dark`: 0.92 m before the person).
+- **Gazebo renders the camera at 0.8 to 3.2 frames a second on this laptop** (WSL, no GPU; the
+  model asks for 10), so the reports are sparse. The core lets a report age out after 0.5 s.
+- Before #170 the detector found **nothing** here. It was given the camera's RGB array, which
+  Ultralytics reads as BGR, and on the 5 m frame it found no person even at confidence 0.3.
 
 ## Mutation testing (#83)
 
