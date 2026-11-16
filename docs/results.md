@@ -440,7 +440,7 @@ already on disk (one in 10). That is 1,166 training frames from 43 walks, with 3
 batch 16, Ultralytics' default settings otherwise, 72 minutes on the laptop CPU above. It was then
 scored exactly as the zero-shot models were, on the same 2,331 test frames, so the rows compare.
 
-Near objects, against zero-shot YOLO26n (and YOLOE-26s for the classes COCO lacks):
+Near objects, against zero-shot YOLO26n and YOLOE-26s (rows from the table above):
 
 | Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -451,7 +451,11 @@ Near objects, against zero-shot YOLO26n (and YOLOE-26s for the classes COCO lack
 | | pole | 1,942 | 0.10 | 0.33 | 0.09 | 0.43 | 0.04 |
 | YOLO26n zero-shot (416, 36 ms) | pedestrian | 2,993 | 0.74 | 0.85 | 0.67 | 0.91 | 0.54 |
 | | vehicle | 1,438 | 0.67 | 0.83 | 0.55 | 0.94 | 0.40 |
-| YOLOE-26s zero-shot (480, 82 ms) | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.50 | 0.03 |
+| YOLOE-26s zero-shot (480, 82 ms) | pedestrian | 2,993 | 0.78 | 0.80 | 0.78 | 0.87 | 0.71 |
+| | vehicle | 1,438 | 0.69 | 0.80 | 0.54 | 0.90 | 0.37 |
+| | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.50 | 0.03 |
+| | opening-door | 175 | 0.01 | 0.20 | 0.01 | 0.50 | 0.01 |
+| | pole | 1,942 | 0.02 | 0.62 | 0.01 | 0.50 | 0.00 |
 
 **Stairs per walk.** The fine-tuned model found stairs in 7 of the 65 test frames with stairs, in
 2 of the 6 walks (YOLOE-26s: 1 frame, 1 walk). Counting near staircases only, it found 7 of 37
@@ -462,13 +466,19 @@ What follows:
 - **Fine-tuning helps the obstacles that stop the chair, at no cost in time.** At the obstacle
   threshold 0.5, people near the chair go from 0.54 to 0.63 recall and vehicles from 0.40 to
   0.56, with precision staying at 0.92 to 0.93; the model is the same size, 35 ms a frame.
+  Against zero-shot YOLOE-26s, the larger open-vocabulary model the demo can run, it is ahead on
+  vehicles (0.56 against 0.37 at 0.5) but not yet on people (0.63 against 0.71), at under half
+  the time (35 against 82 ms). That is the comparison that matters if these weights are proposed
+  as the default.
 - **Stairs are found more often but not trusted.** Recall at 0.3 rises from 0.03 to 0.19, but
   only 6 % of the stairs boxes at 0.3 are right (11 % at 0.5), so most of the time it reports
   stairs where there are none. 378 training stairs and 20 CPU epochs are not enough. On the
   chair a stairs box from the camera alone is not acted on, since stairs need the 3D camera too
   (the two-source rule), but a detector this noisy would make that check carry all the weight.
   It is still far from the 0.85 target.
-- **Doors and poles barely move** (recall 0.03 and 0.09 at 0.3). Poles are thin and often far;
+- **Doors and poles stay low.** Against YOLOE-26s, door AP50 goes from 0.01 to 0.04 and recall at
+  0.3 from 0.01 to 0.03; pole AP50 from 0.02 to 0.10 and recall from 0.01 to 0.09, a fivefold rise
+  that is still far from useful. Poles are thin and often far;
   SANPO's door boxes are mostly doors set into shop fronts. Both need more data than this run had.
 - The GPU runs of #49 (YOLO26s and YOLOv8s, image size 640, more epochs, every frame of the
   stairs walks) are the real test; this table is the floor they start from. The fine-tuned
@@ -477,11 +487,13 @@ What follows:
 Run it (after the fetch above):
 
 ```
+python3 tools/fetch_sanpo.py --root datasets/sanpo-masks --train -1 --test -1 --every 10 \
+    --masks-only --sessions stairs   # writes datasets/sanpo-masks/sessions_with_stairs.txt
 python3 tools/fetch_sanpo.py --root datasets/sanpo-eval --every 20 \
-    --only datasets/sanpo-masks/sessions_with_stairs.txt   # list from --sessions stairs
+    --only datasets/sanpo-masks/sessions_with_stairs.txt
 python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-stairs-yolo
 yolo detect train data=datasets/sanpo-stairs-yolo/data.yaml model=yolo26n.pt imgsz=416 \
     epochs=20 batch=16 device=cpu seed=0
 python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
-    --weights runs/detect/train/weights/best.pt
+    --weights runs/detect/train/weights/best.pt   # train2, train3 ... if train already exists
 ```
