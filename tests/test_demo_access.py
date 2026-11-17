@@ -112,7 +112,7 @@ def test_every_screen_takes_the_key_from_its_address_and_opens_its_socket():
     async def go():
         c = await client_of()
         try:
-            for page in ("/live", "/indoor"):
+            for page in ("/live", "/indoor", "/wifi"):
                 r = await c.get(f"{page}?k={KEY}", allow_redirects=False)
                 assert r.status == 302 and r.headers["Location"] == page
                 assert (await c.get(page)).status == 200

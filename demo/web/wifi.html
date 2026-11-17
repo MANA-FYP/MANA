@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MANA Wi-Fi sensing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+  <link rel="stylesheet" href="/static/wifi.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><b>MANA</b><span class="sub">Wi-Fi sensing</span></div>
+    <div class="status">
+      <span class="dot" id="srcDot"></span><span id="srcText">Starting</span>
+      <span class="sep"></span><span class="mono" id="rate">0 packets/s</span>
+    </div>
+    <nav class="views"><a href="/live">Live view</a><a href="/indoor">Indoor</a><a class="on" href="/wifi">Wi-Fi</a></nav>
+  </header>
+
+  <main class="grid" id="grid">
+    <section class="panel verdict">
+      <div class="ptitle">Who is there <span class="spacer"></span><span class="tag" id="windowTag">1 s windows</span></div>
+      <div class="big" id="big">
+        <svg class="who" id="whoIcon" viewBox="0 0 64 64" aria-hidden="true"></svg>
+        <div><b id="bigText">Listening</b><span id="bigSub">The first window closes after one second</span></div>
+      </div>
+      <div class="bars" id="bars"></div>
+      <div class="truth" id="truth" hidden>
+        <div class="trow"><span>Playing</span><b id="truthText"></b><span class="mark2" id="truthMark"></span></div>
+        <div class="trow"><span>Right so far</span><b id="truthScore">0 of 0 windows</b></div>
+      </div>
+      <div class="picker" id="picker"></div>
+      <div class="use">
+        <b>What MANA does with it</b>
+        <p id="useText">A person sensed by Wi-Fi but not seen by the camera means someone may be round
+          the corner or behind a door: slow down and say so. One source, so it slows and never stops
+          (the core's rule for a single sensor). Proposed: not yet an input to the decision core.</p>
+      </div>
+    </section>
+
+    <section class="panel wave">
+      <div class="ptitle">What the receiver gets <span class="spacer"></span>
+        <span class="legend"><i class="lo"></i>weak<i class="hi"></i>strong</span></div>
+      <p class="hint">The strength of each of the 56 subcarriers, the last 10 seconds. A body in the
+        room bends the pattern; movement makes it flicker.</p>
+      <div class="canvasbox"><canvas id="water"></canvas>
+        <span class="axis y">subcarrier</span><span class="axis x">time →  now</span></div>
+    </section>
+
+    <section class="panel motion">
+      <div class="ptitle">Movement and verdicts, last 60 s <span class="spacer"></span>
+        <span class="legend"><i class="line"></i>movement<i class="thr"></i>threshold (empty room)</span></div>
+      <div class="canvasbox"><canvas id="chart"></canvas></div>
+      <div class="strip" id="strip"></div>
+    </section>
+
+    <section class="panel how">
+      <div class="ptitle">How it works</div>
+      <svg id="howSvg" viewBox="0 0 360 180" class="howsvg" role="img" aria-label="An ESP32 sends, the signal reaches a second ESP32 directly, off the walls and off a person; the receiver sends every packet's channel state to the laptop"></svg>
+      <ol class="steps">
+        <li><b>Two ESP32 boards</b> (about 3 m apart): one sends Wi-Fi packets, the other reports each packet's channel state, about 200 a second.</li>
+        <li><b>Each window of one second</b>: how much every subcarrier flickers, and the shape of their strengths.</li>
+        <li><b>A small linear model</b> fitted on the room empty and with a person in each zone, run on the laptop with numpy.</li>
+      </ol>
+    </section>
+
+    <section class="panel score">
+      <div class="ptitle">Measured on held-out sessions</div>
+      <table class="tbl" id="scoreTbl"></table>
+      <p class="fine" id="scoreNote"></p>
+    </section>
+  </main>
+  <script src="/static/wifi.js"></script>
+</body>
+</html>

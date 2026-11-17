@@ -35,6 +35,8 @@ import io
 import json
 import math
 import sys
+import threading
+import time
 import warnings
 from array import array
 from pathlib import Path
@@ -51,6 +53,7 @@ from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E4
 from demo import (  # noqa: E402
     access,
     caregiver,
+    csi,
     floors,
     navigation,
     recording,
@@ -104,6 +107,7 @@ def build_app(
     key=None,
     listener=None,
     laptop_wifi=None,
+    wifi_sensing=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
@@ -132,6 +136,8 @@ def build_app(
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
     app["floors"] = floors.FloorTracker()  # which floor, from motion and the camera's stairs
     app["wifi"] = laptop_wifi  # the laptop's own Wi-Fi signal (demo.wifi), or None
+    # people from an ESP32's Wi-Fi channel state (demo.csi): sensing, replay, serial; or None
+    app["csi"] = wifi_sensing
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
@@ -141,6 +147,9 @@ def build_app(
     app.router.add_get("/live", live_page)
     app.router.add_get("/indoor", indoor_page)
     app.router.add_get("/api/imagery", imagery)
+    app.router.add_get("/wifi", wifi_page)
+    app.router.add_get("/api/csi", csi_view)
+    app.router.add_post("/api/csi/play", csi_play)
     app.router.add_get("/dashboard", dashboard_page)
     app.router.add_get("/phone", phone_page)
     app.router.add_get("/caregiver", caregiver_page)
@@ -176,6 +185,70 @@ async def live_page(request: web.Request) -> web.FileResponse:
 async def indoor_page(request: web.Request) -> web.FileResponse:
     """The second screen: which floor, the height travelled, the newest map and the Wi-Fi."""
     return web.FileResponse(WEB / "indoor.html")
+
+
+async def wifi_page(request: web.Request) -> web.FileResponse:
+    """The third screen: people sensed from Wi-Fi (an ESP32's CSI, live or recorded)."""
+    return web.FileResponse(WEB / "wifi.html")
+
+
+async def csi_view(request: web.Request) -> web.Response:
+    c = request.app["csi"]
+    if c is None:
+        return web.json_response({"on": False})
+    out = {"on": True, **c["sensing"].view(), "scores": c.get("scores")}
+    out["replay"] = None if c.get("replay") is None else c["replay"].view()
+    return web.json_response(out)
+
+
+async def csi_play(request: web.Request) -> web.Response:
+    """Which recording plays: {"label": "two"}, or {"label": null} for the tour."""
+    c = request.app["csi"]
+    if c is None or c.get("replay") is None:
+        raise web.HTTPConflict(text="no recordings: start the server with --csi-replay")
+    try:
+        c["replay"].choose((await request.json()).get("label"))
+    except (KeyError, ValueError, AttributeError, TypeError) as e:
+        raise web.HTTPBadRequest(text="label: one of the recordings, or null") from e
+    return web.json_response(c["replay"].view())
+
+
+async def csi_task(app: web.Application) -> None:
+    """Feeds the Wi-Fi sensing: recorded sessions at their own pace, or a live ESP32."""
+    c = app["csi"]
+    loop = asyncio.get_running_loop()
+    if c.get("serial"):
+        port, baud = c["serial"]
+        queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+        stop = threading.Event()  # set on the way out: the reader stops within its 1 s timeout
+
+        def put(p) -> None:
+            if not queue.full():  # behind by 10 s: drop rather than raise in the loop
+                queue.put_nowait(p)
+
+        def read() -> None:
+            parse = csi.LineParser()
+            try:
+                for line in csi.serial_lines(port, baud, stop):
+                    p = parse(line)
+                    if p is not None:
+                        loop.call_soon_threadsafe(put, p)
+                    elif why := parse.unread(time.monotonic()):
+                        print(f"wifi: the ESP32 on {port}: {why}", flush=True)
+            except Exception as e:  # unplugged, or the port is busy: said once
+                if not stop.is_set():
+                    print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
+
+        c["sensing"].restart(f"ESP32 on {port}")
+        threading.Thread(target=read, name="esp32", daemon=True).start()
+        try:
+            while True:
+                c["sensing"].feed(await queue.get())
+        finally:
+            stop.set()
+    while True:
+        c["replay"].step(loop.time())
+        await asyncio.sleep(0.05)
 
 
 async def imagery(request: web.Request) -> web.Response:
@@ -779,9 +852,14 @@ async def loop(app: web.Application) -> None:
 
 async def start_loop(app: web.Application) -> None:
     app["loop"] = asyncio.create_task(loop(app))
+    if app["csi"] is not None:
+        app["live"]["csi_task"] = asyncio.create_task(csi_task(app))
 
 
 async def stop_loop(app: web.Application) -> None:
+    task = app["live"].get("csi_task")
+    if task is not None:
+        task.cancel()
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
@@ -795,6 +873,37 @@ async def stop_loop(app: web.Application) -> None:
 
 
 # ---- command line
+
+
+def wifi_sensing_from(a) -> dict | None:
+    """The Wi-Fi sensing set up from the command line: None without --csi-replay or --csi-serial."""
+    if not (a.csi_replay or a.csi_serial):
+        return None
+    model_path = Path(a.csi_model)
+    model = csi.ZoneModel.load(model_path) if model_path.exists() else None
+    scores_path = model_path.with_suffix(".json")
+    scores = json.loads(scores_path.read_text(encoding="utf-8")) if scores_path.exists() else None
+    sensing = csi.Sensing(model)
+    out = {"sensing": sensing, "scores": scores, "replay": None, "serial": None}
+    if a.csi_serial:
+        try:
+            import serial  # noqa: F401
+        except ImportError:
+            raise SystemExit("--csi-serial needs pyserial: pip install pyserial") from None
+        out["serial"] = (a.csi_serial, a.csi_baud)
+    else:  # the held-out sessions: the model never saw them
+        folder = Path(a.csi_replay)
+        recs = {k: folder / f"{k}_2.csv" for k in ("empty", "one", "two", "five")}
+        recs = {k: v for k, v in recs.items() if v.exists()}
+        if not recs:
+            raise SystemExit(f"--csi-replay: no *_2.csv recordings in {folder}")
+        out["replay"] = csi.Replay(recs, sensing)
+    print(
+        f"wifi sensing: {'ESP32 on ' + a.csi_serial if a.csi_serial else 'recordings'}, "
+        f"model {'loaded' if model else 'not found: ' + str(model_path)}",
+        flush=True,
+    )
+    return out
 
 
 def main(argv=None) -> None:
@@ -827,6 +936,18 @@ def main(argv=None) -> None:
                    help="keep what the phone sends, to play with demo.replay")  # fmt: skip
     p.add_argument("--on-foot", action="store_true",
                    help="the phone is carried by a person walking, not on the device")  # fmt: skip
+    p.add_argument(
+        "--csi-replay",
+        metavar="FOLDER",
+        help="Wi-Fi sensing from recorded ESP32 CSI (tools/wifi_csi.py --fetch)",
+    )
+    p.add_argument("--csi-serial", metavar="PORT", help="Wi-Fi sensing from a live ESP32 (esp-csi)")
+    p.add_argument("--csi-baud", type=int, default=115200)
+    p.add_argument(
+        "--csi-model",
+        default=str(Path(__file__).parent / "csi_model" / "wifi_csi_office.npz"),
+        help="the model from tools/wifi_csi.py; it holds for the room it was fitted in",
+    )
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -861,6 +982,7 @@ def main(argv=None) -> None:
         key=key,
         listener=listener,
         laptop_wifi=wifi.LaptopWifi(),
+        wifi_sensing=wifi_sensing_from(a),
     )
     if a.record:
         print(f"recording the phone into {a.record}")
