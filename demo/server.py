@@ -647,6 +647,8 @@ def main(argv=None) -> None:
                    help="BC-ResNet checkpoint, for offline command words")  # fmt: skip
     p.add_argument("--kws-threshold", type=float, default=0.9,
                    help="the least probability of a command word to act on")  # fmt: skip
+    p.add_argument("--kws-stop-threshold", type=float,
+                   help="the least probability of stop (default: --kws-threshold)")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
@@ -681,7 +683,7 @@ def main(argv=None) -> None:
     if a.kws:  # needs torch and torchaudio
         from demo import kws
 
-        recognizer = kws.Spotter.load(a.kws, a.kws_threshold)
+        recognizer = kws.Spotter.load(a.kws, a.kws_threshold, a.kws_stop_threshold)
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
     mount = dz.Mount(a.camera_height, a.camera_fov)
     key = access.load_or_make()  # the server can drive the device: no answer without it
