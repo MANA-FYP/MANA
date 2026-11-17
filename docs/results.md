@@ -663,7 +663,7 @@ Played on 17 November 2026 with `evaluate --world gazebo --compare`, one simulat
 <!-- drives:start (written by mana_sim.drive_summary; do not edit) -->
 ### Each drive, and the same drive with the baseline
 
-Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently. `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
+Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently (for a scenario in which the user speaks at set times, `stop`, the first moment instead, because the stop comes at a different place in each simulation). `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
 
 - **level:** 3.9 s, 4.1 m; 0.0 s on tracks; 0 messages; 0 takeovers
   - stops: none
@@ -716,10 +716,10 @@ Every drive is summarised, and each one is played again with the if-else baselin
 | `ramp` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
 | `stairs` | 1 (Step ahead, stopping) | 0 | 17.6 s | 26.7 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
 | `curb` | 1 (Step ahead, stopping) | 0 | 14.0 s | 20.6 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
-| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Stopped by you); baseline wheels at 100% (Level ground) |
-| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.7 m: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.1 s: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
 | `drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Drop ahead, stopping); baseline wheels at 30% (Drop ahead, slowing down) |
-| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 2.6 m: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
+| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 1.9 s: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
 | `picture` | 0 | 0 | 0.0 s | 25.1 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline wheels at 100% (Level ground) |
 | `dark` | 1 (Obstacle ahead, stopping) | 1 (Obstacle ahead, stopping) | 0.0 s | 0.0 s | none | none | 6.9 m: MANA stops (Obstacle ahead, stopping); baseline wheels at 30% (Obstacle ahead, slowing down) |
 | `imu_lost` | 1 (Drop ahead, stopping) | 2 (Drop ahead, stopping) | 18.4 s | 30.4 s | none | none | 0.7 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
