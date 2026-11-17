@@ -12,8 +12,10 @@ Three ways a floor changes, each written down with where it came from:
 - a lift: the phone, held still (no steps), feels the lift speed up and then slow down. The
   vertical acceleration, integrated twice from the start of the ride to its end, is the height
   travelled, and a floor is `floor_h` metres.
-- stairs: the camera sees stairs up or down ahead, then the person climbs on. Each step on the
-  stairs is one riser (`riser_m`); a flight that rises most of a floor's height is a floor.
+- stairs: the camera sees stairs up or down right in front (`near_m`), and the person climbs on.
+  Only the steps taken while the camera still sees them count, each one a riser (`riser_m`): a
+  walk past a staircase, or along the landing after a half flight, is not a climb. A flight that
+  rises most of a floor's height (`floor_share`) is a floor.
 - by hand: the supervisor sets the floor (the start, or a correction).
 
 GPS altitude is kept beside it, but only as a reference: a phone's GPS height is often 10 m or more
@@ -43,12 +45,12 @@ class Ride:
 
 @dataclass
 class Flight:
-    """A stairs flight being counted: the direction the camera saw, and the steps since."""
+    """A stairs flight being counted: the direction the camera saw, when it last saw the stairs,
+    the track's step count already looked at, and the steps counted while it still saw them."""
 
     seen: float
     direction: int
-    steps_at: int
-    last_step: float
+    at: int
     steps: int = 0
 
 
@@ -57,6 +59,11 @@ class FloorTracker:
     floor: int | None = None  # None: not known yet (see above)
     floor_h: float = 3.2  # metres from one floor to the next
     riser_m: float = 0.17  # one stair step
+    near_m: float = 1.5  # stairs this close to the camera are the ones being climbed
+    seen_s: float = 1.0  # steps up to this long after the camera last saw the stairs still count
+    lost_s: float = 5.0  # the flight ends with the stairs out of sight this long (a landing turn
+    # is shorter)
+    floor_share: float = 0.75  # a flight rising this share of floor_h is a floor
     move_a: float = 0.2  # m/s^2 of vertical acceleration felt as the lift moving
     quiet_a: float = 0.1  # below this the lift runs evenly, or has stopped
     events: deque = field(default_factory=lambda: deque(maxlen=12))
@@ -124,16 +131,31 @@ class FloorTracker:
         """The step count of the track (it only grows while walking)."""
         if steps > self._steps:
             self._last_step_t = t
-            if self._flight is not None:
-                self._flight.last_step = t
         self._steps = steps
+        self._count(t)
 
-    def on_stairs(self, t: float, direction: int) -> None:
-        """The camera sees stairs ahead: +1 up, -1 down. Counting starts from the next step."""
+    def on_stairs(self, t: float, direction: int, distance_m: float | None = None) -> None:
+        """The camera sees stairs: +1 up, -1 down, distance_m from the camera to where they start.
+        Only stairs within near_m are the ones being climbed; further ones are only ahead. Stairs
+        the camera could not place (no tilt, so no distance) count as near: on the stairs they fill
+        the view. Counting starts from the next step."""
+        if distance_m is not None and math.isfinite(distance_m) and distance_m > self.near_m:
+            return
+        self._count(t)
         if self._flight is None or self._flight.direction != direction:
-            self._flight = Flight(t, direction, self._steps, t)
+            self._flight = Flight(t, direction, self._steps)
         else:
             self._flight.seen = t
+
+    def _count(self, t: float) -> None:
+        """A flight takes the track's new steps only while the camera saw the stairs a moment ago;
+        steps out of their sight (along a landing, past a staircase) are passed over."""
+        f = self._flight
+        if f is None:
+            return
+        if t - f.seen <= self.seen_s:
+            f.steps += max(self._steps - f.at, 0)
+        f.at = self._steps
 
     def on_gps_altitude(self, t: float, altitude: float | None, accuracy: float | None) -> None:
         if altitude is None or not math.isfinite(altitude):
@@ -161,18 +183,13 @@ class FloorTracker:
             self.set_floor(t, 0, "walked in from outside (assumed ground floor)", "gps")
 
     def tick(self, t: float) -> None:
-        """Close a stairs flight once the steps have stopped, or when it was only seen."""
+        """Close a stairs flight once the camera has not seen the stairs for lost_s."""
         f = self._flight
-        if f is None:
-            return
-        f.steps = self._steps - f.steps_at
-        stopped = f.steps > 0 and t - f.last_step > 4.0
-        never = f.steps == 0 and t - f.seen > 30.0
-        if not (stopped or never or t - f.seen > 120.0):
+        if f is None or t - f.seen <= self.lost_s:
             return
         self._flight = None
         rise = f.steps * self.riser_m
-        if rise >= 0.6 * self.floor_h:
+        if rise >= self.floor_share * self.floor_h:
             n = max(1, round(rise / self.floor_h))
             self._change(
                 t,
@@ -205,21 +222,28 @@ class FloorTracker:
             r.up_pulse = True
         elif av < -self.move_a:
             r.down_pulse = True
-        if abs(av) < self.quiet_a:
+        # quiet: steady, under the push of a lift starting or stopping. Not "near zero": a phone
+        # tilted during the ride reads a small steady offset after it
+        vals = [a for _, a in self._recent]
+        if abs(av) < self.move_a and max(vals) - min(vals) < 2 * self.quiet_a:
             r.quiet_since = r.quiet_since if r.quiet_since is not None else t
         else:
             r.quiet_since = None
         # over once it has sped up and slowed down, and stayed quiet a moment after
         if r.up_pulse and r.down_pulse and r.quiet_since is not None and t - r.quiet_since > 1.5:
             self._ride = None
-            if abs(r.d) >= 0.6 * self.floor_h:
-                n = max(1, round(abs(r.d) / self.floor_h))
-                way = 1 if r.d > 0 else -1
+            # a lift ends at rest, so the speed left over is drift: a small error in gravity (the
+            # phone tilted during the ride) that grew evenly from the start. Taken out as such, it
+            # put half of it times the ride's length into the height
+            d = r.d - r.v * (t - r.start) / 2
+            if abs(d) >= 0.6 * self.floor_h:
+                n = max(1, round(abs(d) / self.floor_h))
+                way = 1 if d > 0 else -1
                 self._change(
-                    t, way * n, f"lift {'up' if way > 0 else 'down'} about {abs(r.d):.1f} m", "lift"
+                    t, way * n, f"lift {'up' if way > 0 else 'down'} about {abs(d):.1f} m", "lift"
                 )
             else:
-                self._event(t, f"moved {r.d:+.1f} m: less than a floor", "lift")
+                self._event(t, f"moved {d:+.1f} m: less than a floor", "lift")
 
     def _change(self, t: float, by: int, why: str, source: str) -> None:
         self.moved += by
@@ -263,7 +287,7 @@ class FloorTracker:
             # metres up from the start, measured: the floors climbed, plus a lift ride under way
             "height_m": round(self.moved * self.floor_h + (self._ride.d if self._ride else 0.0), 2),
             "mode": mode,
-            "flight_steps": None if self._flight is None else self._steps - self._flight.steps_at,
+            "flight_steps": None if self._flight is None else self._flight.steps,
             "events": list(self.events),
             "trace": [list(p) for p in self.trace],
             "gps_altitude": alt,

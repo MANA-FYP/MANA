@@ -258,9 +258,15 @@ async def imagery(request: web.Request) -> web.Response:
                 aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s,
                 s.get(url) as r,
             ):
-                info = tiles.imagery_info(await r.json(content_type=None))
+                body = await r.json(content_type=None)
+                # an error is not "no date here": not kept, so the next ask tries again
+                if r.status != 200 or not isinstance(body, dict) or "error" in body:
+                    raise ValueError(f"imagery service: {r.status}")
+                info = tiles.imagery_info(body)
         except (aiohttp.ClientError, TimeoutError, ValueError):
             raise web.HTTPServiceUnavailable(text="no answer from the imagery service") from None
+        if len(kept) >= 1000:  # one per ~100 m cell visited: a walk never gets near
+            kept.clear()
         kept[key] = info
     if kept[key] is None:
         raise web.HTTPNotFound(text="no date for the imagery here")
@@ -684,7 +690,10 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 old = app["floors"]  # the floor stays; its history and height trace go
                 app["floors"] = floors.FloorTracker(floor=old.floor, floor_h=old.floor_h)
             elif (
-                d.get("type") == "floor" and isinstance(d.get("set"), int) and -5 <= d["set"] <= 60
+                d.get("type") == "floor"
+                and isinstance(d.get("set"), int)
+                and not isinstance(d["set"], bool)  # JSON true is an int to Python
+                and -5 <= d["set"] <= 60
             ):
                 app["floors"].set_floor(app["mw"].clock(), d["set"])
             elif d.get("type") == "floor" and (h := number(d.get("height"))) and 2.4 <= h <= 6.0:
@@ -765,8 +774,9 @@ def models_status(app: web.Application) -> dict:
 
 
 def floor_step(app: web.Application, snap: dict) -> dict:
-    """Feed the floor tracker what the tick knows: the steps, and stairs the camera placed ahead
-    (each report once); then its view for the pages."""
+    """Feed the floor tracker what the tick knows: the steps, and the stairs the camera saw (each
+    report once, with its distance: the tracker counts only stairs right in front); then its view
+    for the pages."""
     tr, mw = app["floors"], app["mw"]
     now = mw.clock()
     tr.on_steps(now, mw.nav.track.steps)
@@ -774,10 +784,9 @@ def floor_step(app: web.Application, snap: dict) -> dict:
     seen = app["live"]["stairs"]
     if seen is not None and seen.stamp != app["live"].get("stairs_fed"):
         app["live"]["stairs_fed"] = seen.stamp
-        ahead = not math.isfinite(seen.distance_m) or seen.distance_m <= 4.0
         way = {Ground.STAIRS_UP: 1, Ground.STAIRS_DOWN: -1}.get(seen.ground)
-        if way and ahead:
-            tr.on_stairs(now, way)
+        if way:
+            tr.on_stairs(now, way, seen.distance_m)
     tr.tick(now)
     return tr.view(now)
 
@@ -839,6 +848,8 @@ async def stop_loop(app: web.Application) -> None:
             await cache.close()
     if app["recorder"] is not None:
         app["recorder"].close()
+    if app["wifi"] is not None:
+        app["wifi"].close()
 
 
 # ---- command line
