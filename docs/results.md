@@ -773,3 +773,92 @@ What follows:
   node's default; until then the node keeps YOLO26n zero-shot.
 
 Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
+
+## Where the detector fails on SANPO, with pictures (#51)
+
+The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SANPO test frames.
+`tools/failure_examples.py` finds every near box a model missed and every box it gave wrongly at
+confidence 0.3, scored exactly as `tools/eval_detector.py` scores them, and draws the strongest one
+per walk: SANPO's boxes in green (a missed one drawn thicker), the model's in orange with its
+confidence. At 0.3, near the chair. 0.3 is what the detector node keeps, but only a box of 0.5
+or more becomes an obstacle (`min_confidence`, the core's `min_trust`), so the last column gives
+the wrong boxes the chair would act on:
+
+| Class | Near boxes missed | In walks | Boxes given wrongly | In walks | Of them at 0.5 or more |
+|---|---:|---:|---:|---:|---:|
+| stairs | 28 of 37 | 4 | 52 | 13 | 20 |
+| opening-door | 166 of 175 | 13 | 55 | 13 | 11 |
+| pole | 1,674 of 1,942 | 44 | 485 | 41 | 151 |
+
+**Stairs.** 22 of the 37 near staircases of the test split are in one walk, up an outdoor flight
+with railings, and 16 of the 28 misses are there (6 of its 22 found). Looked at by eye, the strongest wrong stairs box
+in each of the 13 walks was on:
+
+| What the wrong stairs box was on | Walks |
+|---|---:|
+| Real stairs: entrance steps and a subway stair seen from above, neither labelled in SANPO, and the lower part of a staircase whose SANPO box covers more | 3 |
+| Probably a stoop (brick steps behind a railing) | 1 |
+| A single raised edge: a curb, a planter's edge, a block | 5 |
+| A railing | 2 |
+| Crosswalk stripes | 2 |
+
+So a few of the "wrong" stairs are stairs that SANPO does not label, but most are things with
+stripes or an edge that look like a step: railings, crosswalks and curbs.
+
+**The box's extent.** SANPO's boxes are drawn round its masks, so one box can cover a whole flight
+of stairs or a whole scaffold labelled "pole", where the model boxes the part in view; and a pole is
+so thin that a box a few pixels narrower falls under IoU 0.5. To see how much of the score that
+costs, the same model was scored again with a match at IoU 0.3 (`--iou 0.3`), near objects:
+
+| Class | AP at IoU 0.5 | AP at IoU 0.3 | Recall at 0.3, IoU 0.5 | Recall at 0.3, IoU 0.3 | Precision at 0.3, IoU 0.5 | Precision at 0.3, IoU 0.3 |
+|---|---:|---:|---:|---:|---:|---:|
+| pedestrian | 0.80 | 0.86 | 0.77 | 0.80 | 0.84 | 0.89 |
+| vehicle | 0.74 | 0.82 | 0.70 | 0.75 | 0.80 | 0.86 |
+| stairs | 0.22 | 0.26 | 0.24 | 0.32 | 0.15 | 0.20 |
+| opening-door | 0.04 | 0.05 | 0.05 | 0.06 | 0.14 | 0.16 |
+| pole | 0.14 | 0.23 | 0.14 | 0.17 | 0.36 | 0.45 |
+
+With the looser match, 12 of the 37 near staircases are found instead of 9. So the box's
+extent explains part of the stairs and pole scores, not most of them: at either IoU most near
+stairs, doors and poles are missed.
+
+Pictures (SANPO frames, CC BY 4.0, Google Research; the walk and frame of each are listed under
+the pictures):
+
+| | |
+|---|---|
+| ![](failures/stairs-box-extent.jpg) | ![](failures/stairs-unlabelled-from-above.jpg) |
+| **Stairs, the box's extent.** SANPO's box covers the whole flight from underfoot; the model boxed the steps ahead (0.42). Under IoU 0.5, so a miss. | **Stairs seen from above, not labelled.** A subway stair going down, found at 0.63; SANPO has no stairs there, so it counts as wrong. |
+| ![](failures/stairs-railing.jpg) | ![](failures/door-glass-missed.jpg) |
+| **A railing taken for stairs** (0.74). | **Glass doors missed.** Shop doors of glass at close range, with nothing found. |
+| ![](failures/door-sign.jpg) | ![](failures/pole-thin-box.jpg) |
+| **A sign board taken for a door** (0.77). | **A thin pole.** Found at 0.94, but SANPO's box also takes in the base, so the overlap is under 0.5. |
+
+SANPO test frames, in the order above (walk, camera, frame): `i2jglnBfoIqIIA7ojQGe-4vK07hUm4T3`,
+chest, 510; `wta4PcYCd4Kfjw_DuB8Bd-dO2Du3ZcnN`, chest, 120; `ZR3hpsQxnbI8C4aSV2UMIKf15QvS6qvQ`,
+chest, 410; `6lm2fRHPl4AtOLKJkEXRJo9MQJVeCT_y`, head, 180; `WCzpj9Vid4Wo4Y0mForLrXk9idQqqxxi`,
+chest, 390; `y-W7aubs2gI5x5AioURb0dPfr9qWveYC`, chest, 110. Scaled to 640 pixels wide, boxes drawn.
+
+What follows:
+
+- **Glass doors are missed, and doors in general.** 166 of the 175 near doors, in all 13 walks
+  that have them. The looser match does not change that, so these are real misses; the ones looked
+  at were doors set into shop fronts at the side of the path, glass ones among them. The detector
+  alone cannot be relied on for doors. Glass is also hard for the lidar and the 3D camera, which
+  can see through it, so a glass door is a case to test on the chair itself (#89).
+- **Stairs are confused with striped and edged ground**, and are missed in the one walk that has
+  most of them. Some of SANPO's stairs labels are loose (a box over a whole flight) or missing, so
+  a stairs figure from SANPO alone is not exact, and the 37 near staircases are too few for one.
+  Stairs from our own recordings (#89) are still needed, as the two-source rule already requires
+  the 3D camera too.
+- **Dark corridors are not in this set.** SANPO's walks are mostly outdoors in daylight, so this cannot
+  show the detector in the dark; that needs the dark frames of #89.
+
+Run it:
+
+```
+python3 tools/failure_examples.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
+    --weights runs/detect/train/weights/best.pt --out datasets/failures
+python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 --iou 0.3 \
+    --weights runs/detect/train/weights/best.pt
+```

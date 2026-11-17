@@ -1,6 +1,6 @@
 # Datasets
 
-The datasets the MANA models are trained and tested on: where each one comes from, its licence, its size, and the split we use. None of the data is kept in git. One script fetches all of it into `datasets/` (git ignores that folder):
+The datasets the MANA models are trained and tested on: where each one comes from, its licence, its size, and the split we use. None of the data is kept in git, except six SANPO test frames, scaled down with boxes drawn on them, in `docs/failures/` as pictures of the detector's failures (#51; CC BY 4.0, credited there). One script fetches all of it into `datasets/` (git ignores that folder):
 
 ```bash
 tools/fetch_datasets.sh            # every dataset

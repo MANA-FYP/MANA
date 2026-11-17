@@ -42,7 +42,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src" / "mana_perception"))
 
-IOU = 0.5
+DEFAULT_IOU = 0.5
+IOU = DEFAULT_IOU  # the overlap match() needs; main() sets it from --iou for its run
 WARMUP = 3
 LOW_CONF = 0.01  # the model is run this low so AP sees the whole precision-recall curve
 
@@ -124,9 +125,9 @@ def match(preds: list[Box], truth: list[Box], ignore: list[Box] = (), min_px: fl
     """(class, conf, right) for each prediction kept, and the truth boxes that were found.
 
     Highest confidence first, each prediction takes the unfound truth box of its class it overlaps
-    most, if at IoU 0.5 or more. One that finds none is dropped when it lies on a neighbouring
-    class's box, on an ignored box of its own class (one too small for the band), or is itself
-    shorter than min_px, as COCO scores its size bands; any other is wrong."""
+    most, if at IoU IOU or more (0.5 unless --iou). One that finds none is dropped when it lies on
+    a neighbouring class's box, on an ignored box of its own class (one too small for the band), or
+    is itself shorter than min_px, as COCO scores its size bands; any other is wrong."""
     found = [False] * len(truth)
     out = []
     for p in sorted(preds, key=lambda b: -b.conf):
@@ -270,6 +271,7 @@ def evaluate(
     result = {
         "conf": confs,
         "imgsz": detector.imgsz,
+        "iou": IOU,
         "frames": frames,
         "not_named": sorted(set(sanpo) - classes),
         "ms_per_frame": 1000 * statistics.median(times) if times else float("nan"),
@@ -289,7 +291,8 @@ def table(name: str, r: dict) -> str:
     lines = [
         f"### {name}",
         "",
-        f"{r['frames']} frames, imgsz {r['imgsz']}, precision (P) and recall (R) at conf "
+        f"{r['frames']} frames, imgsz {r['imgsz']}, a match at IoU {r.get('iou', 0.5)}, "
+        f"precision (P) and recall (R) at conf "
         f"{' and '.join(str(c) for c in r['conf'])}, "
         f"{r['ms_per_frame']:.0f} ms per frame on this machine.",
     ]
@@ -297,7 +300,7 @@ def table(name: str, r: dict) -> str:
         lines += ["", f"Objects: {band}", ""]
         head = "".join(f" P {c} | R {c} |" for c in r["conf"])
         lines += [
-            f"| Class | Objects | AP50 |{head}",
+            f"| Class | Objects | AP{round(100 * r.get('iou', 0.5))} |{head}",
             "|---|---:|---:|" + "---:|" * 2 * len(r["conf"]),
         ]
         for c in b["classes"]:
@@ -318,6 +321,7 @@ def table(name: str, r: dict) -> str:
 
 
 def main(argv=None) -> int:
+    global IOU
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("datasets/sanpo_yolo"))
     ap.add_argument("--weights", nargs="+", default=["yolo26n.pt"])
@@ -335,8 +339,21 @@ def main(argv=None) -> int:
         "--min-height", type=float, default=0.1, help="near band: box height share of the frame"
     )
     ap.add_argument("--json", type=Path, help="also write the results here")
+    ap.add_argument(
+        "--iou",
+        type=float,
+        default=DEFAULT_IOU,
+        help="the overlap a match needs (0.5; a looser one shows how much is box extent)",
+    )
     a = ap.parse_args(argv)
+    before, IOU = IOU, a.iou  # match() reads it at each call
+    try:
+        return run(a)
+    finally:
+        IOU = before  # so a later call in the same process starts from its own --iou
 
+
+def run(a) -> int:
     from mana_perception.detection import Detector
 
     results = {}
