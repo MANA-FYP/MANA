@@ -555,7 +555,8 @@ class Navigator:
     A walk is found before its steps count, as the step-counting studies do it (walk detection,
     then counting): steps are held until walk_steps of them come no more than walk_gap_s apart,
     and then all go on the track. A lone step, from a hand shaking the phone, never does. A walk
-    reaches the track a couple of seconds late but whole."""
+    reaches the track a couple of seconds late but whole. A very slow walker, more than
+    walk_gap_s between steps, never reaches it: the step count stays at 0 (Komail, #180)."""
 
     def __init__(
         self,
