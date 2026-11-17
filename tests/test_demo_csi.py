@@ -55,10 +55,15 @@ def test_an_esp32_line_gives_the_56_amplitudes_and_noise_is_skipped():
     p = csi.parse_line(line(2.5, amps, rssi=-71))
     assert p.t == pytest.approx(2.5) and p.rssi == -71 and p.amp.shape == (56,)
     assert np.allclose(p.amp, amps)
-    # what a real serial port also prints: boot messages, a watchdog warning inside a row, cut lines
+    # what a real serial port also prints: boot messages, a watchdog warning on its own line and
+    # spliced into a row, cut lines, an unclosed quote longer than the csv module's field limit
+    wdt = "E (30736) task_wdt: Task watchdog got triggered."
     assert csi.parse_line("I (312) wifi: mode : sta") is None
-    assert csi.parse_line("E (30736) task_wdt: Task watchdog got triggered.") is None
-    assert csi.parse_line(line(1, amps)[:-40]) is None
+    assert csi.parse_line(wdt) is None
+    row = line(1, amps)
+    assert csi.parse_line(row[:200] + wdt + row[200:]) is None
+    assert csi.parse_line(row[:-40]) is None
+    assert csi.parse_line('CSI_DATA,1,"' + "9" * 200_000) is None
     assert csi.parse_row(["CSI_DATA"] + ["x"] * 14) is None
 
 
@@ -108,7 +113,7 @@ def test_the_replay_paces_by_the_recording_tours_and_scores_against_the_truth(tm
     recs = {k: recording(tmp_path / f"{k}_2.csv", k, seed=i) for i, k in enumerate(BASES)}
     sensing = csi.Sensing(centroid_model())
     r = csi.Replay(recs, sensing, turn_s=2.5)
-    assert r.step(0.0) == [] or True  # the first packet starts the clock
+    r.step(0.0)  # the first packet starts the clock
     out = []
     for i in range(1, 160):  # 8 s of wall time, in 50 ms steps
         out += r.step(i * 0.05)
@@ -158,6 +163,8 @@ def test_the_wifi_screen_and_its_api(tmp_path):
             r = await client.post("/api/csi/play", json={"label": "one"})
             assert r.status == 200 and (await r.json())["fixed"] == "one"
             assert (await client.post("/api/csi/play", json={"label": "nope"})).status == 400
+            for bad in ([], {}, 3):
+                assert (await client.post("/api/csi/play", json={"label": bad})).status == 400
             assert (await client.post("/api/csi/play", json={"label": None})).status == 200
         finally:
             await client.close()
@@ -170,3 +177,48 @@ def test_the_wifi_screen_and_its_api(tmp_path):
             await client.close()
 
     asyncio.run(go())
+
+
+def test_a_quiet_esp32_does_not_keep_the_server_from_stopping(monkeypatch):
+    """Waqas (#195): the serial reader ran forever in the default executor, so with a board that
+    printed nothing the process never exited. Its reads must stop once the server has."""
+    import sys
+    import threading
+    import types
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from demo.server import build_app
+
+    reads = []
+
+    class QuietPort:  # an idle board: every read waits its timeout and returns nothing
+        def __init__(self, port, baud, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def readline(self):
+            reads.append(1)
+            threading.Event().wait(0.1)
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", types.SimpleNamespace(Serial=QuietPort))
+    setup = {"sensing": csi.Sensing(None), "replay": None, "serial": ("COM9", 115200)}
+
+    async def go():
+        client = TestClient(TestServer(build_app(wifi_sensing={**setup, "scores": None})))
+        await client.start_server()
+        await asyncio.sleep(0.5)
+        await client.close()
+
+    asyncio.run(go())
+    assert reads  # it was reading
+    threading.Event().wait(0.3)  # a read under way may finish
+    n = len(reads)
+    threading.Event().wait(0.5)
+    assert len(reads) == n  # and stopped

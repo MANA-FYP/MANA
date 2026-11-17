@@ -54,12 +54,26 @@ class LaptopWifi:
             if api.WlanOpenHandle(2, None, ctypes.byref(ver), ctypes.byref(h)) != 0:
                 return
             lst = ctypes.POINTER(InfoList)()
-            if api.WlanEnumInterfaces(h, None, ctypes.byref(lst)) != 0 or lst.contents.n == 0:
+            if api.WlanEnumInterfaces(h, None, ctypes.byref(lst)) != 0:
+                api.WlanCloseHandle(h, None)
                 return
-            info = lst.contents.items[0]
+            try:
+                if lst.contents.n == 0:
+                    api.WlanCloseHandle(h, None)
+                    return
+                info = lst.contents.items[0]
+                guid, name = GUID.from_buffer_copy(info.guid), info.desc
+            finally:
+                api.WlanFreeMemory(lst)
             self._api, self._ct, self._wt = api, ctypes, wt
-            self._h, self._guid, self.name = h, GUID.from_buffer_copy(info.guid), info.desc
+            self._h, self._guid, self.name = h, guid, name
         except (OSError, AttributeError):
+            self._h = None
+
+    def close(self) -> None:
+        """Give the WLAN handle back (the server does on the way out)."""
+        if self._h is not None:
+            self._api.WlanCloseHandle(self._h, None)
             self._h = None
 
     def read(self) -> int | None:

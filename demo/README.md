@@ -297,9 +297,14 @@ and walls are not known.
 phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
 - **Which floor.** A web page gets no barometer (Chrome has no web API for one), so the floor comes
   from what the page can read. A lift: the phone, held still, feels the lift speed up and slow down,
-  and the vertical acceleration integrated twice is the height. Stairs: the camera's detector
-  (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down ahead, and the steps climbed
-  after it are risers (0.17 m). Motion only measures changes, so the floor is "?" until there is a
+  and the vertical acceleration integrated twice is the height; a lift ends at rest, so the speed
+  left at the end is taken out as drift (a phone tilted on the way). Stairs: the camera's detector
+  (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down within 1.5 m, and each step
+  taken while it still sees them (up to a second after) is a riser (0.17 m); three quarters of a
+  floor's risers is a floor. Steps out of its sight, past a staircase or along a landing, do not
+  count. The detector misses stairs close up, where they fill the picture (the stairs row in
+  `docs/results.md`), so a climb can come out short: a missed floor shows as "less than a floor",
+  never a floor made up. Motion only measures changes, so the floor is "?" until there is a
   reason: walking in from outside (GPS good, then lost at the door) sets the ground floor, as an
   assumption the page states; the user says it ("floor two"); or the supervisor taps it. Until then the floors moved
   since the start are counted. GPS altitude is shown beside it only as a reference: a phone's GPS
@@ -331,8 +336,12 @@ zone, from how their body changes the Wi-Fi signal between two ESP32 boards, wit
   ```bash
   python tools/wifi_csi.py --data datasets/office_csi --fetch       # the recordings, about 950 MB
   python -m demo.server --csi-replay datasets/office_csi            # then open /wifi
-  python -m demo.server --csi-serial COM5     # or a live ESP32 (pyserial); --csi-baud: its rate
+  python -m demo.server --csi-serial COM5     # or a live ESP32 (pip install pyserial)
   ```
+  The baud rate (`--csi-baud`, 115200 by default) matters only through a USB-to-UART bridge. On the
+  ESP32-C6's own USB port it is ignored. A row is about 440 bytes, so 200 a second is about 88 KB/s.
+  115200 baud carries about 11.5 KB/s, about 26 rows a second, so through a bridge set the board
+  and `--csi-baud` to 921600 or more, or the flicker no longer matches what the model was fitted on.
 - The model holds for the room and the placement of the boards it was fitted in. A new place needs
   its own recordings (a few minutes empty and with a person in each zone) and `tools/wifi_csi.py`
   run on them. A person standing still is found by the shape of the subcarriers, not by movement:

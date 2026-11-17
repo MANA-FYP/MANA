@@ -11,10 +11,12 @@ count false alarms.
     python tools/wifi_csi.py --data datasets/office_csi --fetch        # download, about 950 MB
     python tools/wifi_csi.py --data datasets/office_csi --out demo/csi_model/wifi_csi_office.npz
 
-It prints, on the test sessions, one row per one-second window: the share of windows given each
-label, the presence accuracy (empty or not) and the share of extra empty windows called occupied.
-For comparison, the same with the RSSI alone (its mean and spread over the window), which is all a
-laptop or a phone can read. Fitting needs scikit-learn; the saved model runs with numpy alone.
+It prints, for each test session, the share of its one-second windows given each label; then the
+presence accuracy (empty or not), the share of windows with a person found, and the share of empty
+windows called occupied. For comparison, the RSSI alone (its mean and spread over the window), which
+is all a laptop or a phone can read, with two models: the same logistic regression as the CSI, and
+a random forest (300 trees), the more flexible of the two, so the gap is not down to the model.
+Fitting needs scikit-learn; the saved model runs with numpy alone.
 """
 
 from __future__ import annotations
@@ -50,6 +52,8 @@ def session(path: Path):
 
 
 def fit(train: dict, empty_motion: np.ndarray, c: float = 1.0) -> csi.ZoneModel:
+    """Logistic regression on the standardised features (C fixed at 1: nothing tuned on a test
+    session); the movement threshold is the 99th percentile of the first empty session."""
     from sklearn.linear_model import LogisticRegression
 
     X = np.vstack([train[k] for k in LABELS])
@@ -66,6 +70,8 @@ def table(pred: dict, title: str) -> dict:
     print("| Session | Windows | " + " | ".join(NAMES[k] for k in LABELS) + " |")
     print("|---|---:|" + "---:|" * len(LABELS))
     right = total = pres_right = 0
+    person = [0, 0]  # windows with a person: found, all
+    empty = [0, 0]  # empty windows: called occupied, all
     rows = {}
     for k, p in pred.items():
         share = [float(np.mean(p == i)) for i in range(len(LABELS))]
@@ -73,11 +79,30 @@ def table(pred: dict, title: str) -> dict:
         right += int((p == truth).sum())
         pres_right += int(((p > 0) == (truth > 0)).sum())
         total += len(p)
+        if truth > 0:
+            person[0] += int((p > 0).sum())
+            person[1] += len(p)
+        else:
+            empty[0] += int((p > 0).sum())
+            empty[1] += len(p)
         rows[k] = {"windows": len(p), "share": dict(zip(LABELS, share, strict=True))}
         print(f"| {k} | {len(p)} | " + " | ".join(f"{s:.2f}" for s in share) + " |")
-    out = {"zone_accuracy": right / total, "presence_accuracy": pres_right / total, "rows": rows}
+    found, false_alarm = person[0] / person[1], empty[0] / empty[1]
+    out = {
+        "zone_accuracy": right / total,
+        "presence_accuracy": pres_right / total,
+        # most windows are empty, which flatters the pooled figure: both rates, and their mean
+        "person_found": found,
+        "person_missed": person[1] - person[0],
+        "empty_flagged": false_alarm,
+        "empty_flagged_n": empty[0],
+        "balanced_accuracy": (found + 1 - false_alarm) / 2,
+        "rows": rows,
+    }
     print(
         f"zone right {out['zone_accuracy']:.3f}, empty-or-not right {out['presence_accuracy']:.3f}"
+        f" (person found {found:.3f}, {out['person_missed']} missed; empty called occupied"
+        f" {false_alarm:.4f}, {empty[0]} windows; balanced {out['balanced_accuracy']:.3f})"
     )
     return out
 
@@ -119,8 +144,13 @@ def main(argv=None) -> int:
 
     Xr = np.vstack([data[f"{k}_1"][2] for k in LABELS])
     yr = np.concatenate([[i] * len(data[f"{k}_1"][2]) for i, k in enumerate(LABELS)])
+    rssi_lr = fit({k: data[f"{k}_1"][2] for k in LABELS}, data["empty_1"][1])  # same as the CSI's
+    rssi_lr_scores = table(
+        {n: np.array([int(np.argmax(rssi_lr.scores(r))) for r in data[n][2]]) for n in tests},
+        "RSSI alone, the same logistic regression",
+    )
     rf = RandomForestClassifier(300, random_state=0, n_jobs=-1).fit(Xr, yr)
-    rssi_scores = table({n: rf.predict(data[n][2]) for n in tests}, "RSSI alone, same sessions")
+    rssi_scores = table({n: rf.predict(data[n][2]) for n in tests}, "RSSI alone, random forest")
 
     moving = {n: float(np.mean(data[n][1] > model.threshold)) for n in tests}
     print(f"\nmotion over {model.threshold:.4f} (99th percentile of empty_1):")
@@ -134,7 +164,8 @@ def main(argv=None) -> int:
             json.dumps(
                 {
                     "csi": csi_scores,
-                    "rssi_only": rssi_scores,
+                    "rssi_only": rssi_scores,  # the random forest
+                    "rssi_only_logistic": rssi_lr_scores,
                     "moving": moving,
                     "threshold": model.threshold,
                     "window_s": 1.0,
@@ -144,6 +175,7 @@ def main(argv=None) -> int:
             )
             + "\n",
             encoding="utf-8",
+            newline="\n",
         )
         print(f"saved {a.out} and {a.out.with_suffix('.json')}")
     return 0

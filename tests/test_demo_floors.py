@@ -49,25 +49,57 @@ def test_a_bump_or_walking_is_not_a_lift():
     assert tr.floor == 0 and tr.view(t)["mode"] == "walking"
 
 
+def climb(tr, t, steps, n, direction=+1, seen=True, every=0.6):
+    """n steps, one every `every` seconds, the camera seeing the stairs ahead on each or not."""
+    for _ in range(n):
+        t += every
+        steps += 1
+        if seen:
+            tr.on_stairs(t, direction, 0.8)
+        tr.on_steps(t, steps)
+        tr.tick(t)
+    return t, steps
+
+
 def test_a_flight_of_stairs_seen_by_the_camera_then_climbed_is_a_floor():
     tr = FloorTracker(floor=0)
-    tr.on_stairs(1.0, +1)
-    t = 1.0
-    for n in range(1, 20):  # 19 risers of 17 cm: 3.2 m
-        t += 0.6
-        tr.on_steps(t, n)
-        tr.tick(t)
+    tr.on_stairs(1.0, +1, 1.2)
+    t, _ = climb(tr, 1.0, 0, 19)  # 19 risers of 17 cm: 3.2 m
     assert tr.view(t)["mode"] == "stairs up" and tr.view(t)["flight_steps"] == 19
-    tr.tick(t + 5.0)
+    tr.tick(t + 6.0)
     assert tr.floor == 1 and tr.events[-1]["source"] == "stairs"
     assert tr.events[-1]["text"] == "Floor 1: 19 steps up the stairs"
 
 
+def test_walking_past_stairs_is_not_climbing_them():
+    """Waqas (#193): once stairs were seen, every step counted, so a walk down a corridor past a
+    staircase went up floors."""
+    tr = FloorTracker(floor=0)
+    tr.on_stairs(0.0, +1, 3.5)  # seen down the corridor: ahead, not under foot
+    t, steps = climb(tr, 0.0, 0, 60, seen=False, every=0.5)
+    assert tr.floor == 0 and not tr.events
+    tr.on_stairs(t, +1, 1.0)  # passing right by them, then on along the corridor
+    t, steps = climb(tr, t, steps, 60, seen=False, every=0.5)
+    assert tr.floor == 0 and tr.events[-1]["text"] == "2 steps on stairs: less than a floor"
+    # half a flight, then along the landing without a pause: the risers and the first second
+    t, steps = climb(tr, t + 10, steps, 10)
+    t, steps = climb(tr, t, steps, 15, seen=False, every=0.5)
+    assert tr.floor == 0 and tr.events[-1]["text"] == "12 steps on stairs: less than a floor"
+
+
+def test_a_landing_turn_is_one_flight():
+    tr = FloorTracker(floor=0)
+    t, steps = climb(tr, 0.0, 0, 10)  # first half
+    t, steps = climb(tr, t, steps, 4, seen=False)  # the landing: one step in, then out of sight
+    t, steps = climb(tr, t, steps, 10)  # second half
+    tr.tick(t + 6.0)
+    assert tr.floor == 1 and tr.events[-1]["text"] == "Floor 1: 21 steps up the stairs"
+
+
 def test_a_few_steps_on_stairs_are_not_a_floor_and_hand_corrections_win():
     tr = FloorTracker(floor=0)
-    tr.on_stairs(0.0, -1)
-    for n in range(1, 4):
-        tr.on_steps(n * 0.6, n)
+    tr.on_stairs(0.0, -1)  # no distance (no tilt): taken as on them
+    climb(tr, 0.0, 0, 3, direction=-1)
     tr.tick(10.0)
     assert tr.floor == 0 and "less than a floor" in tr.events[-1]["text"]
     tr.set_floor(11.0, -1)
@@ -153,9 +185,15 @@ def test_the_indoor_page_and_the_floor_controls():
             r = await client.get("/api/imagery?lat=nope&lon=1")
             assert r.status == 400
             ws = await client.ws_connect("/ws/dashboard")
+            await ws.send_json({"type": "floor", "set": True})  # ignored: not floor 1
+            await ws.send_json({"type": "floor", "height": 3.5})
+            for _ in range(60):
+                m = await asyncio.wait_for(ws.receive_json(), 3)
+                if m.get("type") == "snapshot" and m["floors"]["floor_h"] == 3.5:
+                    break
+            assert m["floors"]["label"] == "?"
             await ws.send_json({"type": "floor", "set": 2})
             await ws.send_json({"type": "floor", "set": "the moon"})  # ignored
-            await ws.send_json({"type": "floor", "height": 3.5})
             for _ in range(60):
                 m = await asyncio.wait_for(ws.receive_json(), 3)
                 if m.get("type") == "snapshot" and m["floors"]["label"] == "2":
@@ -193,3 +231,59 @@ def test_the_floor_said_by_the_user():
     assert m.floor_said == (1, 5.0) and m.inputs[-1]["command"] == "Floor 1"  # not "on"
     m.on_heard("Stop, there is a wall", 6.0)
     assert m.inputs[-1]["command"] == "Stop"
+
+
+def test_an_imagery_service_error_is_not_kept_as_no_date(monkeypatch):
+    """Waqas (#193): an error reply was kept as "no date here" for good."""
+    import asyncio
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from demo import tiles
+    from demo.server import build_app
+
+    good = {"results": [{"attributes": {"DATE (YYYYMMDD)": "20250828"}}]}
+    replies = [web.json_response({"error": {"code": 500}}), web.json_response(good)]
+
+    async def upstream(request):
+        return replies.pop(0)
+
+    async def go():
+        fake = web.Application()
+        fake.router.add_get("/identify", upstream)
+        service = TestServer(fake)
+        await service.start_server()
+        monkeypatch.setattr(tiles, "IMAGERY_INFO", str(service.make_url("/identify")) + "?x={lat}")
+        client = TestClient(TestServer(build_app()))
+        await client.start_server()
+        try:
+            r = await client.get("/api/imagery?lat=33.65&lon=73.02")
+            assert r.status == 503
+            r = await client.get("/api/imagery?lat=33.65&lon=73.02")  # the service is back
+            assert r.status == 200 and (await r.json())["date"] == "28 Aug 2025"
+        finally:
+            await client.close()
+            await service.close()
+
+    asyncio.run(go())
+
+
+def test_a_phone_tilted_during_the_ride_still_reads_the_floors():
+    """Waqas (#193): gravity is kept from before the ride, so a tilt during it reads as a steady
+    push. The speed left at the end is taken out as drift, and the end is judged on a steady
+    reading (the old code saw neither ride end at 7 degrees)."""
+    import math as m
+
+    for profile, floors in ((UP_ONE, 1), ([(1.5, 0.8), (4.5, 0.0), (1.5, -0.8)], 2)):
+        acc = [a for secs, a in STILL + profile + [(8.0, 0.0)] for _ in range(int(secs * 30))]
+        ride_n = len(acc) - 11 * 30
+        tr, rnd, t = FloorTracker(floor=0), random.Random(1), 0.0
+        for i, a in enumerate(acc):
+            t += 1 / 30
+            # tilts to 7 degrees over the first fifth of the ride, and stays tilted
+            th = m.radians(7) * min(max((i - 90) / (0.2 * ride_n), 0.0), 1.0)
+            g = 9.81 + a
+            z = g * m.cos(th) + rnd.gauss(0, 0.03)
+            tr.on_motion(t, g * m.sin(th) + rnd.gauss(0, 0.03), rnd.gauss(0, 0.03), z)
+        assert tr.floor == floors, tr.events

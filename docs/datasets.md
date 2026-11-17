@@ -18,6 +18,7 @@ A dataset that is already on disk is skipped, and a stopped download picks up wh
 | [COCO 2017 val](#coco) | Check of the pretrained COCO detector (YOLO26n) | Annotations CC BY 4.0; images under their Flickr licences | 1.1 GB, 5,000 images | Automatic |
 | [Speech Commands v2](#speech-commands-v2) | BC-ResNet-8 command words (#46) | CC BY 4.0 | 2.4 GB, 105,829 clips | Automatic |
 | [UrbanSound8K](#urbansound8k) | EfficientAT-mn10 siren and horn detection (#47) | CC BY-NC 4.0 (non-commercial) | 6.0 GB, 8,732 clips | Automatic |
+| [Office Localization](#office-localization-wi-fi-csi) | Wi-Fi sensing: people and their zone from ESP32 CSI (#194) | CC BY 4.0 | About 950 MB, 11 sessions | `tools/wifi_csi.py --fetch` |
 
 EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only fine-tune and test on UrbanSound8K.
 

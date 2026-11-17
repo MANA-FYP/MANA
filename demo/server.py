@@ -36,6 +36,7 @@ import json
 import math
 import re
 import sys
+import threading
 import warnings
 from array import array
 from pathlib import Path
@@ -207,7 +208,7 @@ async def csi_play(request: web.Request) -> web.Response:
         raise web.HTTPConflict(text="no recordings: start the server with --csi-replay")
     try:
         c["replay"].choose((await request.json()).get("label"))
-    except (KeyError, ValueError, AttributeError) as e:
+    except (KeyError, ValueError, AttributeError, TypeError) as e:
         raise web.HTTPBadRequest(text="label: one of the recordings, or null") from e
     return web.json_response(c["replay"].view())
 
@@ -219,20 +220,29 @@ async def csi_task(app: web.Application) -> None:
     if c.get("serial"):
         port, baud = c["serial"]
         queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+        stop = threading.Event()  # set on the way out: the reader stops within its 1 s timeout
+
+        def put(p) -> None:
+            if not queue.full():  # behind by 10 s: drop rather than raise in the loop
+                queue.put_nowait(p)
 
         def read() -> None:
             try:
-                for line in csi.serial_lines(port, baud):
+                for line in csi.serial_lines(port, baud, stop):
                     p = csi.parse_line(line)
                     if p is not None:
-                        loop.call_soon_threadsafe(queue.put_nowait, p)
+                        loop.call_soon_threadsafe(put, p)
             except Exception as e:  # unplugged, or the port is busy: said once
-                print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
+                if not stop.is_set():
+                    print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
 
         c["sensing"].restart(f"ESP32 on {port}")
-        loop.run_in_executor(None, read)
-        while True:
-            c["sensing"].feed(await queue.get())
+        threading.Thread(target=read, name="esp32", daemon=True).start()
+        try:
+            while True:
+                c["sensing"].feed(await queue.get())
+        finally:
+            stop.set()
     while True:
         c["replay"].step(loop.time())
         await asyncio.sleep(0.05)
@@ -259,9 +269,15 @@ async def imagery(request: web.Request) -> web.Response:
                 aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s,
                 s.get(url) as r,
             ):
-                info = tiles.imagery_info(await r.json(content_type=None))
+                body = await r.json(content_type=None)
+                # an error is not "no date here": not kept, so the next ask tries again
+                if r.status != 200 or not isinstance(body, dict) or "error" in body:
+                    raise ValueError(f"imagery service: {r.status}")
+                info = tiles.imagery_info(body)
         except (aiohttp.ClientError, TimeoutError, ValueError):
             raise web.HTTPServiceUnavailable(text="no answer from the imagery service") from None
+        if len(kept) >= 1000:  # one per ~100 m cell visited: a walk never gets near
+            kept.clear()
         kept[key] = info
     if kept[key] is None:
         raise web.HTTPNotFound(text="no date for the imagery here")
@@ -696,7 +712,10 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 old = app["floors"]  # the floor stays; its history and height trace go
                 app["floors"] = floors.FloorTracker(floor=old.floor, floor_h=old.floor_h)
             elif (
-                d.get("type") == "floor" and isinstance(d.get("set"), int) and -5 <= d["set"] <= 60
+                d.get("type") == "floor"
+                and isinstance(d.get("set"), int)
+                and not isinstance(d["set"], bool)  # JSON true is an int to Python
+                and -5 <= d["set"] <= 60
             ):
                 app["floors"].set_floor(app["mw"].clock(), d["set"])
             elif d.get("type") == "floor" and (h := number(d.get("height"))) and 2.4 <= h <= 6.0:
@@ -777,8 +796,9 @@ def models_status(app: web.Application) -> dict:
 
 
 def floor_step(app: web.Application, snap: dict) -> dict:
-    """Feed the floor tracker what the tick knows: the steps, and stairs the camera placed ahead
-    (each report once); then its view for the pages."""
+    """Feed the floor tracker what the tick knows: the steps, and the stairs the camera saw (each
+    report once, with its distance: the tracker counts only stairs right in front); then its view
+    for the pages."""
     tr, mw = app["floors"], app["mw"]
     now = mw.clock()
     tr.on_steps(now, mw.nav.track.steps)
@@ -786,10 +806,9 @@ def floor_step(app: web.Application, snap: dict) -> dict:
     seen = app["live"]["stairs"]
     if seen is not None and seen.stamp != app["live"].get("stairs_fed"):
         app["live"]["stairs_fed"] = seen.stamp
-        ahead = not math.isfinite(seen.distance_m) or seen.distance_m <= 4.0
         way = {Ground.STAIRS_UP: 1, Ground.STAIRS_DOWN: -1}.get(seen.ground)
-        if way and ahead:
-            tr.on_stairs(now, way)
+        if way:
+            tr.on_stairs(now, way, seen.distance_m)
     said = mw.floor_said
     if said is not None and said[1] != app["live"].get("floor_said_t"):
         app["live"]["floor_said_t"] = said[1]
@@ -855,6 +874,8 @@ async def stop_loop(app: web.Application) -> None:
             await cache.close()
     if app["recorder"] is not None:
         app["recorder"].close()
+    if app["wifi"] is not None:
+        app["wifi"].close()
 
 
 # ---- command line
@@ -871,6 +892,10 @@ def wifi_sensing_from(a) -> dict | None:
     sensing = csi.Sensing(model)
     out = {"sensing": sensing, "scores": scores, "replay": None, "serial": None}
     if a.csi_serial:
+        try:
+            import serial  # noqa: F401
+        except ImportError:
+            raise SystemExit("--csi-serial needs pyserial: pip install pyserial") from None
         out["serial"] = (a.csi_serial, a.csi_baud)
     else:  # the held-out sessions: the model never saw them
         folder = Path(a.csi_replay)
