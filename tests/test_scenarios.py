@@ -120,3 +120,25 @@ def test_gazebo_plays_the_baseline_in_place_of_the_core_and_compares_both(
     assert played == ["mana", "baseline"]
     out = capsys.readouterr().out
     assert "Baseline mishap" in out and "on a step on wheels" in out
+
+
+def test_a_baseline_run_that_could_not_be_played_is_said_in_the_mishap_column(
+    monkeypatch, tmp_path, capsys
+):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "mana_sim"))
+    from mana_core.scenarios import Trace
+
+    from mana_sim import gazebo_run as gr
+    from mana_sim import gazebo_scenarios as gs
+
+    def play(name, traces, controller="mana"):
+        if controller == "baseline":
+            raise gr.RunFailed("the chair did not settle")
+        traces.mkdir(parents=True, exist_ok=True)
+        (traces / f"{name}.json").write_text(gs.trace_to_json(Trace()))
+        return traces / f"{name}.json"
+
+    monkeypatch.setattr(gr, "play", play)
+    main(["--world", "gazebo", "--compare", "--rerun", "stop", "--traces", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "not played" in out and "not played: the chair" not in out

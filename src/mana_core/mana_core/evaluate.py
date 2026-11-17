@@ -160,7 +160,8 @@ def gazebo_compare(names, traces, rerun, gr, gs) -> int:
     for n in names:
         mana, base = (gr.results(n, traces, rerun, c) for c in ("mana", "baseline"))
         met = [sum(ok for _, ok, _ in r) for r in (mana, base)]
-        mishap = "" if base[-1][1] else base[-1][2]  # the last mark is "no mishap"
+        last = base[-1]  # the last mark is "no mishap"; a run not played says so instead
+        mishap = "" if last[1] else ("not played" if last[2].startswith("not played") else last[2])
         totals = [totals[0] + met[0], totals[1] + met[1], totals[2] + len(mana)]
         title = gs.RUNS[n].scenario().title
         print(f"{title:<38} {met[0]:>3}/{len(mana):<2} {met[1]:>6}/{len(base):<2}  {mishap}")

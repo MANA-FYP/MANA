@@ -49,7 +49,7 @@ class Summary:
     stops: tuple[Episode, ...]
     slowdowns: tuple[Episode, ...]
     messages: int
-    takeovers: int  # hand-overs to the user (MANUAL) and back (AUTOMATIC)
+    takeovers: int  # hand-overs to the user (MANUAL); the hand-back (AUTOMATIC) is not counted
     mishaps: tuple[str, ...]
 
 
@@ -82,7 +82,7 @@ def summarise(name: str, trace: Trace) -> Summary:
         episodes(trace, lambda s: s.stop),
         episodes(trace, lambda s: not s.stop and s.speed_limit < SLOW_BELOW),
         len(trace.messages),
-        sum(c in (Command.MANUAL, Command.AUTOMATIC) for _, c in trace.said),
+        sum(c == Command.MANUAL for _, c in trace.said),
         tuple(trace.mishaps),
     )
 
@@ -98,25 +98,31 @@ def starting(*samples) -> bool:
     return any(s.reason.startswith(WAITING) for s in samples)
 
 
-def first_difference(mana: Trace, other: Trace):
-    """The first place on the route where the two decided differently for a few samples in a row:
-    (x_m, MANA's sample, the other's sample), or None. The other's sample is the nearest in x.
-    The start-up, while the core waits for its ground sensors, is not a decision about the route
-    and is not compared."""
+def first_difference(mana: Trace, other: Trace, by: str = "x"):
+    """The first place on the route (by="x", the default) or the first moment (by="t") where the
+    two decided differently for a few samples in a row: (x_m or t, MANA's sample, the other's
+    sample), or None. The other's sample is the nearest in x (or t); its samples are sorted by it
+    first, so a drive that backs up, a takeover for example, is matched by place all the same.
+    Use by="t" where something comes at a set time, as the user's stop does in the scenario
+    `stop`: it comes at a different place in each simulation, and a place would show a difference
+    that is not one. The start-up, while the core waits for its ground sensors, is not a decision
+    about the route and is not compared."""
     if not mana.samples or not other.samples:
         return None
-    xs = [s.x_m for s in other.samples]
+    key = (lambda s: s.t) if by == "t" else (lambda s: s.x_m)
+    ordered = sorted(other.samples, key=key)
+    ks = [key(s) for s in ordered]
     run = []
     for s in mana.samples:
-        i = min(bisect_left(xs, s.x_m), len(xs) - 1)
-        if i > 0 and abs(xs[i - 1] - s.x_m) < abs(xs[i] - s.x_m):
+        i = min(bisect_left(ks, key(s)), len(ks) - 1)
+        if i > 0 and abs(ks[i - 1] - key(s)) < abs(ks[i] - key(s)):
             i -= 1
-        if same_decision(s, other.samples[i]) or starting(s, other.samples[i]):
+        if same_decision(s, ordered[i]) or starting(s, ordered[i]):
             run = []
             continue
-        run.append((s, other.samples[i]))
+        run.append((s, ordered[i]))
         if len(run) == HOLD_SAMPLES:
-            return run[0][0].x_m, run[0][0], run[0][1]
+            return key(run[0][0]), run[0][0], run[0][1]
     return None
 
 
@@ -152,11 +158,12 @@ def decided(s) -> str:
     return "stops" if s.stop else f"{s.mode.name.lower()} at {s.speed_limit:.0%}"
 
 
-def comparison_row(title: str, mana: Summary, base: Summary, diff) -> str:
+def comparison_row(title: str, mana: Summary, base: Summary, diff, by_time: bool = False) -> str:
     where = "the same everywhere"
     if diff:
         x, m, b = diff
-        where = f"{x:.1f} m: MANA {decided(m)} ({m.reason}); baseline {decided(b)} ({b.reason})"
+        at = f"{x:.1f} s" if by_time else f"{x:.1f} m"
+        where = f"{at}: MANA {decided(m)} ({m.reason}); baseline {decided(b)} ({b.reason})"
     return (
         f"| {title} | {short(mana.stops)} | {short(base.stops)} "
         f"| {seconds(mana.tracks_s)} | {seconds(base.tracks_s)} "
@@ -183,8 +190,10 @@ def report_markdown(traces: Path) -> str:
         other = base_dir / f"{name}.json"
         if other.exists():
             base_trace = load(other)
-            diff = first_difference(trace, base_trace)
-            rows.append(comparison_row(f"`{name}`", mana, summarise(name, base_trace), diff))
+            by_time = bool(gs.RUNS[name].says)  # the user speaks at set times: compare by time
+            diff = first_difference(trace, base_trace, "t" if by_time else "x")
+            row = comparison_row(f"`{name}`", mana, summarise(name, base_trace), diff, by_time)
+            rows.append(row)
         else:
             rows.append(f"| `{name}` | {short(mana.stops)} | (not played) | | | | | |")
     return (
@@ -193,7 +202,9 @@ def report_markdown(traces: Path) -> str:
         + "Every drive is summarised, and each one is played again with the if-else baseline "
         + "(`mana_core/baseline.py`) deciding in place of the core, with the same route, faults "
         + "and driver commands. The two are separate simulations, so the last column gives "
-        + "the first place on the route where they decided differently. "
+        + "the first place on the route where they decided differently (for a scenario in which "
+        + "the user speaks at set times, `stop`, the first moment instead, because the stop comes "
+        + "at a different place in each simulation). "
         + "`python3 -m mana_sim.drive_summary`"
         + " writes this section from the traces; `mana_core.evaluate --world gazebo --compare`"
         + " plays both.\n\n"

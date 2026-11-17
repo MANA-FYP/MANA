@@ -45,7 +45,7 @@ def test_a_drive_is_summarised_with_its_stops_slowdowns_and_time_on_tracks():
     assert [(e.reason, e.x_m) for e in s.stops] == [("Obstacle ahead, stopping", 1.0)]
     assert round(s.stops[0].length_s, 3) == 0.2
     assert [e.reason for e in s.slowdowns] == ["Obstacle ahead, slowing down"]
-    assert s.takeovers == 2  # to manual and back; the stop is not a takeover
+    assert s.takeovers == 1  # the hand-over to manual; the hand-back and the stop are not
     assert s.mishaps == ()
 
 
@@ -119,3 +119,44 @@ def test_the_start_up_wait_for_the_ground_sensors_is_not_a_difference():
     mana = trace(*[(x, *waiting) for x in range(0, 3)], *[(x, *FREE) for x in range(3, 8)])
     base = trace(*[(x, *FREE) for x in range(0, 8)])
     assert ds.first_difference(mana, base) is None
+
+
+def test_a_drive_that_backs_up_is_matched_by_place_all_the_same():
+    # the other drive goes up to 4 m and then back to 2 m; its samples are not in order of x
+    base = trace(
+        *[(x, *FREE) for x in (0, 1, 2, 3, 4)], *[(x, W, True, 0.0, "back") for x in (3, 2)]
+    )
+    mana = trace(*[(x, *FREE) for x in (0, 1, 2, 3, 4)])
+    # each place is matched to the first time the other drive was there, in order of x
+    assert ds.first_difference(mana, base) is None
+    assert ds.first_difference(base, mana) is None  # and not the other way round either
+
+
+def test_a_scenario_driven_by_time_is_compared_by_time_and_not_by_place():
+    # both stop at 0.3 s, but at different places on the route
+    mana = trace(
+        (0, *FREE),
+        (1, *FREE),
+        (1, *FREE),
+        (1, W, True, 0.0, "Stopped by you"),
+        (1, W, True, 0.0, "Stopped by you"),
+        (1, W, True, 0.0, "Stopped by you"),
+    )
+    base = trace(
+        (0, *FREE),
+        (2, *FREE),
+        (3, *FREE),
+        (3, W, True, 0.0, "Stopped by you"),
+        (3, W, True, 0.0, "Stopped by you"),
+        (3, W, True, 0.0, "Stopped by you"),
+    )
+    assert ds.first_difference(mana, base) is not None  # by place the stop looks like a difference
+    assert ds.first_difference(mana, base, by="t") is None  # by time they are the same
+    row = ds.comparison_row(
+        "`d`",
+        ds.summarise("d", mana),
+        ds.summarise("d", base),
+        (0.3, mana.samples[3], base.samples[3]),
+        by_time=True,
+    )
+    assert "0.3 s:" in row
