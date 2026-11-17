@@ -233,8 +233,10 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   room, Wi-Fi fades in the hall. `ros2 run mana_sim zone_node --ros-args -p use_sim_time:=true`
   follows the chair's true position and calls `set_fault` on entering or leaving; it leaves a
   zone only 0.3 m outside it, so a doorway does not flicker. In Gazebo, with the chair moved from
-  the plaza to the lobby, the dark room and back, `fault_state` read none, GPS lost, camera dark
-  and GPS lost, then none.
+  the plaza to the lobby, the dark room and back, `fault_state` read `none`, `gps dropout`,
+  `camera dark, gps dropout`, then `none`. A change `fault_node` refuses is logged as a
+  warning. Leaving a zone switches its fault off even when `fault_script`, the `dark` scenario or
+  the panel's "Darkness" toggle switched it on, so do not use them with `zone_node`.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
