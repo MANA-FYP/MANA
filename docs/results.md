@@ -376,6 +376,58 @@ What the runs show:
 
 Not done here: the model on the phone's microphone stream, and the hazard report to the core.
 
+## Does the detector's confidence mean what the core's trust assumes? (#87)
+
+Measured on 9 November 2026 with `tools/calibrate_detector.py`: `yolo26n.pt` at 416, as the ROS
+node runs it, on SANPO-Real frames with masks (`tools/fetch_sanpo.py`, 30 train and 30 test
+sessions, one annotated frame in 30). That is 197 train frames and 194 test frames, with 2705 and
+1803 detections of an obstacle class at confidence 0.05 or more. A detection is right when its box
+meets an object of that kind in the mask with IoU 0.5 or more, each object once: a person a
+pedestrian or a rider, a car, bus or truck a vehicle, a dog an animal, and every other obstacle
+label (a chair, a bench, a potted plant, a fire hydrant...) SANPO's broad "obstacle" class, a loose
+match. Boxes under 40 pixels high are left out. SANPO's masks can still miss objects, so "right" is
+a lower bound.
+
+| Confidence | Train: n | Train: right | Test: n | Test: right |
+|---|---|---|---|---|
+| 0.0 to 0.1 | 1175 | 8% | 780 | 8% |
+| 0.1 to 0.2 | 761 | 18% | 409 | 21% |
+| 0.2 to 0.3 | 231 | 34% | 151 | 26% |
+| 0.3 to 0.4 | 133 | 56% | 101 | 44% |
+| 0.4 to 0.5 | 94 | 80% | 78 | 77% |
+| 0.5 to 0.6 | 92 | 88% | 66 | 80% |
+| 0.6 to 0.7 | 87 | 92% | 71 | 89% |
+| 0.7 to 0.8 | 79 | 95% | 80 | 93% |
+| 0.8 to 1.0 | 53 | 92% | 67 | 97% |
+| **Expected calibration error** | | 0.074 | | 0.071 |
+
+On the test split by kind: people 876 detections (ECE 0.106), vehicles 699 (0.070), the other
+obstacles 228 (0.074). People and vehicles are under-confident from 0.4 up (a person at 0.4 to 0.5
+was right 81 percent of the time, 36 boxes); the other obstacles are right about half the time at
+0.4 to 0.6 and do not follow their confidence above it (2 to 12 boxes a bin).
+
+- **The confidence is under-confident from 0.3 to 0.8, though its overall error is low.** The error
+  is 0.07, low because most detections sit in the well-calibrated bins under 0.2 (1189 of the 1803
+  on the test split). A confidence of 0.4 to 0.5 was right 77 to 80 percent of the time, of 0.5 to
+  0.6 80 to 88 percent, and of 0.6 to 0.8 89 to 95 percent: 18 to 24 points over the confidence.
+- **What a map does is move the core's gate.** Platt scaling (a logistic map of the confidence's
+  logit) and isotonic regression lowered the test error to 0.028 and 0.027. Both put a trust of 0.5
+  at a confidence of 0.30. Near the gate neither is exact: their trusts of 0.5 to 0.6 were right 39
+  percent of the time on the test split (about 16 points under), where the raw confidence of 0.5 to
+  0.6 was right 80 percent (about 25 points over). So a map does not make the gate more accurate;
+  it lowers it, from a confidence of 0.5 to 0.30: more objects passed to the core, at a lower share
+  right. Waqas's run on 2,331 SANPO test frames shows the trade: the raw gate passed 2,857 boxes,
+  89 percent right (2,554 of the 5,802 right ones); Platt passed 5,314, 76 percent right (4,025).
+- So the detector's trust stays its confidence, times the light factor (D14): that keeps the core's
+  operating point where it is until min_trust itself is chosen (below), rather than moving it as a
+  side effect of calibration. The ground
+  classifier's calibration needs the trained model (#38), and the light factor needs dark frames
+  (#89); both are still open.
+- **What it means for min_trust (0.5):** the core drops every report under 0.5, and a confidence
+  of 0.4 to 0.5 was right 77 to 80 percent of the time (172 boxes on both splits). For obstacles a
+  missed person costs more than a needless stop, so this table is the evidence for lowering the
+  detector's threshold. That is a separate decision, not made here.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).

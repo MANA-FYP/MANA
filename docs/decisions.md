@@ -309,6 +309,33 @@ Measured in Gazebo with the first version of change 1, before the #173 review na
 
 With the narrower relabelling of the #173 review, all eleven again: 43 of 44 marks in one run. `stairs_down` asked at 1.0 s, waited 1.53 m before the stairs until the yes, was back on wheels at 5.15 m and reached 6.04 of 6 m with no mishap. `imu_lost` missed "Shows 'On tracks until the ground is level'" once: at the top of the stairs, with the IMU gone, it asked about stairs down and stopped there. Played again, it met every mark in 2 of 2 runs with this change and in 2 of 2 without it; the ask without a yes is not touched by this change, and it fits the 3D camera's reading with no IMU at the top of a climb (#171). A second run of all eleven on 17 November, whose traces make the table in `results.md`: again 43 of 44, the same `imu_lost` miss (it asked at 12.4 s and stopped at the edge at 19.2 s); `stairs_down` asked at 0.9 s, waited 1.58 m before the stairs, was back on wheels at 5.14 m and reached 6.01 of 6 m. So with this change `imu_lost` has missed that message in 2 of 4 runs.
 
+## D14. The detector's trust stays its confidence (#87)
+
+**Chosen:** the object detector keeps sending its confidence, times the light factor, as the trust of
+its reports. It is not mapped through a calibration.
+
+**Why.** On SANPO-Real (`results.md`, #87) the confidence was under-confident from 0.3 to 0.8,
+with a low overall error (0.074 on the train split, 0.071 on test) because most detections sit in
+the well-calibrated bins under 0.2. Two maps fitted on the train split lowered the test error to
+0.027 and 0.028. What they change where the core decides is the gate: both put a trust of 0.5 at a
+confidence of 0.30. Near the gate neither is exact (their trusts of 0.5 to 0.6 were right 39 percent
+of the time, against 80 percent for the raw confidence there), so a map is a lower min_trust in
+disguise: more objects passed, a lower share of them right. Keeping the confidence keeps the
+operating point at 0.5 until min_trust is decided on its own (more people caught against more false
+stops, `results.md`), with that trade in view rather than as a side effect of calibration
+(#175).
+
+| Option | Problem |
+|---|---|
+| **The confidence as the trust** | Under-confident from 0.3 to 0.8: a confidence of 0.4 to 0.5 is right 77 to 80 percent of the time, and the core ignores it (min_trust 0.5) |
+| Platt scaling of the confidence | ECE 0.028 on test; moves the gate to a confidence of 0.30, so it decides min_trust by the back door (its trusts of 0.5 to 0.6 right 39 percent of the time) |
+| Isotonic regression | The same: ECE 0.027, the gate at 0.30, trusts of 0.5 to 0.6 right 39 percent of the time |
+
+**Limits.** The test split has 1803 detections, so the bins near 0.5 hold only 66 to 101 each.
+SANPO's frames come from cameras worn by people walking, not the chair's camera. A larger set
+(more sessions with masks) could carry a map over better. The ground classifier's calibration and
+the light factor on dark frames are still open (#38, #89).
+
 ## D15. A person sensed by Wi-Fi slows the device and never stops it (#194)
 
 **Chosen:** a new report, `PresenceReport` (source `WIFI_CSI`, `present`, an optional `zone`, and
