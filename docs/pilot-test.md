@@ -163,7 +163,8 @@ own. The usual average, 68, is a point of comparison, not a target we set.
 >
 > *Your choices.* Taking part is voluntary. You can stop at any moment, and you can ask for what
 > you gave to be deleted until the report is handed in, without giving a reason. It will not affect
-> your marks or anything else. Nobody who is on the team is told your code.
+> your marks or anything else. Only the facilitator keeps the list that links your code to your
+> name, on paper, and it is thrown away when the report is handed in.
 >
 > *What we do with it.* The results are used in the project report as counts, an average and short
 > quotes without names. This is a test of a simulation, not a medical or safety test, and says

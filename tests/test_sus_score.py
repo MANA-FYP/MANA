@@ -57,6 +57,12 @@ def test_a_blank_answer_names_the_person_and_the_item(tmp_path):
         sus.read(str(f))
 
 
+def test_an_empty_row_is_skipped(tmp_path):
+    f = tmp_path / "e.csv"
+    write(f, ["P01,3,3,3,3,3,3,3,3,3,3", ",,,,,,,,,,"])  # as a spreadsheet leaves at the end
+    assert sus.read(str(f)) == {"P01": [3] * 10}
+
+
 def test_a_repeated_participant_is_refused(tmp_path):
     f = tmp_path / "c.csv"
     write(f, ["P01," + ",".join(map(str, BEST)), "P01," + ",".join(map(str, BEST))])

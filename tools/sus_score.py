@@ -32,6 +32,8 @@ def read(path: str) -> dict[str, list[int]]:
     out = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
+            if not any((v or "").strip() for v in row.values()):
+                continue  # an empty row, as a spreadsheet leaves at the end
             who = (row.get("participant") or "").strip()
             if not who:
                 raise ValueError("a row has no participant")
