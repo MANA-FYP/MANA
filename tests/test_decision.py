@@ -730,7 +730,11 @@ def stairs_down(distance=1.0):
 
 def fed(c, reports, at, motion=None):
     for r in reports:
-        c.on_ground(GroundReport(at, r.trust, r.source, r.ground, r.distance_m))
+        c.on_ground(
+            GroundReport(
+                at, r.trust, r.source, r.ground, r.distance_m, step_height_m=r.step_height_m
+            )
+        )
     c.on_motion(MotionReport(at, 0.9, pitch_rad=motion or 0.0))
     return c.tick(at)
 
@@ -771,6 +775,87 @@ def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
     fed(c, flat, NOW + 1.0)  # at the bottom, level
     assert fed(c, flat, NOW + 1.0 + LIM.level_hold_s).reason == "Level ground"
     assert fed(c, stairs_down(), NOW + 4.0).reason == ASK_DOWN
+
+
+def test_after_the_yes_the_floor_at_the_foot_of_the_stairs_is_not_a_drop():
+    # past the top edge the 3D camera sees one step down, to the floor at the stairs' foot, and
+    # reads it as a drop: 0.52 m in Gazebo for three steps (#52)
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    at_the_edge = (
+        GroundReport(NOW + 0.2, 0.9, CAM, Ground.STAIRS_DOWN),
+        GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=0.52),
+    )
+    for r in at_the_edge:
+        c.on_ground(r)
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
+
+
+@pytest.mark.parametrize("height", [1.0, math.nan], ids=["deep", "unknown"])
+def test_after_the_yes_a_deep_drop_or_one_of_unknown_depth_still_stops(height):
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    fed(c, stairs_down(), NOW + 0.1)
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CAM, Ground.STAIRS_DOWN))
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=height))
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+def said_yes_to_stairs_down():
+    c = core(*stairs_down())
+    c.on_command(Command.YES, 0.9)
+    assert fed(c, stairs_down(), NOW + 0.1).mode == Mode.TRACKS
+    return c
+
+
+@pytest.mark.parametrize("other", [Ground.CURB, Ground.FLAT])
+def test_after_the_yes_a_ledge_seen_with_a_curb_or_flat_ground_is_still_a_drop(other):
+    # A (#173 review): a 0.5 m ledge is not those stairs; the camera's curb must not confirm it
+    c = said_yes_to_stairs_down()
+    ledge = (
+        GroundReport(NOW + 0.2, 0.9, CAM, other, 0.3),
+        GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.3, step_height_m=0.5),
+    )
+    d = fed(c, ledge, NOW + 0.2)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+def test_a_ledge_held_long_after_the_yes_does_not_keep_the_yes():
+    # B (#173 review): stopped at the ledge (A), then held there at 0.55 m for 20 s. Only the
+    # sensors' own stairs down keep a yes alive, so it lapses and the chair stays stopped
+    c = said_yes_to_stairs_down()
+    at = (
+        GroundReport(NOW, 0.9, CAM, Ground.CURB, 0.3),
+        GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.3, step_height_m=0.5),
+    )
+    assert fed(c, at, NOW + 0.2).stop
+    held = (
+        GroundReport(NOW, 0.9, CAM, Ground.CURB, 0.55),
+        GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.55, step_height_m=0.5),
+    )
+    ds = [fed(c, held, NOW + 0.3 + i / 10) for i in range(200)]
+    assert not c.down_ok
+    assert all(d.stop and d.reason == "Drop ahead, stopping" for d in ds)
+
+
+def test_after_the_yes_a_shallow_drop_further_on_stays_a_drop():
+    c = said_yes_to_stairs_down()
+    far = (
+        GroundReport(NOW + 0.2, 0.9, CAM, Ground.STAIRS_DOWN),
+        GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 3.0, step_height_m=0.5),
+    )
+    for r in far:
+        c.on_ground(r)
+    c.tick(NOW + 0.2)
+    assert [r.ground for r in c._grounds() if r.source == DEPTH] == [Ground.DROP]
+
+
+def test_without_a_yes_a_shallow_drop_still_stops():
+    d = core(ground(CAM, Ground.FLAT), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.3, 0.52))
+    assert (d.decision.stop, d.decision.reason) == (True, "Drop ahead, stopping")
 
 
 def test_stairs_up_still_change_to_tracks_without_asking():

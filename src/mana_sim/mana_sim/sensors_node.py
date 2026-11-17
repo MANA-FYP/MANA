@@ -6,9 +6,11 @@
   a real chair; map > odom is then left to a localiser (slam_toolbox, #43).
 - `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode:
   the speed of the wheels against the chair's speed, and their turn against the gyro).
-- `obstacle` from the nearest echo of the lidar in front of the chair. (`position` is made by
-  mana_position's position_node from `gps/fix`, and `link` by mana_connectivity's link_node from the
-  heartbeats of fault_node.)
+- `obstacle` from the nearest echo of the lidar in front of the chair, while the chair is level
+  within `scan_max_tilt_rad` (0.17, about 10 degrees: steeper than the ramps it drives on wheels);
+  pitched more, as on stairs, the scan plane runs into the ground and nothing is sent.
+  (`position` is made by mana_position's position_node from `gps/fix`, and `link` by
+  mana_connectivity's link_node from the heartbeats of fault_node.)
 """
 
 import rclpy
@@ -33,6 +35,8 @@ class SensorsNode(Node):
         self.cone_rad = p("obstacle_cone_rad", 0.35).value
         self.obstacle_max_m = p("obstacle_max_m", 4.0).value
         self.obstacle_trust = p("obstacle_trust", 0.9).value
+        self.scan_max_tilt_rad = p("scan_max_tilt_rad", 0.17).value
+        self.tilt: tuple[float, float, float] | None = None  # (pitch, roll, time) from the IMU
         # odom from the simulation's ground truth (exact), or from the wheels and the gyro
         # (drifts, as on a real chair: what a lidar localisation must correct, #43)
         self.odom_from = p("odom_from", "ground_truth").value
@@ -99,6 +103,7 @@ class SensorsNode(Node):
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
         pitch, roll = conv.tilt(q.x, q.y, q.z, q.w)
+        self.tilt = (pitch, roll, self.get_clock().now().nanoseconds / 1e9)
         if self.odom_from == "wheels":
             self.dead_reckon(m)
         wheels = self.left_rad_s + self.right_rad_s
@@ -131,6 +136,9 @@ class SensorsNode(Node):
         self.odom.publish(o)
 
     def on_scan(self, m: LaserScan) -> None:
+        pitch, roll = conv.fresh_tilt(self.tilt, self.get_clock().now().nanoseconds / 1e9)
+        if not conv.scan_is_level(pitch, roll, self.scan_max_tilt_rad):
+            return
         found = conv.nearest_ahead(
             list(m.ranges),
             m.angle_min,
