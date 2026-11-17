@@ -3,7 +3,7 @@
 The Gazebo test route, the wheel-and-track test host and its sensors. The chair follows the core's
 `DriveRequest` and publishes a camera, a 3D camera, a lidar, an IMU, a GPS and wheel encoders on ROS 2
 ([docs/topics.md](docs/topics.md)), and `set_fault` switches sensor faults during a run
-([docs/faults.md](docs/faults.md)). The ten original scenarios play on the route in Gazebo with the
+([docs/faults.md](docs/faults.md)). Eleven scripted scenarios play on the route in Gazebo with the
 same pass marks (see below), and a smoke test runs in CI.
 
 ## Run it
@@ -122,11 +122,11 @@ topics, and it has no switches by design.
 
 ## The scenarios in Gazebo
 
-The ten original scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, `drop`, `manual_drop`,
-`picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
+Eleven scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, `stairs_down`, `drop`,
+`manual_drop`, `picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
 
 ```bash
-ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 20 minutes)
+ros2 run mana_core evaluate --world gazebo                # all eleven, one simulation each
 ros2 run mana_core evaluate --world gazebo stairs curb    # some of them
 ros2 run mana_core evaluate --world gazebo --rerun        # play again; traces are kept in gazebo_traces/
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
