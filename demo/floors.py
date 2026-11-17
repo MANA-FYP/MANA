@@ -95,6 +95,8 @@ class FloorTracker:
         which spaces the readings evenly; now: the server's clock when it came, which the steps
         and the camera use. The phone's time is moved onto the server's by the smallest offset
         seen (the reading that waited least on the network)."""
+        if not all(math.isfinite(v) for v in (t, ax, ay, az)):
+            return  # JSON allows NaN and Infinity: a reading like that is no reading (#193)
         if now is not None:
             off = now - t
             self._offset = off if self._offset is None else min(self._offset, off)
@@ -108,7 +110,7 @@ class FloorTracker:
         gn = math.sqrt(gx * gx + gy * gy + gz * gz) or G
         av = (ax * gx + ay * gy + az * gz) / gn - gn  # up is +: along gravity's opposite
         # walking shakes the phone; a lift pushes it smoothly. Judged on the phone's own readings:
-        # the track's steps arrive late, in a batch, once a walk is confirmed
+        # the first steps of a walk reach the track late, together, once the walk is confirmed
         self._recent.append((t, av))
         while self._recent and t - self._recent[0][0] > 1.0:
             self._recent.popleft()
@@ -142,7 +144,10 @@ class FloorTracker:
         if distance_m is not None and math.isfinite(distance_m) and distance_m > self.near_m:
             return
         self._count(t)
-        if self._flight is None or self._flight.direction != direction:
+        if self._flight is not None and self._flight.direction != direction:
+            self._close(t, self._flight)  # turned round: the flight so far is counted, not lost
+            self._flight = None
+        if self._flight is None:
             self._flight = Flight(t, direction, self._steps)
         else:
             self._flight.seen = t
@@ -188,6 +193,9 @@ class FloorTracker:
         if f is None or t - f.seen <= self.lost_s:
             return
         self._flight = None
+        self._close(t, f)
+
+    def _close(self, t: float, f: Flight) -> None:
         rise = f.steps * self.riser_m
         if rise >= self.floor_share * self.floor_h:
             n = max(1, round(rise / self.floor_h))
