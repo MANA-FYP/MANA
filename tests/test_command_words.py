@@ -296,3 +296,19 @@ def test_noise_alone_is_streamed_without_clips_below_the_average_speech(tmp_path
     probs, pieces, _ = cw.stream_scores([(label, None, noise)], fake_score(0.95, 0.5))
     rows, alone = cw.stream_rows(probs, pieces, [], 0.85)
     assert rows == [] and alone and set(alone) == {"stop"}
+
+
+@needs_torch
+def test_batched_scoring_gives_the_spotters_windows_in_order():
+    rng = np.random.default_rng(1)
+    segments = [
+        (label, Path(f"{label}/{i}.wav"), (rng.standard_normal(2 * SECOND) * s).astype(np.int16))
+        for i, (label, s) in enumerate([("go", 3000), ("bed", 100), ("stop", 9000), ("cat", 5)])
+    ]
+    score = fake_score(0.95, 0.5)
+    one, pieces, spans = cw.stream_scores(segments, score)
+    for batch in (1, 3, 256):
+        many, p2, s2 = cw.stream_scores_batched(
+            segments, lambda w: np.stack([score(x) for x in w]), batch=batch
+        )
+        assert p2 == pieces and s2 == spans and np.array_equal(many, one)

@@ -330,6 +330,51 @@ def stream_scores(segments, score, hop_s: float = 0.25):
     return np.array(probs), pieces, spans
 
 
+def stream_scores_batched(segments, score_many, hop_s: float = 0.25, batch: int = 256):
+    """stream_scores without the Spotter in the loop: the same windows (the newest second, every
+    hop_s once a second has come, as Spotter.feed takes them), scored batch at a time by
+    score_many (windows, a float32 array of rows) for speed. Returns what stream_scores does."""
+    hop = int(hop_s * TARGET_RATE)
+    sound = np.zeros(0, dtype=np.float32)
+    fed, pieces, spans, windows, probs = 0, 0, [], [], []
+    for label, path, segment in segments:
+        assert segment.size % hop == 0, "the gap and the clip must be whole hops"
+        start = fed + segment.size - TARGET_RATE
+        spans.append((label, path, start, start + TARGET_RATE))
+        for i in range(0, segment.size, hop):
+            piece = segment[i : i + hop].astype("<i2").astype(np.float32) / 32768
+            sound = np.concatenate([sound, piece])[-TARGET_RATE:]
+            fed, pieces = fed + piece.size, pieces + 1
+            if sound.size == TARGET_RATE:
+                windows.append(sound)
+                if len(windows) == batch:
+                    probs.extend(score_many(np.stack(windows)))
+                    windows = []
+    if windows:
+        probs.extend(score_many(np.stack(windows)))
+    return np.array(probs), pieces, spans
+
+
+def batch_scorer(checkpoint: Path):
+    """The model of a checkpoint, as Spotter.load builds it, scoring many windows at once."""
+    import torch
+
+    from demo import kws
+
+    saved = torch.load(checkpoint, map_location="cpu")
+    model = kws.BCResNet(saved["tau"])
+    model.load_state_dict(saved["state"])
+    model.eval()
+    features = kws.mel()
+
+    def score_many(windows: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            x = features(torch.from_numpy(windows)).unsqueeze(1)
+            return torch.softmax(model(x), 1).numpy()
+
+    return score_many
+
+
 def stream_rows(
     probs, pieces, spans, threshold: float, stop_at: float | None = None, hop_s: float = 0.25
 ) -> tuple[list[dict], list[str]]:
@@ -510,6 +555,7 @@ def stream_report(a, out: Path) -> int:
     if spotter is None:
         print(f"cannot load {a.kws}", file=sys.stderr)
         return 1
+    score_many = batch_scorer(a.kws)  # the Spotter's windows, scored many at a time
     clips = official_clips(a.official) if a.official else test_clips(a.sc, a.list)
     part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
     held = frozenset(a.held_out)
@@ -539,7 +585,7 @@ def stream_report(a, out: Path) -> int:
         probs, pieces, spans = load_windows(kept, a.kws, a.gap, len(clips))
         if probs is None:
             segments = stream_sound(a.sc, clips, snr, a.gap)
-            probs, pieces, spans = stream_scores(segments, spotter.score)
+            probs, pieces, spans = stream_scores_batched(segments, score_many)
             save_windows(kept, a.kws, a.gap, probs, pieces, spans)
         for threshold, stop_at in settings:
             rows, alone = stream_rows(probs, pieces, spans, threshold, stop_at)
@@ -561,7 +607,7 @@ def stream_report(a, out: Path) -> int:
     if a.snr:
         print("\nNoise alone (each noise file's test quarter, no clips):")
     for snr in a.snr:
-        probs, pieces, _ = stream_scores(noise_alone_sound(a.sc, clips, snr), spotter.score)
+        probs, pieces, _ = stream_scores_batched(noise_alone_sound(a.sc, clips, snr), score_many)
         hours = pieces * 0.25 / 3600
         said = []
         for threshold, stop_at in settings:
