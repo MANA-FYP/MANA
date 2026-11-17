@@ -19,8 +19,8 @@ so a trained model is not tested on noise it was trained with (Waqas, #185).
 
 The clips: the dataset's testing_list.txt, or with --official the authors' separate test set
 (speech_commands_test_set_v0.02: the ten words, _unknown_ and _silence_, 1 s each). Its silence
-clips measure false activations from noise alone, as when the device listens all day; they count
-as other words.
+clips measure false activations from noise alone, as when the device listens all day; they are
+counted on their own, not as other words.
 
 Stop gets its own line: a missed stop is the unsafe case, and "stop heard as go" the worst one.
 With --held-out WORDS, the false activations on those words are given apart: words a trained model
@@ -73,7 +73,7 @@ def test_clips(sc: Path, listed: str = "testing_list.txt") -> list[tuple[str, Pa
 
 def official_clips(folder: Path) -> list[tuple[str, Path]]:
     """(label, path) of the authors' test set: a folder per command word, _unknown_ and _silence_.
-    Unknown clips are labelled "_unknown_" and silences "_silence_", both other words here."""
+    Unknown clips are labelled "_unknown_" (other words) and silences "_silence_" (noise alone)."""
     return [(wav.parent.name, wav) for wav in sorted(folder.glob("*/*.wav"))]
 
 
