@@ -60,6 +60,9 @@ class BaselineController:
     def on_link(self, report: LinkReport) -> None:
         """The alert link is not part of the baseline's rules."""
 
+    def on_presence(self, report) -> None:
+        """Nor is Wi-Fi presence (#194)."""
+
     def on_command(self, command: Command, trust: float) -> None:
         if command == Command.STOP:
             self.stopped_by_user = True

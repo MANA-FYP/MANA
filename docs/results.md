@@ -334,6 +334,14 @@ So the trained model of #46 needs a class for "some other word". BC-ResNet (`dem
 - It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest that keeps 90% of the clean command clips right, 0.85.
 - "Stop at any": stop acts at any probability, the other nine words at 0.85, as the core obeys a stop at any trust (`on_command`). This was also set on the validation list.
 - The demo's `Spotter` acts at 0.9 by default.
+- CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
+
+```
+python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
+```
 
 The settings, on the testing list (stop: 411 clips):
 
@@ -374,6 +382,32 @@ The official set's 4,074 command clips give the same within 0.6 points, and its 
 - **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
 
 These favour 0.85 with stop at any over the demo's 0.9. The demo is not changed here: its `Spotter` listens to a running stream every 0.25 s, which these aligned clips do not cover, and a stop at any probability should be tried on a stream first. One false stop is safe, but many would make the device unusable.
+
+## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
+
+`tools/sound_hazards.py` scores both AudioSet taggers as they come, with no training, on all 8,732 clips of UrbanSound8K.
+- A clip's siren score is the highest score of AudioSet's siren classes over the clip: Siren, Civil defense siren, Emergency vehicle, and the police car, ambulance and fire engine sirens. Its horn score is the same over Vehicle horn, Toot and Air horn.
+- The `siren` and `car_horn` clips are the positives; every other clip is a negative.
+- Each threshold is the best F1 on folds 1 to 5. Precision and recall are reported on folds 6 to 10, so the threshold was not fitted to the clips it is scored on.
+- Code and weights: EfficientAT at commit a425fdc (`mn10_as`, mAP 0.471 on AudioSet), and YAMNet from tensorflow/models at commit c14bf9a. Both are kept outside the repository.
+
+Measured on 10 November 2026:
+
+| Model | Hazard | Positives (folds 6-10) | Threshold (folds 1-5) | Precision | Recall | F1 | TP / FP / FN | Average precision |
+|---|---|---|---|---|---|---|---|---|
+| EfficientAT-mn10 | siren | 396 | 0.22 | 95% | 79% | 0.86 | 311 / 15 / 85 | 0.93 |
+| EfficientAT-mn10 | horn | 151 | 0.08 | 73% | 75% | 0.74 | 114 / 43 / 37 | 0.83 |
+| YAMNet | siren | 396 | 0.60 | 87% | 68% | 0.76 | 270 / 41 / 126 | 0.78 |
+| YAMNet | horn | 151 | 0.18 | 57% | 66% | 0.61 | 100 / 76 / 51 | 0.65 |
+
+What the runs show:
+- **EfficientAT is better on both hazards:** average precision 0.93 against 0.78 for sirens, and 0.83 against 0.65 for horns.
+- **Horns are harder than sirens for both models.**
+- **Thresholds are low for EfficientAT** (0.22 and 0.08). At 0.5 its precision is 97% for both hazards, but recall falls to 51% for sirens and 37% for horns. The threshold has to be set for the model; 0.5 is not a safe default.
+- **EfficientAT needs 10 s of sound.** It was trained on AudioSet's 10 s clips. A shorter clip given as it is gets nonsense: every clip under 2 s (982 of them) scored over 0.9 for both siren and horn. In that first run, siren average precision was 0.22. Clips are now padded with silence to 10 s, as AudioSet's shorter clips were (`ten_seconds`). On a microphone stream, the model has to be given a 10 s window.
+- **Time:** a median 79 ms per clip for EfficientAT and 132 ms for YAMNet, on this laptop's CPU. Other heavy jobs ran at the same time, so these are upper bounds. Either keeps up with a microphone heard once a second.
+
+Not done here: the model on the phone's microphone stream, and the hazard report to the core.
 
 ## Mutation testing (#83)
 

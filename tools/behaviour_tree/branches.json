@@ -120,6 +120,26 @@
     "why": "The message names what is ahead: \"Obstacle ahead\", \"Drop ahead\", \"Ramp ahead\" or \"Possible step ahead\", then \"slowing down\"."
   },
   {
+    "name": "someone near",
+    "label": "Someone near",
+    "group": "move",
+    "icon": "wifi-high",
+    "when": "A person sensed by Wi-Fi in the last 2.5 s (the channel state of an ESP32 link), with nothing else slowing or stopping the device.",
+    "does": "Wheels, at 30%. It never stops for this.",
+    "says": "Someone may be near (zone 1), slowing down",
+    "why": "Wi-Fi senses a person without light, even standing still, but gives a zone of the room, not a distance. So it only slows the device, and every hazard the cameras or the lidar place comes first (#194, D15)."
+  },
+  {
+    "name": "waiting",
+    "label": "Waiting",
+    "group": "move",
+    "icon": "hourglass-medium",
+    "when": "Fewer of the host's ground sensors have reported than it has, as at start-up.",
+    "does": "Wheels, at 30%.",
+    "says": "Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing down",
+    "why": "The first sensor up alone must not set full speed: the camera's stairs can come after the 3D camera's level ground (#151)."
+  },
+  {
     "name": "no alert link",
     "label": "No link",
     "group": "help",
