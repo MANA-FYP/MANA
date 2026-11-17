@@ -31,7 +31,10 @@ import numpy as np
 
 # 64 subcarriers in esp-csi's order (-32 .. 31); the guard bands and the DC one carry nothing
 SUBCARRIERS = np.r_[4:32, 33:61]
-TIME_COL, RSSI_COL, DATA_COL = 9, 3, 14  # local_timestamp (us), rssi (dBm), data in a CSI_DATA row
+# where rssi (dBm), local_timestamp (us) and data are in a CSI_DATA row of the Office Localization
+# recordings. Other esp-csi firmware prints other rows, so a "type,..." header line, when one comes,
+# names the columns instead (LineParser)
+DATASET_COLUMNS = {"rssi": 3, "local_timestamp": 9, "data": 14}
 
 
 @dataclass
@@ -41,13 +44,22 @@ class Packet:
     amp: np.ndarray  # (56,) amplitude per subcarrier
 
 
-def parse_row(row: list[str]) -> Packet | None:
+def columns(row: list[str]) -> dict[str, int] | None:
+    """The column of each field read, from a header row ("type,seq,mac,rssi,..."); None when it
+    is not one or lacks a field."""
+    names = [c.strip() for c in row]
+    if not names or names[0] != "type" or not all(n in names for n in DATASET_COLUMNS):
+        return None
+    return {n: names.index(n) for n in DATASET_COLUMNS}
+
+
+def parse_row(row: list[str], cols: dict[str, int] = DATASET_COLUMNS) -> Packet | None:
     """One CSI_DATA row (already split into fields) to a Packet; None for anything else."""
-    if len(row) <= DATA_COL or row[0] != "CSI_DATA":
+    if len(row) <= max(cols.values()) or row[0] != "CSI_DATA":
         return None
     try:
-        v = np.array(row[DATA_COL].strip(' "[]').split(","), dtype=np.float32)
-        t, rssi = int(row[TIME_COL]) / 1e6, int(row[RSSI_COL])
+        v = np.array(row[cols["data"]].strip(' "[]').split(","), dtype=np.float32)
+        t, rssi = int(row[cols["local_timestamp"]]) / 1e6, int(row[cols["rssi"]])
     except ValueError:
         return None
     if v.size != 128:
@@ -56,21 +68,65 @@ def parse_row(row: list[str]) -> Packet | None:
     return Packet(t, rssi, np.hypot(iq[SUBCARRIERS, 0], iq[SUBCARRIERS, 1]))
 
 
-def parse_line(line: str) -> Packet | None:
+def parse_line(line: str, cols: dict[str, int] = DATASET_COLUMNS) -> Packet | None:
     """A line from the ESP32's serial port or a recording. A row is always one line, so a quote
     left open (a cut line) spoils only that line."""
     if not line.startswith("CSI_DATA"):
         return None
     try:
-        return parse_row(next(csv.reader([line])))
+        return parse_row(next(csv.reader([line])), cols)
     except csv.Error:  # a field past the csv module's limit
         return None
 
 
+class LineParser:
+    """Lines to packets, with the columns from the last "type,..." header seen (the dataset's
+    layout until one comes). It counts the CSI_DATA lines and the packets read from them, so a
+    board whose rows it cannot read is said, not shown as zero packets (Komail, #195)."""
+
+    def __init__(self, warn_after_s: float = 5.0):
+        self.cols, self.warn_after_s = dict(DATASET_COLUMNS), warn_after_s
+        self.lines = self.packets = 0
+        self._first: float | None = None
+        self._warned = False
+
+    def __call__(self, line: str) -> Packet | None:
+        if line.startswith("type,"):
+            try:
+                cols = columns(next(csv.reader([line])))
+            except csv.Error:
+                cols = None
+            if cols is not None:
+                self.cols = cols
+            return None
+        if not line.startswith("CSI_DATA"):
+            return None
+        self.lines += 1
+        p = parse_line(line, self.cols)
+        self.packets += p is not None
+        return p
+
+    def unread(self, now: float) -> str | None:
+        """Once, when CSI_DATA lines have come for warn_after_s and none was read: why."""
+        if self.lines and self._first is None:
+            self._first = now
+        if self._warned or self.packets or self._first is None:
+            return None
+        if now - self._first < self.warn_after_s:
+            return None
+        self._warned = True
+        return (
+            f"{self.lines} CSI_DATA lines, none read: the columns rssi, local_timestamp and data "
+            f"are taken from a 'type,...' header line (now {self.cols}), and data must hold 128 "
+            "values (64 subcarriers, I and Q)"
+        )
+
+
 def read_file(path) -> Iterator[Packet]:
+    parse = LineParser()
     with open(path, newline="") as f:
         for line in f:
-            p = parse_line(line.rstrip("\r\n"))
+            p = parse(line.rstrip("\r\n"))
             if p is not None:
                 yield p
 

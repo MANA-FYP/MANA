@@ -222,3 +222,34 @@ def test_a_quiet_esp32_does_not_keep_the_server_from_stopping(monkeypatch):
     n = len(reads)
     threading.Event().wait(0.5)
     assert len(reads) == n  # and stopped
+
+
+def test_a_header_line_names_the_columns_of_another_firmwares_rows():
+    """Komail (#195): esp-csi's console builds print other, longer rows than the recordings.
+    The columns read come from the "type,..." header line when one is seen."""
+    iq = np.zeros((64, 2), dtype=int)
+    iq[csi.SUBCARRIERS, 0] = 7
+    data = ",".join(str(v) for v in iq.ravel())
+    names = ["type", "id", "mac", "rate", "sig_mode", "rssi", "noise_floor", "channel",
+             "secondary_channel", "local_timestamp", "ant", "sig_len", "rx_state", "len",
+             "first_word", "data"]  # fmt: skip
+    row = f'CSI_DATA,9,1a:00:00:00:00:00,11,1,-52,-96,6,0,2500000,0,47,0,128,0,"[{data}]"'
+    parse = csi.LineParser()
+    assert parse(row) is None  # read as the recordings' layout: wrong columns
+    assert parse(",".join(names)) is None
+    p = parse(row)
+    assert (p.t, p.rssi) == (2.5, -52) and np.allclose(p.amp, 7)
+    assert csi.columns(["type", "seq", "rssi"]) is None  # a header without the data: not used
+
+
+def test_rows_that_cannot_be_read_are_said_once_after_a_few_seconds():
+    parse = csi.LineParser(warn_after_s=5.0)
+    assert parse('CSI_DATA,1,"[1,2,3]"') is None  # too few fields
+    assert parse.unread(100.0) is None  # just started
+    assert "1 CSI_DATA lines, none read" in parse.unread(105.5)
+    assert parse.unread(110.0) is None  # said once
+    ok = csi.LineParser()
+    ok(HEADER)
+    ok(line(1.0, BASES["empty"]))
+    ok.unread(0.0)
+    assert ok.packets == 1 and ok.unread(10.0) is None

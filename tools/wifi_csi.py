@@ -120,7 +120,9 @@ def main(argv=None) -> int:
             dest = a.data / f"{name}.csv"
             if not dest.exists():
                 print(f"fetching {name}", flush=True)
-                urllib.request.urlretrieve(URL.format(name), dest)
+                part = dest.with_name(dest.name + ".part")  # a cut download is not kept as done
+                urllib.request.urlretrieve(URL.format(name), part)
+                part.replace(dest)
     data = {}
     for name in files:
         path = a.data / f"{name}.csv"
