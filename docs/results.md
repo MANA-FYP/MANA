@@ -173,7 +173,23 @@ What the runs show:
 - **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
 - **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
 
-A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+### The jumps taken out before the EKF
+
+`ekf_global`'s own rejection threshold on the map pose either let a 1 m jump through (5 sigma) or, set tight, refused good poses too. So a small node sits between slam_toolbox and `ekf_global` (`mana_position.lidar_gate`). It compares each map pose with the one before it and with the wheels' move over that time. A difference over 0.5 m is a jump: it is taken off every pose after it, and that correction fades over 60 s, so a lasting change is taken in the end. `ekf_global` then fuses the gated pose with the wheels and the IMU.
+
+| Run | Driven | Map pose: mean / 95th / max | Jumps refused |
+|---|---|---|---|
+| Offline, 2 earlier recorded runs with a jump | | max 1.26 m to 0.59 m, and 1.13 m to 0.33 m | |
+| Offline, 2 earlier recorded runs with no jump | | max unchanged (0.35, 0.40 m) | |
+| Gazebo, map C: slam_toolbox alone, two laps | 88.9 m | 0.18 / 0.42 / 0.62 m | |
+| Gazebo, map C: the EKF with the gated lidar, two laps | 88.8 m | 0.17 / 0.37 / 0.60 m | 1 (1.47 m) |
+| Gazebo, map D: slam_toolbox alone, two laps | 88.9 m | 0.22 / 0.81 / 0.90 m | |
+| Gazebo, map D: the EKF with the gated lidar, two laps | 88.9 m | 0.18 / 0.39 / 0.58 m | 0 |
+
+The Gazebo rows are from `tools/indoor_localisation.sh` (plain) and `--ekf` (the gate and `ekf_global`, slam_toolbox's map > odom off, the wheels the only odom > base_link), measured on 16 November 2026 on two new maps, each driven both ways, after the loop driver's start-pose fix. The plain runs (means 0.18 and 0.22 m) sit with the remeasured ones above (0.19 to 0.23 m).
+- **A jump taken out in Gazebo.** In the EKF run on map C, slam_toolbox jumped 1.47 m and the gate took it out: the EKF's pose was never more than 0.60 m off. In the plain run on map D, slam_toolbox jumped on the south corridor (its worst, 0.90 m, at (14.4, 1.6)); the EKF run on that map had no jump, so these runs do not show the same jump both ways.
+- **No worse where nothing jumped.** On both maps the EKF's mean and 95th were at or under slam_toolbox's alone (0.17 and 0.18 m mean, 0.37 and 0.39 m 95th). Wheel odometry ended 1.54 and 1.55 m off; the EKF's pose ended 0.13 and 0.03 m off.
+- The gate's settings (0.5 m, 60 s) were tuned on the four offline runs, recorded before the start-pose fix; they were not tuned again. A jump back now clears the offset (Waqas, #181): before, a 1.2 m jump undone 15 s later left 0.26 m the other way.
 
 ## Camera depth and stairs on real phone frames (#131)
 
