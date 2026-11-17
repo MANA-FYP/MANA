@@ -1,6 +1,6 @@
 """ROS 2 node for the decision core.
 
-Listens to the module reports (ground, obstacle, motion, position and link) and the user's
+Listens to the module reports (ground, obstacle, motion, position, link and presence) and the user's
 commands, decides at 10 Hz, and publishes a drive request for the host every tick. Messages for
 the user go through a queue (messages.py): one at a time, the most urgent first. With the parameter
 directions set, the node also says what is ahead, for a host with no chair such as a smart cane.
@@ -23,6 +23,7 @@ from mana_msgs.msg import (
     MotionReport,
     ObstacleReport,
     PositionReport,
+    PresenceReport,
     UserCommand,
     UserMessage,
 )
@@ -52,6 +53,7 @@ class CoreNode(Node):
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
         self.create_subscription(PositionReport, "position", self.on_position, 10)
         self.create_subscription(LinkReport, "link", self.on_link, 10)
+        self.create_subscription(PresenceReport, "presence", self.on_presence, 10)
         self.create_subscription(UserCommand, "user_command", self.on_command, 10)
         self.drive = self.create_publisher(DriveRequest, "drive_request", 10)
         self.message = self.create_publisher(UserMessage, "user_message", 10)
@@ -98,6 +100,15 @@ class CoreNode(Node):
         except ValueError:
             return self.ignore("position report", m)
         self.core.on_position(d.PositionReport(self.measured(m), m.trust, source, m.error_m))
+
+    def on_presence(self, m: PresenceReport) -> None:
+        try:
+            source = d.PresenceSource(m.source)
+        except ValueError:
+            return self.ignore("presence report", m)
+        self.core.on_presence(
+            d.PresenceReport(self.measured(m), m.trust, source, m.present, m.zone)
+        )
 
     def on_link(self, m: LinkReport) -> None:
         try:
