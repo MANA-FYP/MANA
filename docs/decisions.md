@@ -314,8 +314,12 @@ With the narrower relabelling of the #173 review, all eleven again: 43 of 44 mar
 **Chosen:** a new report, `PresenceReport` (source `WIFI_CSI`, `present`, an optional `zone`, and
 the trust every report has), on the topic `presence`. While a recent (2.5 s), trusted one says a
 person is present, the core slows to 30 % with "Someone may be near (zone 1), slowing down". It comes
-after every other slow-down for a hazard, before the start-up, link and position checks: every stop, every change to tracks, manual
-mode and every hazard the cameras or the lidar place come first, and it never stops the device.
+after every other slow-down for a hazard. Every stop, every change to tracks, manual mode and every
+hazard the cameras or the lidar place come before it, and it never stops the device. The checks
+for the ground sensors at start-up, the alert link and the position come after it. All three slow
+to the same 30 %, so the device's speed is the same either way, but while someone may be near,
+their message ("waiting for ground sensors (1 of 2 up: ...)" and the others) is not shown
+(Komail, #198).
 
 **Why.** Wi-Fi sensing (#194, measured in #195's section of `docs/results.md`) tells whether a person is in the room, and in
 which zone, from how they change the channel state of a Wi-Fi link. It needs no light, and it

@@ -19,7 +19,7 @@ A dataset that is already on disk is skipped, and a stopped download picks up wh
 | [Speech Commands v2](#speech-commands-v2) | BC-ResNet-8 command words (#46) | CC BY 4.0 | 2.4 GB, 105,829 clips | Automatic |
 | [UrbanSound8K](#urbansound8k) | EfficientAT-mn10 siren and horn detection (#47) | CC BY-NC 4.0 (non-commercial) | 6.0 GB, 8,732 clips | Automatic |
 
-EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only fine-tune and test on UrbanSound8K.
+EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only test on UrbanSound8K: both models are used as they come, with no fine-tuning (#183), and its licence (CC BY-NC 4.0) keeps it to non-commercial use.
 
 ## StairNet
 
