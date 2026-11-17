@@ -42,7 +42,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src" / "mana_perception"))
 
-IOU = 0.5
+DEFAULT_IOU = 0.5
+IOU = DEFAULT_IOU  # the overlap match() needs; main() sets it from --iou for its run
 WARMUP = 3
 LOW_CONF = 0.01  # the model is run this low so AP sees the whole precision-recall curve
 
@@ -341,12 +342,18 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--iou",
         type=float,
-        default=IOU,
+        default=DEFAULT_IOU,
         help="the overlap a match needs (0.5; a looser one shows how much is box extent)",
     )
     a = ap.parse_args(argv)
-    IOU = a.iou  # match() reads it at each call
+    before, IOU = IOU, a.iou  # match() reads it at each call
+    try:
+        return run(a)
+    finally:
+        IOU = before  # so a later call in the same process starts from its own --iou
 
+
+def run(a) -> int:
     from mana_perception.detection import Detector
 
     results = {}

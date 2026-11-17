@@ -182,3 +182,9 @@ def test_the_table_names_the_iou_it_matched_at(tmp_path):
     assert "| AP30 |" in ev.table("m", {**r, "iou": 0.3}) and "IoU 0.3" in ev.table(
         "m", {**r, "iou": 0.3}
     )
+
+
+def test_main_puts_the_iou_back_after_its_run(tmp_path):
+    args = ["--data", str(tmp_path), "--weights", str(tmp_path / "none.pt"), "--iou", "0.3"]
+    assert ev.main(args) == 2  # no such weights: it stops, and still puts the IoU back
+    assert ev.IOU == ev.DEFAULT_IOU == 0.5

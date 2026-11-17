@@ -11,7 +11,8 @@ lowest confidence the node keeps):
 - false boxes: predictions of that class that match no box, the most confident first.
 
 A miss and a false box mean exactly what they mean in tools/eval_detector.py: the same matching
-(IoU 0.5, same class, highest confidence first), the same neighbour rule and the same size band. At
+(IoU 0.5, same class, highest confidence first), the same neighbour rule and the same size band. It
+always matches at IoU 0.5 (eval_detector's default; its --iou does not apply here). At
 most one picture per walk and kind, since neighbouring frames of a walk are near copies.
 
 Each picture shows the frame scaled to --width pixels, the class's true boxes in green (a missed one
