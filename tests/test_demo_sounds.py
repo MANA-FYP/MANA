@@ -99,6 +99,37 @@ def test_the_server_feeds_the_phones_sound_to_the_listener():
     asyncio.run(go())
 
 
+def test_the_sound_kept_is_forgotten_when_the_phone_goes():
+    pytest.importorskip("aiohttp")
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from demo.server import build_app
+
+    listener = sounds.Listener(lambda w: scores())
+
+    async def go():
+        client = TestClient(TestServer(build_app(listener=listener)))
+        await client.start_server()
+        try:
+            phone = await client.ws_connect("/ws/phone")
+            await phone.send_bytes(b"\x02" + array("f", [0.1] * 4800).tobytes())
+            for _ in range(100):
+                if listener.sound.size:
+                    break
+                await asyncio.sleep(0.01)
+            assert listener.sound.size
+            await phone.close()
+            for _ in range(100):  # the server sees the close a moment later
+                if not listener.sound.size:
+                    break
+                await asyncio.sleep(0.01)
+            assert listener.sound.size == 0 and not listener.due(0.0)
+        finally:
+            await client.close()
+
+    asyncio.run(go())
+
+
 def test_the_phone_streams_its_microphone_when_the_laptop_hears_sounds():
     """With --sounds and no speech model the phone must still send its audio (#184): Android
     Chrome cannot run its own recogniser beside the stream, so the stream wins, at 32 kHz."""

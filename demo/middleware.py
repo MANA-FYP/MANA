@@ -309,12 +309,14 @@ GUIDE_EVERY_M = 15.0  # the way is said again after this much walking
 # and sooner, but no more often than this, when it moves 2 hours round: indoors the compass can
 # swing that far with the person standing still
 GUIDE_TURN_GAP_S = 10.0
+GUIDE_TURN_DEG = 60.0  # 2 hours round on a clock face
 
 
-def _clock_hour(way: tuple[float, float | None, str]) -> float:
-    """The way's direction in clock hours: from where the person faces, else from the compass."""
+def _direction_deg(way: tuple[float, float | None, str]) -> float:
+    """The way's direction in degrees: from where the person faces, else from the compass. Not
+    rounded to clock hours, so a turn is compared in degrees (Komail, #188)."""
     _, turn, compass = way
-    return round(turn / 30.0) % 12 if turn is not None else COMPASS.index(compass) * 1.5
+    return turn % 360.0 if turn is not None else COMPASS.index(compass) * 45.0
 
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
@@ -759,7 +761,15 @@ class Middleware:
         """A place picked on the supervisor's map, in metres east and north of the start: its way
         is said now, again as the person walks, and "arrived" when they are there."""
         now = self.clock() if now is None else now
-        self.nav.track.marks[DESTINATION] = (float(east), float(north))
+        track = self.nav.track
+        track.marks[DESTINATION] = (float(east), float(north))
+        way = track.way_to(DESTINATION)
+        if way is not None and way[0] < ARRIVED_M:  # said once, not "set" and then "arrived"
+            track.marks.pop(DESTINATION)
+            self._guided = None
+            text = "That place is where you are now."
+            self._decide(now, "way", text, Priority.INFO)
+            return text
         return self.say_destination(now, "Destination set. ")
 
     def clear_destination(self, now: float | None = None) -> None:
@@ -777,13 +787,13 @@ class Middleware:
             text = "No destination yet. The supervisor picks one on the map."
         else:
             text = lead + way_text(way, DESTINATION)
-            self._guided = (now, track.distance_m, _clock_hour(way))
+            self._guided = (now, track.distance_m, _direction_deg(way))
         self._decide(now, "way", text, Priority.INFO)
         return text
 
     def _guide(self, now: float) -> None:
         """While a destination is set: arrived, or the way again after a stretch of walking, or
-        sooner when it has moved 2 hours round (a turn the wrong way)."""
+        sooner when it has moved 60 degrees, 2 hours round (a turn the wrong way)."""
         track = self.nav.track
         way = track.way_to(DESTINATION)
         if way is None:
@@ -796,9 +806,9 @@ class Middleware:
         if self._guided is None:
             self.say_destination(now)
             return
-        said_t, said_walked, said_hour = self._guided
-        apart = abs(_clock_hour(way) - said_hour) % 12
-        turned = min(apart, 12 - apart) >= 2 and now - said_t >= GUIDE_TURN_GAP_S
+        said_t, said_walked, said_deg = self._guided
+        apart = abs(_direction_deg(way) - said_deg) % 360.0
+        turned = min(apart, 360.0 - apart) >= GUIDE_TURN_DEG and now - said_t >= GUIDE_TURN_GAP_S
         if turned or track.distance_m - said_walked >= GUIDE_EVERY_M:
             self.say_destination(now)
 

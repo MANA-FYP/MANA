@@ -80,3 +80,16 @@ def nearest_ahead(
         if best is None or r < best[0]:
             best = (r, bearing)
     return best
+
+
+def dead_reckon(
+    x: float, y: float, yaw: float, speed_mps: float, yaw_rate: float, dt: float
+) -> tuple[float, float, float]:
+    """The pose after dt seconds at this forward speed and turn rate, from (x, y, yaw): odometry
+    from the wheels and the gyro, which drifts, unlike the simulation's ground truth (#43)."""
+    mid = yaw + yaw_rate * dt / 2  # the heading halfway through the step
+    return (
+        x + speed_mps * dt * math.cos(mid),
+        y + speed_mps * dt * math.sin(mid),
+        math.atan2(math.sin(yaw + yaw_rate * dt), math.cos(yaw + yaw_rate * dt)),
+    )

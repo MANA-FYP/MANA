@@ -34,6 +34,8 @@ if ! dpkg -s ros2-apt-source >/dev/null 2>&1; then
 fi
 
 sudo apt-get install -y ros-jazzy-desktop ros-jazzy-ros-gz ros-dev-tools python3-venv
+# lidar mapping and localisation indoors (tools/indoor_localisation.sh, #43)
+sudo apt-get install -y ros-jazzy-slam-toolbox
 
 if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
   sudo rosdep init

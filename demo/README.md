@@ -171,7 +171,8 @@ python -m demo.field recordings/road-1 --distance 120 --steps 160 --place "campu
 `--loop`: the walk ended where it started, so the gap between the track's end and start is its
 error. `--distance`: the real length (a tape, or a route measured on a map). `--steps`: the steps
 you counted. It prints the steps and the distance against those, the gap, and a row for the table
-in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS).
+in `docs/results.md`. Do one loop indoors (steps alone, no GPS) and one outdoors (GPS). The six walks
+that give the field numbers, with what to note on the spot, are in `docs/field-walks.md`.
 
 ## The phone screen
 
@@ -368,7 +369,7 @@ The server starts without any model and says which ones are missing.
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
 | Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included**: train one on StairNet with `tools/train_ground.py` (#38). |
-| Sirens and horns | `pip install torch torchvision torchaudio`, a checkout of [EfficientAT](https://github.com/fschmid56/EfficientAT) with `resources/mn10_as_mAP_471.pt`, then `--sounds <checkout>`, with `--vosk-model` for voice commands | a siren or a horn in the last 10 s of the phone's microphone, said once and shown on the live page. The phone then streams its microphone at 32 kHz, and Android Chrome cannot run its own speech recognition beside that stream, so without `--vosk-model` voice commands are off (the server says so). On UrbanSound8K: sirens F1 0.86, horns F1 0.74 (docs/results.md, #47) |
+| Sirens and horns | `pip install torch torchvision torchaudio`, a checkout of [EfficientAT](https://github.com/fschmid56/EfficientAT) with `resources/mn10_as_mAP_471.pt`, then `--sounds <checkout>`, with `--vosk-model` for voice commands | a siren or a horn in the last 10 s of the phone's microphone, said once and shown on the live page. The phone then streams its microphone at 32 kHz, and Android Chrome cannot run its own speech recognition beside that stream, so without `--vosk-model` voice commands are off (the server says so). On UrbanSound8K: sirens F1 0.86, horns F1 0.74 (docs/results.md, #47). The thresholds (0.22, 0.08) were set on clips of 4 s or less padded with silence; on a running 10 s window of street sound they are untested, so its false alarms may differ. The kept sound is forgotten when the phone disconnects |
 | Depth from the camera | `pip install torch transformers`, then `--depth` | distances in metres from the camera image, and where stairs the detector sees are and which way they go (see above) |
 
 ## Known limits
