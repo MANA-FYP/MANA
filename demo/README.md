@@ -336,8 +336,12 @@ zone, from how their body changes the Wi-Fi signal between two ESP32 boards, wit
   ```bash
   python tools/wifi_csi.py --data datasets/office_csi --fetch       # the recordings, about 950 MB
   python -m demo.server --csi-replay datasets/office_csi            # then open /wifi
-  python -m demo.server --csi-serial COM5     # or a live ESP32 (pyserial); --csi-baud: its rate
+  python -m demo.server --csi-serial COM5     # or a live ESP32 (pip install pyserial)
   ```
+  The baud rate (`--csi-baud`, 115200 by default) matters only through a USB-to-UART bridge. On the
+  ESP32-C6's own USB port it is ignored. A row is about 440 bytes, so 200 a second is about 88 KB/s.
+  115200 baud carries about 11.5 KB/s, about 26 rows a second, so through a bridge set the board
+  and `--csi-baud` to 921600 or more, or the flicker no longer matches what the model was fitted on.
 - The model holds for the room and the placement of the boards it was fitted in. A new place needs
   its own recordings (a few minutes empty and with a person in each zone) and `tools/wifi_csi.py`
   run on them. A person standing still is found by the shape of the subcarriers, not by movement:

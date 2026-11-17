@@ -35,6 +35,7 @@ import io
 import json
 import math
 import sys
+import threading
 import warnings
 from array import array
 from pathlib import Path
@@ -206,7 +207,7 @@ async def csi_play(request: web.Request) -> web.Response:
         raise web.HTTPConflict(text="no recordings: start the server with --csi-replay")
     try:
         c["replay"].choose((await request.json()).get("label"))
-    except (KeyError, ValueError, AttributeError) as e:
+    except (KeyError, ValueError, AttributeError, TypeError) as e:
         raise web.HTTPBadRequest(text="label: one of the recordings, or null") from e
     return web.json_response(c["replay"].view())
 
@@ -218,20 +219,29 @@ async def csi_task(app: web.Application) -> None:
     if c.get("serial"):
         port, baud = c["serial"]
         queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+        stop = threading.Event()  # set on the way out: the reader stops within its 1 s timeout
+
+        def put(p) -> None:
+            if not queue.full():  # behind by 10 s: drop rather than raise in the loop
+                queue.put_nowait(p)
 
         def read() -> None:
             try:
-                for line in csi.serial_lines(port, baud):
+                for line in csi.serial_lines(port, baud, stop):
                     p = csi.parse_line(line)
                     if p is not None:
-                        loop.call_soon_threadsafe(queue.put_nowait, p)
+                        loop.call_soon_threadsafe(put, p)
             except Exception as e:  # unplugged, or the port is busy: said once
-                print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
+                if not stop.is_set():
+                    print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
 
         c["sensing"].restart(f"ESP32 on {port}")
-        loop.run_in_executor(None, read)
-        while True:
-            c["sensing"].feed(await queue.get())
+        threading.Thread(target=read, name="esp32", daemon=True).start()
+        try:
+            while True:
+                c["sensing"].feed(await queue.get())
+        finally:
+            stop.set()
     while True:
         c["replay"].step(loop.time())
         await asyncio.sleep(0.05)
@@ -866,6 +876,10 @@ def wifi_sensing_from(a) -> dict | None:
     sensing = csi.Sensing(model)
     out = {"sensing": sensing, "scores": scores, "replay": None, "serial": None}
     if a.csi_serial:
+        try:
+            import serial  # noqa: F401
+        except ImportError:
+            raise SystemExit("--csi-serial needs pyserial: pip install pyserial") from None
         out["serial"] = (a.csi_serial, a.csi_baud)
     else:  # the held-out sessions: the model never saw them
         folder = Path(a.csi_replay)

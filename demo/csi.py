@@ -23,7 +23,6 @@ ESP32s: each place needs its own short calibration (`tools/wifi_csi.py`).
 from __future__ import annotations
 
 import csv
-import io
 from collections import deque
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -58,16 +57,20 @@ def parse_row(row: list[str]) -> Packet | None:
 
 
 def parse_line(line: str) -> Packet | None:
-    """A line from the ESP32's serial port or a recording."""
+    """A line from the ESP32's serial port or a recording. A row is always one line, so a quote
+    left open (a cut line) spoils only that line."""
     if not line.startswith("CSI_DATA"):
         return None
-    return parse_row(next(csv.reader(io.StringIO(line))))
+    try:
+        return parse_row(next(csv.reader([line])))
+    except csv.Error:  # a field past the csv module's limit
+        return None
 
 
 def read_file(path) -> Iterator[Packet]:
     with open(path, newline="") as f:
-        for row in csv.reader(f):
-            p = parse_row(row)
+        for line in f:
+            p = parse_line(line.rstrip("\r\n"))
             if p is not None:
                 yield p
 
@@ -298,12 +301,13 @@ class Replay:
         }
 
 
-def serial_lines(port: str, baud: int):
-    """Lines from an ESP32 on a serial port (pyserial), forever; blocking, so run in a thread."""
+def serial_lines(port: str, baud: int, stop=None):
+    """Lines from an ESP32 on a serial port (pyserial) until `stop` (a threading.Event) is set;
+    blocking, so run in a thread. A read waits at most 1 s, so a quiet board still lets it stop."""
     import serial  # pyserial, only when an ESP32 is used
 
     with serial.Serial(port, baud, timeout=1) as s:
-        while True:
+        while stop is None or not stop.is_set():
             line = s.readline().decode("ascii", "replace").strip()
             if line:
                 yield line

@@ -39,3 +39,11 @@ UrbanSound8K
   Licence: Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)
   https://creativecommons.org/licenses/by-nc/4.0/
   Non-commercial use only. This limit also applies to models fine-tuned on it.
+
+Office Localization (Wi-Fi CSI)
+  Gad, Batool, Fouda, Verma and Fadlullah, "WiFi Sensing-Based Human Activity Recognition For
+  Smart Home Applications Using Commodity Access Points", IEEE, 2026.
+  https://huggingface.co/datasets/gadgadgad/OfficeLocalization
+  Licence: Creative Commons Attribution 4.0 (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+  The model fitted on it (demo/csi_model/, a few kilobytes) is in this repository, with this credit.

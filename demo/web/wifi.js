@@ -97,14 +97,21 @@ function drawScores(sc) {
   scoresDrawn = true;
   const cls = (x) => (x >= 0.9 ? "good" : x >= 0.7 ? "mid" : "bad");
   const rows = Object.entries(sc.csi.rows).map(([k, r]) => {
-    const truth = k.split("_")[0], a = r.share[truth], b = sc.rssi_only.rows[k].share[truth];
+    const truth = k.split("_")[0], a = r.share[truth];
+    // the RSSI alone, with the CSI's own model (logistic) and a random forest, when both are there
+    const rssi = [sc.rssi_only_logistic, sc.rssi_only].filter(Boolean).map((m) => m.rows[k].share[truth]);
     const label = truth === "empty" ? `Empty (${k.split("_")[1]})` : name(truth);
     return `<tr><td>${label}</td><td>${r.windows}</td><td class="${cls(a)}">${Math.round(a * 100)} %</td>` +
-      `<td class="${cls(b)}">${Math.round(b * 100)} %</td></tr>`;
+      rssi.map((b) => `<td class="${cls(b)}">${Math.round(b * 100)} %</td>`).join("") + "</tr>";
   });
-  $("scoreTbl").innerHTML = "<tr><th>Session</th><th>Windows</th><th>Wi-Fi CSI right</th><th>RSSI alone</th></tr>" + rows.join("");
-  $("scoreNote").textContent = `Empty or not: ${(sc.csi.presence_accuracy * 100).toFixed(1)} % right with CSI, ` +
-    `${(sc.rssi_only.presence_accuracy * 100).toFixed(1)} % with RSSI alone. ${sc.data}. Fitted on each label's first ` +
+  const heads = sc.rssi_only_logistic ? "<th>RSSI, same model</th><th>RSSI, forest</th>" : "<th>RSSI alone</th>";
+  $("scoreTbl").innerHTML = "<tr><th>Session</th><th>Windows</th><th>Wi-Fi CSI right</th>" + heads + "</tr>" + rows.join("");
+  const pct = (m) => (m.presence_accuracy * 100).toFixed(1) + " %";
+  const rssiNote = sc.rssi_only_logistic
+    ? `${pct(sc.rssi_only_logistic)} with RSSI alone (same model; ${pct(sc.rssi_only)} with a random forest)`
+    : `${pct(sc.rssi_only)} with RSSI alone`;
+  $("scoreNote").textContent = `Empty or not: ${pct(sc.csi)} right with CSI, ` +
+    `${rssiNote}. ${sc.data}. Fitted on each label's first ` +
     "session, scored on later ones. One office, one placement of the boards: a new room needs its own calibration.";
 }
 
