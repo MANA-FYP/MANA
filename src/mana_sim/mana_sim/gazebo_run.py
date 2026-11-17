@@ -1,6 +1,6 @@
 """Plays the scenarios of gazebo_scenarios.py in Gazebo, one simulation for each, and scores them.
 
-    python3 -m mana_sim.gazebo_run [--baseline] [scenario ...]    # play them (workspace sourced), then score
+    python3 -m mana_sim.gazebo_run [--baseline] [scenario ...]   # play (workspace sourced), score
 
 For every scenario it writes the world of the run (the chair at the start, the boxes), starts the
 simulation headless, the core and the scenario runner, waits for the runner to write its trace,
