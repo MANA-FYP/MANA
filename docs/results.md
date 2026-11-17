@@ -330,18 +330,21 @@ The first three columns are the testing list's 4,074 command clips; on the offic
 So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
 
 **BC-ResNet-8** (`--kws`) was trained by `tools/train_commands.py --tau 8 --epochs 5 --hold-out backward forward follow learn visual` on this laptop's CPU, at about 28 minutes an epoch. The paper trains for 200 epochs on a GPU. Its best accuracy on `validation_list.txt` was 95.9%, after the fifth epoch.
-- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The other 20 words are in its "other word" class.
-- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest that keeps 90% of the clean command clips right, 0.85.
-- "Stop at any": stop acts at any probability, the other nine words at 0.85, as the core obeys a stop at any trust (`on_command`). This was also set on the validation list.
+- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The testing list has 818 clips of them (backward 165, forward 155, follow 172, learn 161, visual 165). The other 20 words are in its "other word" class.
+- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest, in steps of 0.05, that keeps 90% of the clean command clips right. That is 0.85 (3,366 of 3,703, 90.9%; 0.9 keeps 88.9%). `--choose` makes this choice from the validation run's CSVs (`choose_threshold()`).
+- "Stop at any": stop acts at any probability when it is the top class, and the other nine words at 0.85 (`--stop-any`). This was also decided on the validation list, by what it does to stop. At 0.85, stop was missed 14 times in 350 clean and 33 at 10 dB. At any probability it was missed 7 and 11 times, while other words were heard as "stop" 46 and 80 times of 6,278, against 3 and 14. A missed stop is the unsafe case and a stop not asked for the safe one, and the core already obeys a spoken stop at any trust (`on_command`), so stop acts at any probability. `--choose` prints these figures too.
 - The demo's `Spotter` acts at 0.9 by default.
 - CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
 
 ```
 python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --choose datasets/speech_commands/val_kws_0_clean.csv datasets/speech_commands/val_kws_0_snr10.csv
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
 ```
+
+The tables below were scored from the threshold-0 CSVs at each setting (`rethreshold()`, as `--choose` does). `--threshold 0.85 --stop-any` runs the model at that setting directly. It can differ by a clip whose probability rounds to 0.85 in the CSV.
 
 The settings, on the testing list (stop: 411 clips):
 
@@ -355,7 +358,7 @@ The settings, on the testing list (stop: 411 clips):
 
 0.85 with stop at any, at every noise level (measured on 17 November 2026):
 
-| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 816) | Official set: other words (of 408) | Official set: noise alone (of 408) |
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 818) | Official set: other words (of 408) | Official set: noise alone (of 408) |
 |---|---|---|---|---|---|---|---|
 | clean | 90.6% (3,693) | 0.5% | 8.8% | 3.6% (249) | 7.2% (59) | 3.2% (13) | 0 |
 | noise at 20 dB | 89.4% | 0.8% | 9.8% | 3.7% (258) | 6.8% (56) | 2.9% (12) | 0 |
@@ -376,34 +379,34 @@ The official set's 4,074 command clips give the same within 0.6 points, and its 
 - **The threshold trades commands for false activations.** At its top class BC-ResNet is close to Vosk clean (96.3%, Vosk 97.2%) and holds up better in noise (88.7% right at 0 dB, Vosk 70.2%), but it hears other words as commands more often (14.6%, Vosk 10.8%). At 0.85 it acts on 3.6% of them, and misses 8.8% of the commands clean and 31.8% at 0 dB: a missed command is said again.
 - **Stop, with stop at any:** 0.5% missed clean and 9.0% at 0 dB (Vosk 1.0% and 19.0%), and heard as "go" at most twice in 411 at any level.
 - **"Go" by mistake is rare:** another word started it 29 times in 6,931 clean clips (Vosk 195). The most common false activations were "dog" heard as "down" (27), "learn" as "no" (22), "dog" as "stop" (20) and "two" as "go" (17). A stop not asked for stops the device, the safe side.
-- **Words it never heard in training are taken for commands twice as often** (7.2% against 3.6%). Words outside the dataset are likely to be closer to that rate.
+- **Words it never heard in training are taken for commands about twice as often** as the words it was trained to reject: 7.2% (59 of 818) against 3.1% (190 of 6,113) clean. Words outside the dataset are likely to be closer to the first rate.
 - **Noise alone** woke it once at 5 dB and 3 times at 0 dB (of 408), each time as "stop", and never with less noise.
 - **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
 - **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
 
 On aligned clips these favour 0.85 with stop at any over the demo's 0.9. But the demo's `Spotter` listens to a running stream every 0.25 s, which aligned clips do not cover, and on a stream (below) a stop at any probability stops the device for noise. One false stop is safe, but many would make the device unusable.
 
-**On a running stream** (`--stream 0.85 0.9`): the 11,005 test clips one after another, in a shuffled order, each after 1 s of silence (or of the same noise), fed to the demo's own `Spotter` in 0.25 s pieces as the phone's sound comes. A word it gives goes to the clip its 1 s window overlaps most. A word given while no clip is in the window would be a false activation from silence or noise alone (3.1 hours of gaps per run).
+**On a running stream** (`--stream 0.85 0.9`): the 11,005 test clips one after another, in a shuffled order, each after 1 s of silence (or of the same noise), fed to the demo's own `Spotter` in 0.25 s pieces as the phone's sound comes. A word it gives goes to the clip its 1 s window overlaps most. A word given while no clip is in the window is counted in the gaps (3.1 hours of them per run). Noise alone is also streamed on its own, with no clips (below).
 
-| Sound | Setting | Right | Wrong | Missed | False activations (of 6,931) | of which held-out words (of 816) | Other words heard as "go" | Other words heard as "stop" | Stop missed (of 411) | Words in the gaps |
-|---|---|---|---|---|---|---|---|---|---|---|
-| clean | 0.9, the demo's | 90.3% (3,679) | 0.6% | 9.1% | 6.4% (447) | 9.4% | 34 | 15 | 2.7% (11) | 0 |
-| clean | 0.9, stop at any | 90.3% (3,677) | 1.1% | 8.6% | 9.6% (665) | 11.2% | 34 | 245 | 0.2% (1) | 0 |
-| clean | 0.85 | 92.3% (3,760) | 1.0% | 6.8% | 9.6% (666) | 15.4% | 54 | 19 | 1.5% (6) | 0 |
-| clean | 0.85, stop at any | 92.1% (3,751) | 1.4% | 6.5% | 12.6% (875) | 17.2% | 54 | 243 | 0.2% (1) | 0 |
-| noise at 10 dB | 0.9, the demo's | 82.5% | 1.0% | 16.5% | 6.1% (421) | 9.7% | 20 | 22 | 9.0% (37) | 0 |
-| noise at 10 dB | 0.9, stop at any | 82.2% | 2.9% | 14.9% | 13.5% (935) | 16.5% | 19 | 563 | 2.2% (9) | 48 |
-| noise at 10 dB | 0.85 | 85.9% | 1.5% | 12.5% | 9.4% (651) | 14.3% | 41 | 37 | 6.6% (27) | 0 |
-| noise at 10 dB | 0.85, stop at any | 85.5% | 3.3% | 11.3% | 16.4% (1,138) | 20.7% | 36 | 560 | 2.2% (9) | 48 |
-| noise at 0 dB | 0.9, the demo's | 60.9% | 0.7% | 38.3% | 3.6% (252) | 4.4% | 16 | 15 | 36.0% (148) | 0 |
-| noise at 0 dB | 0.9, stop at any | 63.1% | 4.3% | 32.6% | 12.9% (896) | 14.5% | 16 | 675 | 7.5% (31) | 148 |
-| noise at 0 dB | 0.85 | 67.5% | 1.1% | 31.4% | 6.5% (448) | 8.6% | 33 | 26 | 29.0% (119) | 0 |
-| noise at 0 dB | 0.85, stop at any | 68.9% | 4.3% | 26.8% | 15.4% (1,064) | 18.1% | 31 | 670 | 7.3% (30) | 148 |
+| Sound | Setting | Right | Wrong | Missed | False activations (of 6,931) | of which held-out words (of 818) | Other words heard as "go" | Other words heard as "stop" | Stop missed (of 411) | Stop heard as "go" | Words in the gaps |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| clean | 0.9, the demo's | 90.3% (3,679) | 0.6% | 9.1% | 6.4% (447) | 9.4% | 34 | 15 | 2.7% (11) | 0 | 0 |
+| clean | 0.9, stop at any | 90.3% (3,677) | 1.1% | 8.6% | 9.6% (665) | 11.2% | 34 | 245 | 0.2% (1) | 0 | 0 |
+| clean | 0.85 | 92.3% (3,760) | 1.0% | 6.8% | 9.6% (666) | 15.4% | 54 | 19 | 1.5% (6) | 0 | 0 |
+| clean | 0.85, stop at any | 92.1% (3,751) | 1.4% | 6.5% | 12.6% (875) | 17.2% | 54 | 243 | 0.2% (1) | 0 | 0 |
+| noise at 10 dB | 0.9, the demo's | 82.5% | 1.0% | 16.5% | 6.1% (421) | 9.7% | 20 | 22 | 9.0% (37) | 0 | 0 |
+| noise at 10 dB | 0.9, stop at any | 82.2% | 2.9% | 14.9% | 13.5% (935) | 16.5% | 19 | 563 | 2.2% (9) | 0 | 48 |
+| noise at 10 dB | 0.85 | 85.9% | 1.5% | 12.5% | 9.4% (651) | 14.3% | 41 | 37 | 6.6% (27) | 0 | 0 |
+| noise at 10 dB | 0.85, stop at any | 85.5% | 3.3% | 11.3% | 16.4% (1,138) | 20.7% | 36 | 560 | 2.2% (9) | 0 | 48 |
+| noise at 0 dB | 0.9, the demo's | 60.9% | 0.7% | 38.3% | 3.6% (252) | 4.4% | 16 | 15 | 36.0% (148) | 3 | 0 |
+| noise at 0 dB | 0.9, stop at any | 63.1% | 4.3% | 32.6% | 12.9% (896) | 14.5% | 16 | 675 | 7.5% (31) | 3 | 148 |
+| noise at 0 dB | 0.85 | 67.5% | 1.1% | 31.4% | 6.5% (448) | 8.6% | 33 | 26 | 29.0% (119) | 3 | 0 |
+| noise at 0 dB | 0.85, stop at any | 68.9% | 4.3% | 26.8% | 15.4% (1,064) | 18.1% | 31 | 670 | 7.3% (30) | 3 | 148 |
 
 - **On a stream there are about three times as many false activations as on aligned clips** (9.6% clean at 0.85, against 3.0%). The `Spotter` scores each word in several overlapping windows, and one passing window is enough.
-- **0.9, the demo's setting, misses more stops in noise:** 2.7 % clean, 9.0 % at 10 dB and 36.0 % at 0 dB, against 1.5 %, 6.6 % and 29.0 % at 0.85. It has fewer false activations (6.4 % against 9.6 % clean).
-- **Stop at any probability keeps stops from being missed** (0.2 % clean, 2.2 % at 10 dB, 7.5 % at 0 dB), **but it stops for noise:** with nobody speaking it fired 48 times in the 3.1 hours of gaps at 10 dB and 148 times at 0 dB, each time as "stop" (with a threshold on stop, none). Other words were heard as "stop" 245 times clean and 675 times at 0 dB, of 6,931 (at 0.9).
-- **So neither suits "stop" on a stream:** a threshold misses too many in noise, and any probability stops the device for noise alone about 15 times an hour at 10 dB and 48 at 0 dB. A threshold of stop's own, between the two, is the next thing to measure; the demo keeps 0.9 until then.
+- **0.9, the demo's setting, misses more stops in noise:** 2.7% clean, 9.0% at 10 dB and 36.0% at 0 dB, against 1.5%, 6.6% and 29.0% at 0.85. It has fewer false activations (6.4% against 9.6% clean).
+- **Stop at any probability keeps stops from being missed** (0.2% clean, 2.2% at 10 dB, 7.5% at 0 dB), **but it stops for noise:** in the 3.1 hours of gaps it fired 48 times at 10 dB and 148 times at 0 dB, each time as "stop" (with a threshold on stop, none). That is a floor. Only one window per 1 s gap lies wholly in it; a firing in a window that also overlaps a clip is charged to that clip. So a noise "stop" just before a stop clip counts as right, which also flatters stop at any's stop-missed figures. Streamed on its own with no clips, at the clips' average speech level less 10 or 0 dB, the 1.7 minutes of held-out noise (the test quarter of each noise file) made stop at any fire once at 10 dB and 3 times at 0 dB, at 0.9 and at 0.85, and a threshold never. That is about 36 and 109 an hour, but from very few firings. Other words were heard as "stop" 245 times clean and 675 times at 0 dB, of 6,931 (at 0.9).
+- **So neither suits "stop" on a stream:** a threshold misses too many in noise, and any probability stops the device for noise alone: at least 15 times an hour at 10 dB and 48 at 0 dB counted in the gaps, and about 36 and 109 an hour on the short sample of noise alone. A threshold of stop's own, between the two, is the next thing to measure, chosen on the validation list; the demo keeps 0.9 until then.
 - **"Go" by mistake:** another word started it 34 times clean at 0.9 and 54 at 0.85, of 6,931. Stop was heard as "go" 3 times in 411 at 0 dB, and never clean or at 10 dB.
 - No word was given in the gaps of silence (clean), at any setting.
 

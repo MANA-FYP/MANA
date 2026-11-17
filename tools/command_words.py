@@ -2,6 +2,11 @@
 
     python tools/command_words.py --sc datasets/speech_commands --vosk vosk-model-small-en-us-0.15
     python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --threshold 0.9
+    python tools/command_words.py --choose val_kws_0_clean.csv val_kws_0_snr10.csv
+
+The threshold is chosen on the validation list (--list validation_list.txt at threshold 0, then
+--choose): the highest that keeps 90% of the clean command clips right, and what letting "stop"
+act at any probability (--stop-any) changes for stop.
 
 The recogniser is the demo's own (demo/speech.py): Vosk limited to the ten command words, with
 "[unk]" for anything else. Each clip of the test list (testing_list.txt) is given as the demo gives
@@ -31,10 +36,12 @@ The clips are aligned 1 s recordings with the word in them; the demo's Spotter l
 clips one after another, each after --gap seconds of silence (or of the same noise), fed to the
 demo's own Spotter in 0.25 s pieces. A word it gives goes to the clip its 1 s window overlaps
 most; a word given while no clip is in the window is counted on its own, as is a word given
-again for the same clip. With --stop-at P..., stop also acts from each P (0: any probability)
-while the other words keep the threshold. Each window's probabilities are kept in
-stream_windows_<sound>.npz beside the CSVs, and used again for the same model and gap, so other
-thresholds take seconds, not the hour of scoring.
+again for the same clip. Only one window per gap lies wholly in it, so the words in the gaps are a
+floor for noise alone. Noise alone is also measured directly: each noise file's test quarter
+streamed with no clips, at the clips' average speech level less the --snr. With --stop-at P...,
+stop also acts from each P (0: any probability) while the other words keep the threshold. Each
+window's probabilities are kept in stream_windows_<sound>.npz beside the CSVs, and used again for
+the same model and gap, so other thresholds take seconds, not the hour of scoring.
 
     python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --stream 0.85
 """
@@ -133,6 +140,9 @@ def summary(rows: list[dict], held_out: frozenset = frozenset()) -> dict:
         "stop_as_go": sum(r["heard"] == "go" for r in stop),
         "stop_as_other": sum(r["outcome"] == "wrong" and r["heard"] != "go" for r in stop),
         "go_as_stop": sum(r["label"] == "go" and r["heard"] == "stop" for r in said),
+        # another word taken for the two that move or stop the device
+        "other_as_go": sum(r["heard"] == "go" for r in other),
+        "other_as_stop": sum(r["heard"] == "stop" for r in other),
         "held": len(held),
         "held_false": count(held, "false"),
     }
@@ -154,9 +164,10 @@ def vosk_listener(model_dir: Path):
     return listen
 
 
-def kws_listener(checkpoint: Path, threshold: float):
+def kws_listener(checkpoint: Path, threshold: float, stop_any: bool = False):
     """A trained BC-ResNet (demo/kws.py): its top class, if that is a command word at least as
-    likely as threshold."""
+    likely as threshold. With stop_any, "stop" acts at any probability when it is the top class,
+    as the core obeys a spoken stop at any trust."""
     import torch
 
     from demo import kws
@@ -174,9 +185,58 @@ def kws_listener(checkpoint: Path, threshold: float):
             p = torch.softmax(model(x), 1)[0]
         i = int(p.argmax())
         word, prob = kws.LABELS[i], float(p[i])
-        return [(word, prob)] if word in COMMAND_WORDS and prob >= threshold else []
+        least = 0.0 if stop_any and word == "stop" else threshold
+        return [(word, prob)] if word in COMMAND_WORDS and prob >= least else []
 
     return listen
+
+
+def rethreshold(rows: list[dict], threshold: float, stop_any: bool = False) -> list[dict]:
+    """The rows of a run at threshold 0 (each clip's top command word and its probability), as a
+    run at this threshold would give them, so a threshold is chosen without running the model
+    again."""
+    out = []
+    for r in rows:
+        least = 0.0 if stop_any and r["heard"] == "stop" else threshold
+        heard = r["heard"] if r["heard"] and float(r["conf"] or 0) >= least else ""
+        out.append(
+            {**r, "heard": heard, "outcome": outcome(r["label"], [(heard, 1.0)] if heard else [])}
+        )
+    return out
+
+
+def choose_threshold(rows: list[dict], keep: float = 0.9, step: float = 0.05) -> float:
+    """The highest threshold, in steps of step, that keeps keep of the command clips right: the
+    rule used on the validation list's clean run at threshold 0 (val_kws_0_clean.csv)."""
+    best = 0.0
+    for k in range(round(1 / step)):
+        t = round(k * step, 4)  # 17 * 0.05 is 0.8500000000000001, above a clip's 0.85
+        s = summary(rethreshold(rows, t))
+        if s["said"] and s["right"] / s["said"] >= keep:
+            best = t
+    return best
+
+
+def choose_report(paths: list[Path], keep: float = 0.9) -> int:
+    """--choose: the threshold from the first CSV (the clean validation run at threshold 0), and
+    what stop at any changes there in each CSV given."""
+    runs = [(path, list(csv.DictReader(open(path, encoding="utf-8")))) for path in paths]
+    t = choose_threshold(runs[0][1], keep)
+    s = summary(rethreshold(runs[0][1], t))
+    print(f"threshold {t:g}: {s['right']} of {s['said']} command clips right "
+          f"({s['right'] / s['said']:.1%}) in {paths[0].name}")  # fmt: skip
+    for path, rows in runs:
+        for stop_any in (False, True):
+            kept = rethreshold(rows, t, stop_any)
+            s = summary(kept)
+            other = [
+                r for r in kept if r["label"] not in COMMAND_WORDS and r["label"] != "_silence_"
+            ]
+            as_stop = sum(r["heard"] == "stop" for r in other)
+            print(f"{path.name}, stop {'at any' if stop_any else f'at {t:g}'}: "
+                  f"{s['stop_missed']} of {s['stop']} stops missed, {s['stop_as_go']} heard as go; "
+                  f"{as_stop} of {s['other']} other words heard as stop")  # fmt: skip
+    return 0
 
 
 def run(
@@ -237,6 +297,18 @@ def stream_sound(sc: Path, clips, snr: float | None, gap_s: float = 1.0, seed: i
         yield label, path, segment
 
 
+def noise_alone_sound(sc: Path, clips, snr: float, hop_s: float = 0.25):
+    """Each noise file's test quarter, cut to whole hops, with no clips: noise alone, snr_db below
+    the clips' average speech power. Yields (label, path, noise), as stream_sound does."""
+    power = np.mean([np.mean(read_wav(path).astype(np.float64) ** 2) for _, path in clips])
+    level = np.full(1, np.sqrt(power))  # a sound of that power, for mix()
+    hop = int(hop_s * TARGET_RATE)
+    for path in sorted((sc / "_background_noise_").glob("*.wav")):
+        noise = noise_part(read_wav(path), "test")
+        noise = noise[: noise.size - noise.size % hop]
+        yield "_noise_", path, mix(np.zeros_like(noise), noise, snr, level=level)
+
+
 def stream_scores(segments, score, hop_s: float = 0.25):
     """Feed the stream to the demo's own Spotter in hop_s pieces, as the phone's sound comes, and
     keep each window's probabilities, to replay at any threshold (stream_rows). Returns the
@@ -270,9 +342,10 @@ def stream_rows(
 
     stop = LABELS.index("stop")
     scored = iter(probs)
+    last = [None]  # the window just scored, as the model gave it (before stop is lifted)
 
     def score(_):
-        p = next(scored)
+        p = last[0] = next(scored)
         if stop_at is not None and int(np.argmax(p)) == stop and p[stop] >= stop_at:
             p = p.copy()
             p[stop] = 1.0
@@ -284,7 +357,8 @@ def stream_rows(
     alone = []
     silent = np.zeros(hop, dtype=np.int16).tobytes()
     for n in range(1, pieces + 1):
-        for word, p in spotter.feed(silent):
+        for word, _ in spotter.feed(silent):
+            p = float(last[0][LABELS.index(word)])  # the model's own probability, kept in the CSV
             end = n * hop
             near = range(max(bisect.bisect_right(starts, end - TARGET_RATE) - 1, 0),
                           bisect.bisect_left(starts, end))  # fmt: skip
@@ -310,12 +384,17 @@ def stream_rows(
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--sc", type=Path, required=True, help="Speech Commands v2, unpacked")
-    which = p.add_mutually_exclusive_group(required=True)
+    p.add_argument("--sc", type=Path, help="Speech Commands v2, unpacked")
+    which = p.add_mutually_exclusive_group()
     which.add_argument("--vosk", type=Path, help="a Vosk model folder")
     which.add_argument("--kws", type=Path, help="a BC-ResNet checkpoint (tools/train_commands.py)")
     p.add_argument("--threshold", type=float, default=0.0,
                    help="BC-ResNet: the least probability of a command word to act on")  # fmt: skip
+    p.add_argument("--stop-any", action="store_true",
+                   help="BC-ResNet: stop at any probability, others at --threshold")  # fmt: skip
+    p.add_argument("--choose", type=Path, nargs="+", metavar="CSV",
+                   help="choose the threshold from a validation run at threshold 0 "
+                        "(val_kws_0_clean.csv first), without the model")  # fmt: skip
     p.add_argument("--snr", type=float, nargs="*", default=[20.0, 10.0, 5.0, 0.0],
                    help="noise levels to test, besides clean (dB)")  # fmt: skip
     p.add_argument("--out", type=Path, default=None, help="where the per-clip CSVs go")
@@ -334,6 +413,10 @@ def main(argv=None) -> int:
     p.add_argument("--gap", type=float, default=1.0,
                    help="--stream: seconds of silence or noise before each clip")  # fmt: skip
     a = p.parse_args(argv)
+    if a.choose:
+        return choose_report(a.choose)
+    if not a.sc or not (a.vosk or a.kws):
+        p.error("--sc and one of --vosk or --kws are needed")
     out = a.out or a.sc
     if a.stream:
         if not a.kws:
@@ -342,7 +425,8 @@ def main(argv=None) -> int:
     if a.vosk:
         listen, prefix = vosk_listener(a.vosk), "vosk"
     else:
-        listen, prefix = kws_listener(a.kws, a.threshold), f"kws_{a.threshold:g}"
+        listen = kws_listener(a.kws, a.threshold, a.stop_any)
+        prefix = f"kws_{a.threshold:g}{'s' if a.stop_any else ''}"
     held = frozenset(a.held_out)
     part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
     pct = lambda n, d: f"{n} ({n / d:.1%})" if d else "-"  # noqa: E731
@@ -430,12 +514,24 @@ def stream_report(a, out: Path) -> int:
     part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
     held = frozenset(a.held_out)
     pct = lambda n, d: f"{n} ({n / d:.1%})" if d else "-"  # noqa: E731
+    settings = [(t, None) for t in a.stream]
+    settings += [(t, s) for t in a.stream for s in a.stop_at if s <= t]
+
+    def name_of(threshold: float, stop_at: float | None) -> str:
+        if stop_at is None:
+            return f"{threshold:g}"
+        return (
+            f"{threshold:g}, stop at any"
+            if stop_at == 0
+            else f"{threshold:g}, stop from {stop_at:g}"
+        )
+
     print(
-        "| Sound | Setting | Right | Wrong | Missed | False activations | of which held-out "
-        "words | Stop missed | Stop as go | Go as stop | Words again, same clip | Words in the "
-        "gaps |"
+        "| Sound | Setting | Right | Wrong | Missed | False activations | of which held-out words "
+        '| Other words heard as "go" | Other words heard as "stop" | Stop missed '
+        '| Stop heard as "go" | Words in the gaps |'
     )
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|")  # fmt: skip
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for snr in [None, *a.snr]:
         name = "clean" if snr is None else f"snr{snr:g}"
         sound = "clean" if snr is None else f"noise at {snr:g} dB"
@@ -445,8 +541,6 @@ def stream_report(a, out: Path) -> int:
             segments = stream_sound(a.sc, clips, snr, a.gap)
             probs, pieces, spans = stream_scores(segments, spotter.score)
             save_windows(kept, a.kws, a.gap, probs, pieces, spans)
-        settings = [(t, None) for t in a.stream]
-        settings += [(t, s) for t in a.stream for s in a.stop_at if s <= t]
         for threshold, stop_at in settings:
             rows, alone = stream_rows(probs, pieces, spans, threshold, stop_at)
             tag = f"{threshold:g}" + (
@@ -457,19 +551,24 @@ def stream_report(a, out: Path) -> int:
                 w.writeheader()
                 w.writerows(rows)
             s = summary(rows, held)
-            if stop_at is None:
-                setting = f"{threshold:g}"
-            elif stop_at == 0:
-                setting = f"{threshold:g}, stop at any"
-            else:
-                setting = f"{threshold:g}, stop from {stop_at:g}"
-            print(f"| {sound} | {setting} | {pct(s['right'], s['said'])} "
+            print(f"| {sound} | {name_of(threshold, stop_at)} | {pct(s['right'], s['said'])} "
                   f"| {pct(s['wrong'], s['said'])} | {pct(s['missed'], s['said'])} "
                   f"| {pct(s['false'], s['other'])} | {pct(s['held_false'], s['held'])} "
+                  f"| {s['other_as_go']} | {s['other_as_stop']} "
                   f"| {pct(s['stop_missed'], s['stop'])} | {s['stop_as_go']} "
-                  f"| {s['go_as_stop']} | {sum(r['extra'] for r in rows)} "
                   f"| {len(alone)} in {len(spans) * a.gap / 3600:.1f} h |",
                   flush=True)  # fmt: skip
+    if a.snr:
+        print("\nNoise alone (each noise file's test quarter, no clips):")
+    for snr in a.snr:
+        probs, pieces, _ = stream_scores(noise_alone_sound(a.sc, clips, snr), spotter.score)
+        hours = pieces * 0.25 / 3600
+        said = []
+        for threshold, stop_at in settings:
+            _, alone = stream_rows(probs, pieces, [], threshold, stop_at)
+            n = len(alone)
+            said.append(f"{name_of(threshold, stop_at)}: {n} ({n / hours:.0f} an hour)")
+        print(f"- {snr:g} dB, {hours * 60:.1f} min: " + "; ".join(said), flush=True)
     return 0
 
 
