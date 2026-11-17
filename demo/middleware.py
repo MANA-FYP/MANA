@@ -445,6 +445,7 @@ class Middleware:
         self.decisions: deque = deque(maxlen=30)  # every decision MANA took, as text
         self._decision_n = 0
         self._decision_key: tuple | None = None
+        self._restarted: str | None = None  # "Starting again", said after the next tick's lines
         self._last_link: str | None = None
         self._last_position: str | None = None
         self._last_manual: bool | None = None
@@ -503,6 +504,7 @@ class Middleware:
         priority: Priority | None = None,
         state: str | None = None,
         why: str = "",
+        say: bool = True,
     ) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
@@ -522,7 +524,7 @@ class Middleware:
                 **({"state": state, "why": why} if state else {}),
             }
         )
-        if kind != "detection":  # a detection is shown as a box, not said
+        if kind != "detection" and say:  # a detection is shown as a box, not said
             level = priority if priority is not None else KIND_PRIORITY.get(kind, Priority.WARNING)
             self.queue.push(Message(text, level, True, now), now)
 
@@ -805,13 +807,25 @@ class Middleware:
         said and decided. The track starts again where the person is now, tied to the map at the
         next GPS fix. The sensors, the core and the link are kept."""
         now = self.clock() if now is None else now
+        heading = self.nav.track.heading
         self.nav = Navigator()
+        if heading is not None:  # which way the phone faces is kept: no arrow lost till it turns
+            self.nav.track.on_heading(heading)
         self._guided = None
         for kept in (self.decisions, self.heard, self.log, self.inputs):
             kept.clear()
         self._said_at.clear()
+        # what was waiting to be said is forgotten too, so the line below is not held behind the
+        # end of the last one and dropped by the next decision; a stop waiting is still said
+        urgent = [m for m in self.queue.waiting if m.priority >= Priority.URGENT]
+        self.queue = MessageQueue()
+        for m in urgent:
+            self.queue.push(m, m.stamp)
         self._decision_key = None  # the current decision is written again, at the top
-        self._decide(now, "way", "Starting again from here.", Priority.INFO)
+        # written now, but said after the lines the next tick writes again: pushed first, the
+        # next decision pushed would drop it from the queue, and it was never said (#191)
+        self._restarted = "Starting again from here."
+        self._decide(now, "way", self._restarted, Priority.INFO, say=False)
 
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
@@ -1104,6 +1118,9 @@ class Middleware:
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
         self._guide(now)
+        if self._restarted is not None:
+            self.queue.push(Message(self._restarted, Priority.INFO, True, now), now)
+            self._restarted = None
         if self.directions:
             if ahead := direction(self.core, now):
                 self.queue.push(ahead, now)

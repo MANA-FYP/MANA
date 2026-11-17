@@ -293,6 +293,12 @@ more than once in 10 s) when the direction moves two hours round, as after a wro
 to hear it at any time; the X on the map clears it. It is the straight line, not a route: streets
 and walls are not known.
 
+**Starting again.** The anticlockwise-arrow button on the live map, after a confirm, clears the path,
+the steps, the marks and the destination, and the messages and decisions so far, and the phone
+says "Starting again from here." The track starts at the person's place, tied to the map at the
+next GPS fix. The sensors, the core, the link and the way the phone faces are kept, and a stop
+still waiting to be said is still said.
+
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
 fix, otherwise in metres from the start (it says so).

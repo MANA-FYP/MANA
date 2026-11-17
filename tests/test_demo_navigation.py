@@ -640,8 +640,24 @@ def test_starting_again_forgets_the_walk_and_counts_from_here():
     assert not mw.heard and not mw.inputs
     mw.tick(14.0)  # the current decision is written again, and no way to the old destination
     assert [d["kind"] for d in mw.decisions][-1] == "decision"
+    for t in range(15, 25):  # and "Starting again from here." is said, not dropped (#191)
+        mw.tick(float(t))
+    assert [h["text"] for h in mw.heard][0] == "Starting again from here."
     walk_legs(mw.nav, [(90, 10)], t0=14.0)
     assert mw.nav.view(30.0)["x"] == pytest.approx(7.0, abs=0.01)  # 7 m east of the new start
+
+
+def test_a_stop_waiting_to_be_said_is_still_said_after_starting_again():
+    from mana_core.messages import Message, Priority
+
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=90)
+    mw.queue.push(Message("Stop. Steps down ahead.", Priority.URGENT, True, 10.0), 10.0)
+    mw.start_again(now=10.0)
+    assert [m.text for m in mw.queue.waiting] == ["Stop. Steps down ahead."]
+    assert mw.nav.view(10.0)["heading"] == 90  # and which way the phone faces
 
 
 def test_held_fixes_do_not_stop_gps_correcting_the_steps():
