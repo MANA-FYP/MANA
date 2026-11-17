@@ -202,6 +202,8 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
         app["phones"].discard(ws)
         if not app["phones"]:  # no round trip is measured now: not shown as if it were live
             app["mw"].on_phone_gone()
+            if app["listener"] is not None:  # nor its last seconds of sound heard again
+                app["listener"].clear()
     return ws
 
 
