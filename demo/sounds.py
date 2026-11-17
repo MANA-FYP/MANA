@@ -46,6 +46,12 @@ class Listener:
         keep = int(WINDOW_S * RATE)
         self.sound = np.concatenate([self.sound, resample(samples, rate)])[-keep:]
 
+    def clear(self) -> None:
+        """Forget the sound kept: the phone went away, and its last seconds are not the street
+        a new phone hears (Komail, #184)."""
+        self.sound = np.zeros(0, dtype=np.float32)
+        self.scored_at = None
+
     def due(self, now: float) -> bool:
         return self.sound.size > 0 and (
             self.scored_at is None or now - self.scored_at >= self.every_s
