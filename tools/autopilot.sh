@@ -73,4 +73,4 @@ start "$OUT/ekf.log" ros2 run robot_localization ekf_node --ros-args -r __node:=
   -r odometry/filtered:=/odometry/global -r lidar/pose:=/lidar/pose
 start "$OUT/nav2.log" ros2 launch mana_sim autopilot.launch.py
 start "$OUT/drive_request.csv" ros2 topic echo /drive_request mana_msgs/msg/DriveRequest --csv
-python3 "$HERE/autopilot_goal.py" --out "$OUT/goals.csv"
+python3 "$HERE/autopilot_goal.py" --out "$OUT/goals.csv" --keep-going  # every goal, in simulation

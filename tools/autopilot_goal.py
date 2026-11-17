@@ -7,6 +7,11 @@ For each goal: whether Nav2 reached it, how long it took, how far the chair ende
 Gazebo's ground truth, and what MANA did on the way: its lowest speed limit, how long it asked
 for a stop, and its modes (from drive_request, the core's output). The map frame begins where the
 chair starts (tools/indoor_localisation.sh), at (1.0, 1.375) in the indoor world, facing +x.
+
+It stops at the first goal not reached (aborted, cancelled, timed out or refused): the next goal
+would set the chair moving again on its own once a stop lifts (Komail, #187). --keep-going tries
+every goal anyway, as the runs in docs/results.md did; only in simulation or with the chair
+watched.
 """
 
 import argparse
@@ -138,6 +143,8 @@ def main(argv=None) -> int:
     p.add_argument("--goal", type=float, nargs=3, metavar=("X", "Y", "YAW"))
     p.add_argument("--timeout", type=float, default=300.0, help="wall seconds per goal")
     p.add_argument("--out", help="a CSV of the results")
+    p.add_argument("--keep-going", action="store_true",
+                   help="send the next goal after one is not reached")  # fmt: skip
     a = p.parse_args(argv)
     rclpy.init()
     node = Autopilot()
@@ -149,6 +156,9 @@ def main(argv=None) -> int:
         row = node.go(x, y, yaw, a.timeout)
         print(row, flush=True)
         rows.append(row)
+        if row["result"] != "reached" and not a.keep_going:
+            print(f"goal {row['goal']} {row['result']}: stopping here (--keep-going to go on)")
+            break
     if a.out:
         with open(a.out, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=FIELDS)
