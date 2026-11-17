@@ -304,10 +304,11 @@ WORD_COMMANDS = {
 
 MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
 # which floor, said: "floor two", "second floor", "floor 2", "ground floor", "basement"
+NUMBER_NAMES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten")  # fmt: skip
 FLOOR_WORDS = {
-    "ground": 0, "zero": 0, "basement": -1,
-    **{w: i for i, w in enumerate(("one", "two", "three", "four", "five", "six", "seven",
-                                   "eight", "nine", "ten"), 1)},
+    "ground": 0, "basement": -1,
+    **{w: i for i, w in enumerate(NUMBER_NAMES)},
     **{w: i for i, w in enumerate(("first", "second", "third", "fourth", "fifth", "sixth",
                                    "seventh", "eighth", "ninth", "tenth"), 1)},
 }  # fmt: skip
@@ -320,17 +321,31 @@ def in_sentence(text: str) -> bool:
 
 
 def floor_in(text: str) -> int | None:
-    """The floor a phrase names, or None. "basement" alone is enough; others need "floor"."""
+    """The floor a phrase names, or None. "basement" alone is enough; others need "floor", and
+    the number next to it: "second floor" or "ground floor" before it, "floor two" or "floor 2"
+    after it. So "two people on the first floor" is floor 1 (Waqas, #196)."""
     words = re.findall(r"[a-z']+|\d+", text.lower())
     if "basement" in words:
         return -1
-    if "floor" not in words:
-        return None
-    for w in words:
-        if w.isdigit() and int(w) <= 60:
-            return int(w)
-        if w in FLOOR_WORDS:
-            return FLOOR_WORDS[w]
+
+    def value(i: int) -> int | None:
+        if not 0 <= i < len(words):
+            return None
+        w = words[i]
+        if w.isdigit():
+            return int(w) if int(w) <= 60 else None
+        return FLOOR_WORDS.get(w)
+
+    for i, w in enumerate(words):
+        if w != "floor":
+            continue
+        before, after = value(i - 1), value(i + 1)
+        if before is not None and words[i - 1] not in NUMBER_NAMES:  # "second floor", "ground"
+            return before
+        if after is not None:
+            return after
+        if before is not None:  # "two floor"
+            return before
     return None
 
 

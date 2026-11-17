@@ -27,9 +27,15 @@ def test_a_phrase_is_a_result_with_a_word_that_is_not_a_command():
         return json.dumps({"text": text})
 
     assert speech.phrase_of(result("floor two")) == "floor two"
-    assert speech.phrase_of(result("[unk] where go")) == "where go"
-    assert speech.phrase_of(result("stop")) == speech.phrase_of(result("[unk] go")) == ""
+    assert speech.phrase_of(result("[unk] where go")) == "(unclear) where go"
+    assert speech.phrase_of(result("stop")) == speech.phrase_of(result("go go")) == ""
+    assert speech.phrase_of(result("[unk]")) == speech.phrase_of(result("[unk] [unk]")) == ""
     assert speech.phrase_of("not json") == ""
+    # Waqas (#196): Vosk hears "don't go", "can we go", "let's go now" as unknown words and "go"
+    from demo.middleware import in_sentence
+
+    for said in ("[unk] go", "[unk] [unk] go", "go [unk]"):
+        assert in_sentence(speech.phrase_of(result(said))), said
 
 
 def test_feeding_a_phrase_keeps_it_for_the_server():

@@ -225,6 +225,9 @@ def test_the_floor_said_by_the_user():
     assert floor_in("floor two") == floor_in("Second floor.") == floor_in("floor 2") == 2
     assert floor_in("ground floor") == 0 and floor_in("basement") == -1
     assert floor_in("the floor is wet") is None and floor_in("two") is None
+    # the number next to "floor", not the first one in the phrase (Waqas, #196)
+    assert floor_in("two people on the first floor") == floor_in("first floor, two people") == 1
+    assert floor_in("I am on floor 3 with two friends") == 3 and floor_in("floor 99") is None
     assert in_sentence("where do I go") and not in_sentence("Stop.") and not in_sentence("go go")
     m = Middleware()
     m.on_heard("I am on the first floor", 5.0)

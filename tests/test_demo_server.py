@@ -111,6 +111,38 @@ def test_in_a_spoken_sentence_only_stop_acts():
     run(with_clients(go))
 
 
+def test_with_the_laptop_recogniser_go_in_a_sentence_of_unknown_words_does_not_start():
+    """Waqas (#196): Vosk gives "don't go" as "[unk] go"; that "go" must not start the device."""
+    from demo.speech import CommandRecognizer
+
+    class Vosk:  # what Vosk returns for each audio message, in turn
+        def __init__(self):
+            self.said = ["stop", "[unk] go", "[unk] [unk] go", "go"]
+
+        def AcceptWaveform(self, data):  # noqa: N802
+            return True
+
+        def Result(self):  # noqa: N802
+            text = self.said.pop(0)
+            words = [{"word": w, "conf": 0.9} for w in text.split() if w != "[unk]"]
+            return json.dumps({"text": text, "result": words})
+
+    audio = bytes([2]) + bytes(4 * 480)  # one audio message of silence
+
+    async def go(client, phone, dash):
+        await phone.send_bytes(audio)  # "stop"
+        await snapshot_where(dash, lambda s: s["decision"]["stop"])
+        await phone.send_bytes(audio)  # "don't go"
+        await phone.send_bytes(audio)  # "can we go"
+        for _ in range(5):
+            snap = await snapshot_where(dash, lambda s: True)
+            assert snap["decision"]["stop"]
+        await phone.send_bytes(audio)  # "go" on its own
+        await snapshot_where(dash, lambda s: not s["decision"]["stop"])
+
+    run(with_clients(go, recognizer=CommandRecognizer(Vosk())))
+
+
 def test_the_dashboard_can_stop_the_chair_too():
     async def go(client, phone, dash):
         await dash.send_json({"type": "button", "name": "stop"})

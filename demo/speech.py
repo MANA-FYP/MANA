@@ -35,13 +35,18 @@ def grammar() -> str:
 
 
 def phrase_of(text: str) -> str:
-    """A finished result's text when it is a phrase (a word that is not a command); else ""."""
+    """A finished result's text when it is a phrase (a word that is not a command); else "".
+    A word outside the grammar comes back as "[unk]", and it counts as a word that is not a
+    command: "don't go" is "[unk] go", a sentence, so its "go" must not act (Waqas, #196). It is
+    shown as "(unclear)". A result of "[unk]" alone (noise, a cough) is no phrase."""
     try:
         said = str(json.loads(text).get("text", ""))
     except (TypeError, ValueError, AttributeError):
         return ""
-    words = [w for w in said.lower().split() if w != "[unk]"]
-    return " ".join(words) if any(w not in COMMAND_WORDS for w in words) else ""
+    words = said.lower().split()
+    if all(w == "[unk]" for w in words) or all(w in COMMAND_WORDS for w in words):
+        return ""
+    return " ".join("(unclear)" if w == "[unk]" else w for w in words)
 
 
 def parse_result(text: str) -> list[tuple[str, float]]:
