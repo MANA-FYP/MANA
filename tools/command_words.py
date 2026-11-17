@@ -2,6 +2,11 @@
 
     python tools/command_words.py --sc datasets/speech_commands --vosk vosk-model-small-en-us-0.15
     python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --threshold 0.9
+    python tools/command_words.py --choose val_kws_0_clean.csv val_kws_0_snr10.csv
+
+The threshold is chosen on the validation list (--list validation_list.txt at threshold 0, then
+--choose): the highest that keeps 90% of the clean command clips right, and what letting "stop"
+act at any probability (--stop-any) changes for stop.
 
 The recogniser is the demo's own (demo/speech.py): Vosk limited to the ten command words, with
 "[unk]" for anything else. Each clip of the test list (testing_list.txt) is given as the demo gives
@@ -156,9 +161,10 @@ def vosk_listener(model_dir: Path):
     return listen
 
 
-def kws_listener(checkpoint: Path, threshold: float):
+def kws_listener(checkpoint: Path, threshold: float, stop_any: bool = False):
     """A trained BC-ResNet (demo/kws.py): its top class, if that is a command word at least as
-    likely as threshold."""
+    likely as threshold. With stop_any, "stop" acts at any probability when it is the top class,
+    as the core obeys a spoken stop at any trust."""
     import torch
 
     from demo import kws
@@ -176,9 +182,58 @@ def kws_listener(checkpoint: Path, threshold: float):
             p = torch.softmax(model(x), 1)[0]
         i = int(p.argmax())
         word, prob = kws.LABELS[i], float(p[i])
-        return [(word, prob)] if word in COMMAND_WORDS and prob >= threshold else []
+        least = 0.0 if stop_any and word == "stop" else threshold
+        return [(word, prob)] if word in COMMAND_WORDS and prob >= least else []
 
     return listen
+
+
+def rethreshold(rows: list[dict], threshold: float, stop_any: bool = False) -> list[dict]:
+    """The rows of a run at threshold 0 (each clip's top command word and its probability), as a
+    run at this threshold would give them, so a threshold is chosen without running the model
+    again."""
+    out = []
+    for r in rows:
+        least = 0.0 if stop_any and r["heard"] == "stop" else threshold
+        heard = r["heard"] if r["heard"] and float(r["conf"] or 0) >= least else ""
+        out.append(
+            {**r, "heard": heard, "outcome": outcome(r["label"], [(heard, 1.0)] if heard else [])}
+        )
+    return out
+
+
+def choose_threshold(rows: list[dict], keep: float = 0.9, step: float = 0.05) -> float:
+    """The highest threshold, in steps of step, that keeps keep of the command clips right: the
+    rule used on the validation list's clean run at threshold 0 (val_kws_0_clean.csv)."""
+    best = 0.0
+    for k in range(round(1 / step)):
+        t = round(k * step, 4)  # 17 * 0.05 is 0.8500000000000001, above a clip's 0.85
+        s = summary(rethreshold(rows, t))
+        if s["said"] and s["right"] / s["said"] >= keep:
+            best = t
+    return best
+
+
+def choose_report(paths: list[Path], keep: float = 0.9) -> int:
+    """--choose: the threshold from the first CSV (the clean validation run at threshold 0), and
+    what stop at any changes there in each CSV given."""
+    runs = [(path, list(csv.DictReader(open(path, encoding="utf-8")))) for path in paths]
+    t = choose_threshold(runs[0][1], keep)
+    s = summary(rethreshold(runs[0][1], t))
+    print(f"threshold {t:g}: {s['right']} of {s['said']} command clips right "
+          f"({s['right'] / s['said']:.1%}) in {paths[0].name}")  # fmt: skip
+    for path, rows in runs:
+        for stop_any in (False, True):
+            kept = rethreshold(rows, t, stop_any)
+            s = summary(kept)
+            other = [
+                r for r in kept if r["label"] not in COMMAND_WORDS and r["label"] != "_silence_"
+            ]
+            as_stop = sum(r["heard"] == "stop" for r in other)
+            print(f"{path.name}, stop {'at any' if stop_any else f'at {t:g}'}: "
+                  f"{s['stop_missed']} of {s['stop']} stops missed, {s['stop_as_go']} heard as go; "
+                  f"{as_stop} of {s['other']} other words heard as stop")  # fmt: skip
+    return 0
 
 
 def run(
@@ -323,12 +378,17 @@ def stream_rows(probs, pieces, spans, threshold: float, stop_any: bool, hop_s: f
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--sc", type=Path, required=True, help="Speech Commands v2, unpacked")
-    which = p.add_mutually_exclusive_group(required=True)
+    p.add_argument("--sc", type=Path, help="Speech Commands v2, unpacked")
+    which = p.add_mutually_exclusive_group()
     which.add_argument("--vosk", type=Path, help="a Vosk model folder")
     which.add_argument("--kws", type=Path, help="a BC-ResNet checkpoint (tools/train_commands.py)")
     p.add_argument("--threshold", type=float, default=0.0,
                    help="BC-ResNet: the least probability of a command word to act on")  # fmt: skip
+    p.add_argument("--stop-any", action="store_true",
+                   help="BC-ResNet: stop at any probability, others at --threshold")  # fmt: skip
+    p.add_argument("--choose", type=Path, nargs="+", metavar="CSV",
+                   help="choose the threshold from a validation run at threshold 0 "
+                        "(val_kws_0_clean.csv first), without the model")  # fmt: skip
     p.add_argument("--snr", type=float, nargs="*", default=[20.0, 10.0, 5.0, 0.0],
                    help="noise levels to test, besides clean (dB)")  # fmt: skip
     p.add_argument("--out", type=Path, default=None, help="where the per-clip CSVs go")
@@ -344,6 +404,10 @@ def main(argv=None) -> int:
     p.add_argument("--gap", type=float, default=1.0,
                    help="--stream: seconds of silence or noise before each clip")  # fmt: skip
     a = p.parse_args(argv)
+    if a.choose:
+        return choose_report(a.choose)
+    if not a.sc or not (a.vosk or a.kws):
+        p.error("--sc and one of --vosk or --kws are needed")
     out = a.out or a.sc
     if a.stream:
         if not a.kws:
@@ -352,7 +416,8 @@ def main(argv=None) -> int:
     if a.vosk:
         listen, prefix = vosk_listener(a.vosk), "vosk"
     else:
-        listen, prefix = kws_listener(a.kws, a.threshold), f"kws_{a.threshold:g}"
+        listen = kws_listener(a.kws, a.threshold, a.stop_any)
+        prefix = f"kws_{a.threshold:g}{'s' if a.stop_any else ''}"
     held = frozenset(a.held_out)
     part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
     pct = lambda n, d: f"{n} ({n / d:.1%})" if d else "-"  # noqa: E731
