@@ -320,6 +320,8 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
         app["phones"].discard(ws)
         if not app["phones"]:  # no round trip is measured now: not shown as if it were live
             app["mw"].on_phone_gone()
+            if app["listener"] is not None:  # nor its last seconds of sound heard again
+                app["listener"].clear()
     return ws
 
 
@@ -675,9 +677,13 @@ def metres(x, y, within_m: float = 20_000.0) -> tuple[float, float] | None:
     finite numbers within reach."""
     if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (x, y)):
         return None
+    try:  # a JSON integer can be too large for a float (10**400): refused, not raised (#188)
+        x, y = float(x), float(y)
+    except OverflowError:
+        return None
     if not (math.isfinite(x) and math.isfinite(y)) or math.hypot(x, y) > within_m:
         return None
-    return float(x), float(y)
+    return x, y
 
 
 async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:

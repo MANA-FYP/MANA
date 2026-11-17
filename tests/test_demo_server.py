@@ -476,7 +476,8 @@ def test_a_destination_picked_on_the_map_is_checked_kept_and_cleared():
     from demo.server import metres
 
     assert metres(3, -4.5) == (3.0, -4.5)
-    for bad in [("3", 4), (True, 0), (float("nan"), 0), (float("inf"), 0), (None, 1), (30_000, 0)]:
+    for bad in [("3", 4), (True, 0), (float("nan"), 0), (float("inf"), 0), (None, 1), (30_000, 0),
+                (10**400, 0)]:  # fmt: skip
         assert metres(*bad) is None
 
     async def go(client, phone, dash):
