@@ -80,7 +80,19 @@ def test_a_chair_over_an_obstacle_in_the_mask_is_right():
 
 
 def test_another_detector_or_size_is_not_read_from_the_first_ones_file(tmp_path):
-    first = cd.cached(tmp_path, "test", "yolo26n.pt", 416)
+    absent = str(tmp_path / "none" / "yolo26n.pt")  # not on disk: keyed by its name
+    first = cd.cached(tmp_path, "test", absent, 416)
     assert first == tmp_path / "detections_test_yolo26n_416.csv"
-    assert cd.cached(tmp_path, "test", "weights/yolo26s.pt", 416) != first
-    assert cd.cached(tmp_path, "test", "yolo26n.pt", 640) != first
+    assert cd.cached(tmp_path, "test", str(tmp_path / "none" / "yolo26s.pt"), 416) != first
+    assert cd.cached(tmp_path, "test", absent, 640) != first
+
+
+def test_two_best_pt_files_are_kept_apart(tmp_path):
+    a, b = tmp_path / "run1" / "best.pt", tmp_path / "run2" / "best.pt"
+    for p, data in ((a, b"first weights"), (b, b"second weights")):
+        p.parent.mkdir()
+        p.write_bytes(data)
+    first = cd.cached(tmp_path, "test", str(a), 416)
+    assert first.name.startswith("detections_test_best_") and first.name.endswith("_416.csv")
+    assert cd.cached(tmp_path, "test", str(b), 416) != first
+    assert cd.cached(tmp_path, "test", str(a), 416) == first  # the same file, the same CSV

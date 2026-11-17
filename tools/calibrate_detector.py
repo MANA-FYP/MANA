@@ -13,14 +13,16 @@ error (ECE), fits a logistic map from the confidence to the trust on the train s
 scaling), and checks it on the test split. Detections under 40 pixels high are left out: SANPO's
 masks leave small far objects out, and they would count as wrong.
 
-The detections are kept in <root>/detections_<split>_<weights>_<imgsz>.csv, so another detector
-or size is run anew, not read from another's file (Komail, #175); --again runs it anew anyway.
+The detections are kept in <root>/detections_<split>_<weights>_<hash>_<imgsz>.csv, the hash taken
+from the weights file's contents, so another detector, size or retrained best.pt is run anew, not
+read from another's file (#175); --again runs it anew anyway.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import math
 import sys
 from pathlib import Path
@@ -160,8 +162,14 @@ def frames(root: Path, split: str):
 
 
 def cached(root: Path, split: str, weights: str, imgsz: int) -> Path:
-    """Where a split's judged detections are kept, for these weights at this size."""
-    return root / f"detections_{split}_{Path(weights).stem}_{imgsz}.csv"
+    """Where a split's judged detections are kept, for these weights at this size. Weights on disk
+    add the first 8 hex digits of their SHA-1, so two files both called best.pt are kept apart; a
+    name Ultralytics downloads on first use (no file yet) is keyed by the name alone."""
+    path = Path(weights)
+    name = path.stem
+    if path.is_file():
+        name += "_" + hashlib.sha1(path.read_bytes()).hexdigest()[:8]
+    return root / f"detections_{split}_{name}_{imgsz}.csv"
 
 
 def detect(root: Path, split: str, weights: str, imgsz: int) -> Path:

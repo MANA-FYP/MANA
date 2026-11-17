@@ -323,7 +323,7 @@ of the time, against 80 percent for the raw confidence there), so a map is a low
 disguise: more objects passed, a lower share of them right. Keeping the confidence keeps the
 operating point at 0.5 until min_trust is decided on its own (more people caught against more false
 stops, `results.md`), with that trade in view rather than as a side effect of calibration
-(Waqas, #175).
+(#175).
 
 | Option | Problem |
 |---|---|
