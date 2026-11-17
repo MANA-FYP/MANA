@@ -75,7 +75,7 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Source:** Warden, *Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition*, arXiv:1804.03209, 2018.
 - **Licence:** CC BY 4.0.
 - **Contents:** 105,829 one-second 16 kHz WAV clips of 35 words from 2,618 speakers (2.4 GB), plus background-noise recordings. MANA's ten command words (`COMMAND_WORDS` in `demo/speech.py`: stop, go, yes, no, left, right, up, down, on, off) are among them.
-- **Split:** the official one. `validation_list.txt` and `testing_list.txt` inside the archive name the validation and test clips (split by speaker, so a speaker is in one part only); every other clip is training. The separate official test set (`speech_commands_test_set_v0.02`, 113 MB) goes to `datasets/speech_commands/test_set/` and is the one we report.
+- **Split:** the official one. `validation_list.txt` and `testing_list.txt` inside the archive name the validation and test clips (split by speaker, so a speaker is in one part only); every other clip is training. The separate official test set (`speech_commands_test_set_v0.02`, 113 MB: 4,074 clips of the ten words, 408 other words, 408 of noise alone) goes to its own folder and is read with `tools/command_words.py --official`. `docs/results.md` reports both the testing list and this set. Noise for tests is the last quarter of each `_background_noise_` file; training uses the rest.
 
 ## UrbanSound8K
 
