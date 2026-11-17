@@ -13,7 +13,8 @@ error (ECE), fits a logistic map from the confidence to the trust on the train s
 scaling), and checks it on the test split. Detections under 40 pixels high are left out: SANPO's
 masks leave small far objects out, and they would count as wrong.
 
-The detections are kept in <root>/detections_<split>.csv; --again runs the detector anew.
+The detections are kept in <root>/detections_<split>_<weights>_<imgsz>.csv, so another detector
+or size is run anew, not read from another's file (Komail, #175); --again runs it anew anyway.
 """
 
 from __future__ import annotations
@@ -158,6 +159,11 @@ def frames(root: Path, split: str):
             yield image, mask
 
 
+def cached(root: Path, split: str, weights: str, imgsz: int) -> Path:
+    """Where a split's judged detections are kept, for these weights at this size."""
+    return root / f"detections_{split}_{Path(weights).stem}_{imgsz}.csv"
+
+
 def detect(root: Path, split: str, weights: str, imgsz: int) -> Path:
     """Run the detector on a split and keep what it found, judged, in a CSV."""
     import json
@@ -168,7 +174,7 @@ def detect(root: Path, split: str, weights: str, imgsz: int) -> Path:
     if detector is None:
         raise SystemExit(f"cannot load the detector {weights}")
     names = {i: n for n, i in json.loads((root / "labelmap.json").read_text()).items()}
-    out = root / f"detections_{split}.csv"
+    out = cached(root, split, weights, imgsz)
     with out.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["frame", "label", "confidence", "right"])
@@ -211,7 +217,7 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     data = {}
     for split in ("train", "test"):
-        path = a.root / f"detections_{split}.csv"
+        path = cached(a.root, split, a.weights, a.imgsz)
         if a.again or not path.exists():
             detect(a.root, split, a.weights, a.imgsz)
         data[split] = load(path)

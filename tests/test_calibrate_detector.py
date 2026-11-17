@@ -77,3 +77,10 @@ def test_a_chair_over_an_obstacle_in_the_mask_is_right():
     assert cd.judge(dets, found) == [("chair", 0.6, True), ("potted plant", 0.5, False)]
     assert "person" not in cd.SAME["obstacle"] and "car" not in cd.SAME["obstacle"]
     assert {"chair", "bench", "potted plant", "fire hydrant"} <= cd.SAME["obstacle"]
+
+
+def test_another_detector_or_size_is_not_read_from_the_first_ones_file(tmp_path):
+    first = cd.cached(tmp_path, "test", "yolo26n.pt", 416)
+    assert first == tmp_path / "detections_test_yolo26n_416.csv"
+    assert cd.cached(tmp_path, "test", "weights/yolo26s.pt", 416) != first
+    assert cd.cached(tmp_path, "test", "yolo26n.pt", 640) != first
