@@ -541,3 +541,47 @@ yolo detect train data=datasets/sanpo-stairs-yolo/data.yaml model=yolo26n.pt img
 python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
     --weights runs/detect/train/weights/best.pt   # train2, train3 ... if train already exists
 ```
+
+### YOLO26s against YOLOv8s, the same CPU run (#49)
+
+#49 compares YOLO26s with YOLOv8s trained the same way. Both were fine-tuned exactly as the
+YOLO26n above (same 1,166 training frames, 20 epochs, image size 416, batch 16, seed 0, the
+laptop CPU), from their COCO weights, and scored on the same 2,331 test frames. Training took
+168 minutes for YOLO26s and 126 for YOLOv8s. Near objects:
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned (416, 53 ms) | pedestrian | 2,993 | 0.80 | 0.84 | 0.77 | 0.89 | 0.72 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.62 |
+| | stairs | 37 | 0.22 | 0.15 | 0.24 | 0.31 | 0.24 |
+| | opening-door | 175 | 0.04 | 0.14 | 0.05 | 0.27 | 0.02 |
+| | pole | 1,942 | 0.14 | 0.36 | 0.14 | 0.47 | 0.07 |
+| YOLOv8s fine-tuned (416, 48 ms) | pedestrian | 2,993 | 0.77 | 0.87 | 0.72 | 0.92 | 0.67 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.64 |
+| | stairs | 37 | 0.20 | 0.18 | 0.27 | 0.28 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.14 | 0.03 | 0.38 | 0.03 |
+| | pole | 1,942 | 0.12 | 0.36 | 0.11 | 0.49 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 9 of the 65 test frames with stairs and YOLOv8s in
+10, both in 2 of the 6 walks (YOLO26n: 7 frames, 2 walks; YOLOE-26s: 1 frame, 1 walk).
+
+What follows:
+
+- **The two small models are close.** YOLO26s is ahead on people (AP50 0.80 against 0.77, recall
+  at 0.5 0.72 against 0.67, at 0.89 against 0.92 precision), and they tie on vehicles (AP50 0.74).
+  YOLOv8s was 5 ms a frame faster here. With one seed and 20 epochs each, a gap of 0.02 to 0.03 in
+  AP50 is within what a second run could change, so this does not settle the choice.
+- **Both small models beat the nano one and the demo's zero-shot model.** Against YOLOE-26s
+  zero-shot (82 ms), YOLO26s matches it on people at 0.5 (0.72 against 0.71) and is far ahead on
+  vehicles (0.62 against 0.37), at about two thirds of the time. Against the fine-tuned YOLO26n
+  (35 ms), people at 0.5 go from 0.63 to 0.72 and vehicles from 0.56 to 0.62.
+- **Stairs improve, but not near the target.** AP50 0.20 to 0.22 against 0.14 for the nano model,
+  and stairs precision at 0.3 rises from 0.06 to 0.15 (YOLO26s) and 0.18 (YOLOv8s). That is still a quarter of the near
+  staircases at 0.3, against the 0.85 target, and most stairs boxes are wrong. The 37 near
+  staircases of the test split are also too few to tell these models apart on stairs.
+- **Doors and poles stay low** for both (door recall 0.03 to 0.05, pole 0.11 to 0.14 at 0.3).
+- These are CPU runs at 416 with 20 epochs and one frame in 20 of the stairs walks. The GPU runs of
+  #49 at 640, with more epochs and every frame, are still needed before one of them becomes the
+  node's default; until then the node keeps YOLO26n zero-shot.
+
+Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
