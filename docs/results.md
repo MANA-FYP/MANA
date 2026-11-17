@@ -330,18 +330,21 @@ The first three columns are the testing list's 4,074 command clips; on the offic
 So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
 
 **BC-ResNet-8** (`--kws`) was trained by `tools/train_commands.py --tau 8 --epochs 5 --hold-out backward forward follow learn visual` on this laptop's CPU, at about 28 minutes an epoch. The paper trains for 200 epochs on a GPU. Its best accuracy on `validation_list.txt` was 95.9%, after the fifth epoch.
-- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The other 20 words are in its "other word" class.
-- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest that keeps 90% of the clean command clips right, 0.85.
-- "Stop at any": stop acts at any probability, the other nine words at 0.85, as the core obeys a stop at any trust (`on_command`). This was also set on the validation list.
+- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The testing list has 818 clips of them (backward 165, forward 155, follow 172, learn 161, visual 165). The other 20 words are in its "other word" class.
+- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest, in steps of 0.05, that keeps 90% of the clean command clips right. That is 0.85 (3,366 of 3,703, 90.9%; 0.9 keeps 88.9%). `--choose` makes this choice from the validation run's CSVs (`choose_threshold()`).
+- "Stop at any": stop acts at any probability when it is the top class, and the other nine words at 0.85 (`--stop-any`). This was also decided on the validation list, by what it does to stop. At 0.85, stop was missed 14 times in 350 clean and 33 at 10 dB. At any probability it was missed 7 and 11 times, while other words were heard as "stop" 46 and 80 times of 6,278, against 3 and 14. A missed stop is the unsafe case and a stop not asked for the safe one, and the core already obeys a spoken stop at any trust (`on_command`), so stop acts at any probability. `--choose` prints these figures too.
 - The demo's `Spotter` acts at 0.9 by default.
 - CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
 
 ```
 python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --choose datasets/speech_commands/val_kws_0_clean.csv datasets/speech_commands/val_kws_0_snr10.csv
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
 python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
 ```
+
+The tables below were scored from the threshold-0 CSVs at each setting (`rethreshold()`, as `--choose` does). `--threshold 0.85 --stop-any` runs the model at that setting directly. It can differ by a clip whose probability rounds to 0.85 in the CSV.
 
 The settings, on the testing list (stop: 411 clips):
 
@@ -355,7 +358,7 @@ The settings, on the testing list (stop: 411 clips):
 
 0.85 with stop at any, at every noise level (measured on 17 November 2026):
 
-| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 816) | Official set: other words (of 408) | Official set: noise alone (of 408) |
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 818) | Official set: other words (of 408) | Official set: noise alone (of 408) |
 |---|---|---|---|---|---|---|---|
 | clean | 90.6% (3,693) | 0.5% | 8.8% | 3.6% (249) | 7.2% (59) | 3.2% (13) | 0 |
 | noise at 20 dB | 89.4% | 0.8% | 9.8% | 3.7% (258) | 6.8% (56) | 2.9% (12) | 0 |
@@ -376,7 +379,7 @@ The official set's 4,074 command clips give the same within 0.6 points, and its 
 - **The threshold trades commands for false activations.** At its top class BC-ResNet is close to Vosk clean (96.3%, Vosk 97.2%) and holds up better in noise (88.7% right at 0 dB, Vosk 70.2%), but it hears other words as commands more often (14.6%, Vosk 10.8%). At 0.85 it acts on 3.6% of them, and misses 8.8% of the commands clean and 31.8% at 0 dB: a missed command is said again.
 - **Stop, with stop at any:** 0.5% missed clean and 9.0% at 0 dB (Vosk 1.0% and 19.0%), and heard as "go" at most twice in 411 at any level.
 - **"Go" by mistake is rare:** another word started it 29 times in 6,931 clean clips (Vosk 195). The most common false activations were "dog" heard as "down" (27), "learn" as "no" (22), "dog" as "stop" (20) and "two" as "go" (17). A stop not asked for stops the device, the safe side.
-- **Words it never heard in training are taken for commands twice as often** (7.2% against 3.6%). Words outside the dataset are likely to be closer to that rate.
+- **Words it never heard in training are taken for commands about twice as often** as the words it was trained to reject: 7.2% (59 of 818) against 3.1% (190 of 6,113) clean. Words outside the dataset are likely to be closer to the first rate.
 - **Noise alone** woke it once at 5 dB and 3 times at 0 dB (of 408), each time as "stop", and never with less noise.
 - **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
 - **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.

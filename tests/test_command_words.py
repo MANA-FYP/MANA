@@ -92,3 +92,44 @@ def test_the_official_test_set_is_read_by_folder(tmp_path):
     clips = cw.official_clips(tmp_path)
     assert sorted(label for label, _ in clips) == ["_silence_", "_unknown_", "stop"]
     assert cw.outcome("_silence_", [("go", 0.9)]) == "false"
+
+
+def test_a_run_at_threshold_0_is_scored_again_at_any_threshold():
+    rows = [
+        {"label": "go", "heard": "go", "conf": "0.95", "outcome": "right"},
+        {"label": "go", "heard": "go", "conf": "0.85", "outcome": "right"},
+        {"label": "stop", "heard": "stop", "conf": "0.4", "outcome": "right"},
+        {"label": "bed", "heard": "stop", "conf": "0.3", "outcome": "false"},
+        {"label": "cat", "heard": "", "conf": "", "outcome": "quiet"},
+    ]
+    at = cw.rethreshold(rows, 0.85)
+    assert [r["outcome"] for r in at] == ["right", "right", "missed", "quiet", "quiet"]
+    # stop at any: a stop that is the top class acts, for the stop clip and for "bed" alike
+    at = cw.rethreshold(rows, 0.85, stop_any=True)
+    assert [r["outcome"] for r in at] == ["right", "right", "right", "false", "quiet"]
+
+
+def test_the_threshold_is_the_highest_that_keeps_ninety_percent_right():
+    # ten go clips: at 0.85 nine are right (90%), at 0.9 seven
+    confs = ["0.99", "0.98", "0.97", "0.96", "0.95", "0.93", "0.91", "0.88", "0.85", "0.5"]
+    rows = [{"label": "go", "heard": "go", "conf": c, "outcome": "right"} for c in confs]
+    assert cw.choose_threshold(rows) == 0.85  # a clip at exactly 0.85 still counts
+    assert cw.choose_threshold(rows, keep=0.7) == 0.9
+
+
+def test_choose_prints_the_threshold_and_what_stop_at_any_changes(tmp_path, capsys):
+    import csv
+
+    path = tmp_path / "val_kws_0_clean.csv"
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["clip", "label", "heard", "conf", "outcome", "ms"])
+        w.writeheader()
+        for i in range(9):
+            w.writerow({"clip": f"go/{i}.wav", "label": "go", "heard": "go", "conf": "0.95"})
+        w.writerow({"clip": "stop/a.wav", "label": "stop", "heard": "stop", "conf": "0.4"})
+        w.writerow({"clip": "bed/a.wav", "label": "bed", "heard": "stop", "conf": "0.3"})
+    assert cw.main(["--choose", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "threshold 0.95: 9 of 10 command clips right (90.0%)" in out
+    assert "stop at 0.95: 1 of 1 stops missed, 0 heard as go; 0 of 1 other words" in out
+    assert "stop at any: 0 of 1 stops missed, 0 heard as go; 1 of 1 other words" in out
