@@ -186,6 +186,7 @@ function startGps() {
     (p) => send({
       type: "gps", accuracy: p.coords.accuracy, lat: p.coords.latitude, lon: p.coords.longitude,
       speed: p.coords.speed, heading: p.coords.heading,
+      altitude: p.coords.altitude, altitude_accuracy: p.coords.altitudeAccuracy,
     }),
     () => send({ type: "gps", accuracy: null }),
     { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });

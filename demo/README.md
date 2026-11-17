@@ -300,6 +300,35 @@ says "Starting again from here." The track starts at the person's place, tied to
 next GPS fix. The sensors, the core, the link and the way the phone faces are kept, and a stop
 still waiting to be said is still said.
 
+**The indoor screen (`/indoor`).** A second screen beside `/live`, on the same server and the same
+phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
+- **Which floor.** A web page gets no barometer (Chrome has no web API for one), so the floor comes
+  from what the page can read. A lift: the phone, held still, feels the lift speed up and slow down,
+  and the vertical acceleration integrated twice is the height; a lift ends at rest, so the speed
+  left at the end is taken out as drift (a phone tilted on the way). Stairs: the camera's detector
+  (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down within 1.5 m, and each step
+  taken while it still sees them (up to a second after) is a riser (0.17 m); three quarters of a
+  floor's risers is a floor. A walk's first four steps reach the count together, once the walk is
+  confirmed, and still count while the stairs are in view; turning round on the stairs counts the
+  flight so far. Steps out of its sight, past a staircase or along a landing, do not
+  count. The detector misses stairs close up, where they fill the picture (the stairs row in
+  `docs/results.md`), so a climb can come out short: a missed floor shows as "less than a floor",
+  never a floor made up. Motion only measures changes, so the floor is "?" until there is a
+  reason: walking in from outside (GPS good, then lost at the door) sets the ground floor, as an
+  assumption the page states; or the supervisor sets it with one tap. Until then the floors moved
+  since the start are counted. GPS altitude is shown beside it only as a reference: a phone's GPS
+  height is often 10 m or more off indoors.
+- **The newest map.** The satellite layer is Esri World Imagery, whose current release is the
+  newest it has; the map shows the date the picture at that point was taken and by what satellite
+  (`/api/imagery`, from Esri's imagery metadata). For the FAST campus it is 28 Aug 2025, 0.46 m a
+  pixel. Tiles are kept a week, then fetched again.
+- **Wi-Fi.** The laptop's own Wi-Fi signal, read twice a second. Windows gives only the RSSI, in
+  whole dBm, refreshed rarely (it did not change once in 20 s here), which is too coarse to sense
+  people. Wi-Fi sensing needs the channel state (CSI), from hardware such as two ESP32 boards.
+- Tested on synthetic lift rides (up one floor, down two), a bump, walking, a stairs flight of 19
+  steps and a few steps, and a lift taken right after a walk (`tests/test_demo_floors.py`). Not yet
+  measured on real lifts and stairs.
+
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
 fix, otherwise in metres from the start (it says so).
