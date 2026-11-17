@@ -45,6 +45,10 @@ class Link(IntEnum):
     BLUETOOTH = 1
 
 
+class PresenceSource(IntEnum):
+    WIFI_CSI = 0  # a person sensed from a Wi-Fi link's channel state (#194)
+
+
 class Ground(IntEnum):
     FLAT = 0
     RAMP = 1
@@ -92,6 +96,7 @@ SENSOR_NAMES = {
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
+SOMEONE_NEAR = "Someone may be near"  # sensed by Wi-Fi, not seen; then where, if known
 STOPS = ("drop", "obstacle", "lone step", "stairs down")  # the stop branches that hold (#97)
 
 
@@ -141,6 +146,15 @@ class LinkReport:
 
 
 @dataclass(frozen=True)
+class PresenceReport:
+    stamp: float
+    trust: float
+    source: PresenceSource
+    present: bool
+    zone: str = ""
+
+
+@dataclass(frozen=True)
 class Limits:
     min_trust: float = 0.5  # reports below this trust are ignored
     max_age_s: float = 0.5  # reports older than this are ignored
@@ -159,6 +173,7 @@ class Limits:
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
     position_max_age_s: float = 2.5
+    presence_max_age_s: float = 2.5  # Wi-Fi sensing gives a verdict for each second
     clock_back_s: float = 5.0  # a report this much older than the one held: the clock went back
 
 
@@ -256,6 +271,7 @@ class DecisionCore:
         self.motion: MotionReport | None = None
         self.positions: dict[PositionSource, PositionReport] = {}
         self.links: dict[Link, LinkReport] = {}
+        self.presence: dict[PresenceSource, PresenceReport] = {}
         self.automatic = True
         self.stopped_by_user = False
         self.user_mode = Mode.WHEELS
@@ -314,6 +330,9 @@ class DecisionCore:
 
     def on_link(self, report: LinkReport) -> None:
         self._keep(self.links, report.link, report)
+
+    def on_presence(self, report: PresenceReport) -> None:
+        self._keep(self.presence, report.source, report)
 
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
@@ -533,6 +552,20 @@ class DecisionCore:
             " slowing down"
         )
 
+    def _someone_near(self) -> PresenceReport | None:
+        """A person sensed without a camera (Wi-Fi), recently and trusted. It has no distance, so it
+        only slows the device, and only when nothing else does (#194, D15)."""
+        lim = self.limits
+        near = [
+            r for r in self.presence.values() if self._ok(r, lim.presence_max_age_s) and r.present
+        ]
+        return max(near, key=lambda r: r.trust, default=None)
+
+    def _someone_near_reason(self) -> str:
+        r = self._someone_near()
+        where = f" ({r.zone})" if r is not None and r.zone else ""
+        return f"{SOMEONE_NEAR}{where}, slowing down"
+
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
 
@@ -665,6 +698,13 @@ class DecisionCore:
                     lambda: self._slow_reason() is not None,
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                    ),
+                ),
+                branch(  # below every hazard: it has no distance, and it never stops
+                    "someone near",
+                    lambda: self._someone_near() is not None,
+                    lambda: self._set(
+                        Mode.WHEELS, False, lim.slow, self._someone_near_reason(), Priority.WARNING
                     ),
                 ),
                 branch(

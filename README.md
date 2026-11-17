@@ -226,6 +226,7 @@ Each module is its own package, added by its owner in their own pull request:
 | `MotionReport` | M2 → core | Tilt and wheel slip |
 | `PositionReport` | M2 → core | One position source (GPS, lidar map, odometry) and its error |
 | `LinkReport` | M3 → core | One link (Wi-Fi or Bluetooth): signal and missed heartbeats |
+| `PresenceReport` | M3 → core | Whether a person is near, sensed by Wi-Fi (no distance), and in which zone (#194) |
 | `UserCommand` | M4, M5 → core | One voice, touch or button command |
 | `DriveRequest` | core → host | Wheels or tracks, speed limit, stop |
 | `UserMessage` | core → M4, M5 | Text for the user, its priority, and whether to speak it |
@@ -238,7 +239,7 @@ Every report to the core starts with the same two fields: `header` (its stamp is
 ros2 run mana_core core_node
 ```
 
-The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` through a queue that says one message at a time, the most urgent first (`mana_core/messages.py`; the parameter `directions` also says what is ahead, for a smart cane host). The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
+The node listens on `ground`, `obstacle`, `motion`, `position`, `link`, `presence` and `user_command`. It decides 10 times a second, publishes `drive_request` every time, and publishes `user_message` through a queue that says one message at a time, the most urgent first (`mana_core/messages.py`; the parameter `directions` also says what is ahead, for a smart cane host). The decision is a behaviour tree (py_trees) that acts on the first rule that holds:
 
 1. The user said stop: stop until they say go
 2. A drop within 0.5 m or an obstacle within 0.8 m: stop
@@ -252,8 +253,10 @@ The node listens on `ground`, `obstacle`, `motion`, `position`, `link` and `user
 7. On tracks and not yet level for 2 s: stay on tracks
 8. No trusted ground report: slow down
 9. An obstacle, drop, ramp or possible step ahead: slow down
-10. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
-11. Otherwise: wheels, full speed
+10. A person sensed by Wi-Fi in the last 2.5 s: slow down, and never stop for it. Wi-Fi gives a zone, not a distance, so every hazard the cameras or the lidar place comes first (D15).
+11. Fewer of the host's ground sensors have reported than it has, as at start-up: slow down
+12. No link could carry an alert, or neither GPS nor the lidar map has a recent, trusted position: slow down. Only when the host runs a link or position module; these reports come about once a second, so they count as recent for 2.5 s, and odometry alone does not count because it drifts. In manual mode the user drives and the warning waits.
+13. Otherwise: wheels, full speed
 
 The tree branch by branch, with scenarios played through the real core and the branch that decides at each tick, is in [docs/diagrams/behaviour-tree.html](docs/diagrams/behaviour-tree.html) (picture: [behaviour-tree.png](docs/diagrams/behaviour-tree.png); rebuild with `python3 tools/behaviour_tree/build.py`).
 

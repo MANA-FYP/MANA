@@ -335,3 +335,34 @@ stops, `results.md`), with that trade in view rather than as a side effect of ca
 SANPO's frames come from cameras worn by people walking, not the chair's camera. A larger set
 (more sessions with masks) could carry a map over better. The ground classifier's calibration and
 the light factor on dark frames are still open (#38, #89).
+
+## D15. A person sensed by Wi-Fi slows the device and never stops it (#194)
+
+**Chosen:** a new report, `PresenceReport` (source `WIFI_CSI`, `present`, an optional `zone`, and
+the trust every report has), on the topic `presence`. While a recent (2.5 s), trusted one says a
+person is present, the core slows to 30 % with "Someone may be near (zone 1), slowing down". It comes
+after every other slow-down for a hazard, before the start-up, link and position checks: every stop, every change to tracks, manual
+mode and every hazard the cameras or the lidar place come first, and it never stops the device.
+
+**Why.** Wi-Fi sensing (#194, measured in #195's section of `docs/results.md`) tells whether a person is in the room, and in
+which zone, from how they change the channel state of a Wi-Fi link. It needs no light, and it
+found people standing still (in two of the three zones the movement stayed at the empty room's
+level). Radio also passes walls, so it could sense a person the cameras cannot see, round a corner
+or behind a door, but the recordings it was measured on are line of sight. And it gives a
+zone, not a distance or a bearing, so it cannot say whether the person is in the path. A stop on
+it would stop the device in any room with someone in it. Slowing down is what a careful driver
+does on hearing someone near and not seeing them; the cameras and the lidar still stop it once the
+person is in front.
+
+| Option | Problem |
+|---|---|
+| Send it as an `ObstacleReport` with an unknown distance | The obstacle rules stop or slow by distance; with none, it either does nothing or is taken as near and stops the device for a person anywhere in the room |
+| Stop while a person is sensed and not seen | The device would not move in any occupied room; one zone of a room is metres wide |
+| **A report of its own that only slows, below every hazard** | Slows the device in an occupied room even when the person is far from its path; at 30 % that costs time, not safety |
+| Ignore it until it gives a distance | Wastes the one sensor that works through walls and in the dark |
+
+**Limits.** Measured on one office's recordings (two ESP32-C6 boards), not yet on our own boards
+or on a moving device: the boards are fixed in a room, so this is for a device in a known place,
+such as a home or a ward, with its own few minutes of recordings. Sensing from the device itself,
+moving, is not covered. The demo's `/wifi` screen shows the verdict; feeding it to the core is the
+next step there.
