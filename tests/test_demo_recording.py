@@ -106,9 +106,15 @@ def test_a_walk_recorded_by_the_server_plays_back_the_same_into_a_fresh_one(tmp_
         try:
             dash = await client.ws_connect("/ws/dashboard")
             url = str(client.make_url("")).rstrip("/")
-            sent = await recording.play(url, folder, speed=50)
+            decided = []
+            sent = await recording.play(url, folder, speed=50, decisions=decided)
             snap = await track_of(dash, 7)
             assert (await client.get("/frame.jpg")).status == 200  # the frame came through
+            # what the server decided while it played: each once, in order, timed in the walk
+            assert decided and len({d["n"] for d in decided}) == len(decided)
+            times = [d["walk_s"] for d in decided]
+            assert times == sorted(times) and all(0 <= t <= 60 for t in times)
+            assert all(d["text"] for d in decided)
             return sent, snap["position"]["track"]
         finally:
             await client.close()
@@ -120,6 +126,32 @@ def test_a_walk_recorded_by_the_server_plays_back_the_same_into_a_fresh_one(tmp_
     assert sent == 152
     assert played["steps"] == live["steps"] and played["heading"] == live["heading"] == 0
     assert played["y"] == pytest.approx(live["y"], abs=0.01)
+
+
+def test_replay_writes_what_the_server_decided(tmp_path, monkeypatch, capsys):
+    import csv
+
+    from demo import recording, replay
+
+    (tmp_path / "walk").mkdir()
+    (tmp_path / "walk" / "session.jsonl").write_text("")
+
+    async def play(url, folder, speed, decisions):
+        decisions += [
+            {"walk_s": 1.5, "n": 1, "t": 9.0, "kind": "decision", "text": "Level ground"},
+            {"walk_s": 4.25, "n": 2, "kind": "decision", "state": "stop", "why": "Drop ahead",
+             "text": "Drop ahead, stopping"},
+        ]  # fmt: skip
+        return 3
+
+    monkeypatch.setattr(recording, "play", play)
+    out = tmp_path / "decided.csv"
+    assert replay.main([str(tmp_path / "walk"), "--decisions", str(out)]) == 0
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
+    assert [r["walk_s"] for r in rows] == ["1.5", "4.25"]
+    assert rows[1]["state"] == "stop" and rows[0]["state"] == ""  # a missing field is blank
+    assert list(rows[0]) == replay.FIELDS and b"\r" not in out.read_bytes()
+    assert "2 decisions written" in capsys.readouterr().out
 
 
 def test_replay_says_when_there_is_no_recording(tmp_path, capsys):

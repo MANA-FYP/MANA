@@ -149,7 +149,15 @@ A walk can be kept and run through MANA again, the same messages at the same pac
 python -m demo.server --record recordings/stairs-1      # use the phone as usual
 python -m demo.replay recordings/stairs-1               # later, into a running server
 python -m demo.replay recordings/stairs-1 --speed 4     # four times as fast
+python -m demo.replay recordings/stairs-1 --server http://localhost:8001 --decisions stairs-1.csv
 ```
+
+With `--decisions`, what the server decided while the walk played is written to a CSV: the seconds
+into the recording (`walk_s`), the kind, the state (stop, slow, go), the reason and the sentence.
+That is the record to score against hazards marked by hand on the same walk (#89). Play into a
+server of its own (here on port 8001, started with the same models as the walk) at speed 1, so the
+models keep up. Played into a server with no camera models, the 19 s walk `2026-11-09_steps` gave
+11 decisions, from "Ground sensors not available, slowing down" at 0.1 s to GPS back at 2.3 s.
 
 The folder has `session.jsonl`, one line per message from the phone with its time, each camera
 frame as a JPEG in `frames/`, and `meta.json` with when the walk began (UTC), which stays right

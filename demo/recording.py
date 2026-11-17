@@ -82,9 +82,13 @@ def read(folder: Path | str) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-async def play(url: str, folder: Path | str, speed: float = 1.0) -> int:
+async def play(
+    url: str, folder: Path | str, speed: float = 1.0, decisions: list | None = None
+) -> int:
     """Send a recording to a running server's phone socket at its own pace (speed 2 is twice as
-    fast). Returns how many messages were sent."""
+    fast). Returns how many messages were sent. Given a list, each decision the server takes is
+    added to it once, from its dashboard, with walk_s: the seconds into the recording when it
+    came, so it can be set beside marks made by hand on the same recording (#89)."""
     import aiohttp
 
     from demo import access
@@ -103,6 +107,22 @@ async def play(url: str, folder: Path | str, speed: float = 1.0) -> int:
         reader = asyncio.create_task(drain())
         loop = asyncio.get_running_loop()
         start = loop.time()
+        watcher = None
+        if decisions is not None:
+            dash = await session.ws_connect(access.with_key(url + "/ws/dashboard", access.read()))
+
+            async def watch():
+                seen = {d["n"] for d in decisions}
+                async for msg in dash:
+                    snap = msg.json() if msg.type == aiohttp.WSMsgType.TEXT else {}
+                    for d in snap.get("decisions", []) if snap.get("type") == "snapshot" else []:
+                        if d["n"] not in seen:
+                            seen.add(d["n"])
+                            decisions.append(
+                                {"walk_s": round((loop.time() - start) * speed, 2), **d}
+                            )
+
+            watcher = asyncio.create_task(watch())
         for line in lines:
             wait = start + line["t"] / speed - loop.time()
             if wait > 0:
@@ -114,4 +134,7 @@ async def play(url: str, folder: Path | str, speed: float = 1.0) -> int:
             sent += 1
         await asyncio.sleep(1.0)  # the server takes frames one at a time: let it finish
         reader.cancel()
+        if watcher is not None:
+            watcher.cancel()
+            await dash.close()
     return sent
