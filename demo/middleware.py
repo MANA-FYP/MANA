@@ -33,6 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
+from demo.floors import label as floor_label
 from demo.navigation import COMPASS, Fix, Navigator, route_text, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
@@ -302,6 +303,52 @@ WORD_COMMANDS = {
 }
 
 MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
+# which floor, said: "floor two", "second floor", "floor 2", "ground floor", "basement"
+NUMBER_NAMES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten")  # fmt: skip
+FLOOR_WORDS = {
+    "ground": 0, "basement": -1,
+    **{w: i for i, w in enumerate(NUMBER_NAMES)},
+    **{w: i for i, w in enumerate(("first", "second", "third", "fourth", "fifth", "sixth",
+                                   "seventh", "eighth", "ninth", "tenth"), 1)},
+}  # fmt: skip
+
+
+def in_sentence(text: str) -> bool:
+    """Whether a finished phrase has a word that is not a command: then it is a sentence, and of
+    its command words only "stop" acts ("where do I go" must not start the device)."""
+    return any(w not in WORD_COMMANDS for w in re.findall(r"[a-z']+", text.lower()))
+
+
+def floor_in(text: str) -> int | None:
+    """The floor a phrase names, or None. "basement" alone is enough; others need "floor", and
+    the number next to it: "second floor" or "ground floor" before it, "floor two" or "floor 2"
+    after it. So "two people on the first floor" is floor 1 (Waqas, #196)."""
+    words = re.findall(r"[a-z']+|\d+", text.lower())
+    if "basement" in words:
+        return -1
+
+    def value(i: int) -> int | None:
+        if not 0 <= i < len(words):
+            return None
+        w = words[i]
+        if w.isdigit():
+            return int(w) if int(w) <= 60 else None
+        return FLOOR_WORDS.get(w)
+
+    for i, w in enumerate(words):
+        if w != "floor":
+            continue
+        before, after = value(i - 1), value(i + 1)
+        if before is not None and words[i - 1] not in NUMBER_NAMES:  # "second floor", "ground"
+            return before
+        if after is not None:
+            return after
+        if before is not None:  # "two floor"
+            return before
+    return None
+
+
 # a place picked on the supervisor's map, kept with the marks (so it is drawn and saved with them)
 DESTINATION = "destination"
 ARRIVED_M = 3.0  # nearer than this it is reached: about the error of a phone's GPS fix outdoors
@@ -462,6 +509,7 @@ class Middleware:
         # its clock hour
         self._guided: tuple[float, float, float] | None = None
         self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
+        self.floor_said: tuple[int, float] | None = None  # (floor, time) the user last named
         self.detections: list[dict] = []
         self.sounds: dict[str, tuple[float, float]] = {}  # hazard -> (score, when last heard)
         self._seen_candidate: tuple[frozenset | None, int] = (None, 0)
@@ -954,10 +1002,16 @@ class Middleware:
         self._speaking = None
         if not text:
             return
-        found = [COMMAND_TEXT[WORD_COMMANDS[w]] for w in text.split() if w in WORD_COMMANDS]
         # recognisers add punctuation ("Where is the mark?"), so words are letters only; marking is
         # checked as a phrase first, so "mark this place, I will come back" is not a question
         words = re.findall(r"[a-z']+", text)
+        # in a sentence only "stop" acts (the server drops the rest), so only it is written down
+        sentence = in_sentence(text)
+        found = [
+            COMMAND_TEXT[WORD_COMMANDS[w]]
+            for w in words
+            if w in WORD_COMMANDS and (not sentence or WORD_COMMANDS[w] == Command.STOP)
+        ]
         said = " ".join(words)
         if said == "mark" or any(p in said for p in MARK_PHRASES):
             self.mark_place(now)
@@ -968,6 +1022,17 @@ class Middleware:
         elif DESTINATION in words and set(words) & {"where", "way", "find", "how"}:
             self.say_destination(now)
             found.append("Destination")
+        elif (floor := floor_in(text)) is not None:
+            self.floor_said = (floor, now)  # the server's floor tracker takes it on its tick
+            name = (
+                "the ground floor"
+                if floor == 0
+                else f"basement {-floor}"
+                if floor < 0
+                else (f"floor {floor}")
+            )
+            self._decide(now, "floor", f"On {name}.", Priority.INFO)
+            found.append(f"Floor {floor_label(floor)}")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )

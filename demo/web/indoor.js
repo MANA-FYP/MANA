@@ -58,7 +58,7 @@ function drawFloor(f) {
   if (f.outdoors && !f.known) { $("floorWhy").textContent = "Outdoors"; $("floorSub").textContent = "Going in sets the ground floor"; }
   else if (!f.known) {
     $("floorWhy").textContent = "Not known yet";
-    $("floorSub").textContent = (f.moved ? (f.moved > 0 ? "+" : "") + f.moved + " floor" + (Math.abs(f.moved) > 1 ? "s" : "") + " since the start. " : "") + "Set it once, or walk in from outside";
+    $("floorSub").textContent = (f.moved ? (f.moved > 0 ? "+" : "") + f.moved + " floor" + (Math.abs(f.moved) > 1 ? "s" : "") + " since the start. " : "") + "Say “floor two”, tap Set floor, or walk in from outside";
   } else {
     $("floorWhy").textContent = f.label === "G" ? "Ground floor" : (f.label.startsWith("B") ? "Basement " + f.label.slice(1) : "Floor " + f.label);
     $("floorSub").textContent = last ? last.text : "";
