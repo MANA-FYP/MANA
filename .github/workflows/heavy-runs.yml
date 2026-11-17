@@ -51,6 +51,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Keep the pip downloads between runs (PyTorch is large)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-heavy-torch-2.11.0
       - name: Install
         # the versions the BC-ResNet results were made with on the laptop
         run: |
