@@ -1,0 +1,131 @@
+name: Heavy runs
+
+# Long jobs on GitHub's machines instead of a laptop, started by hand: the Actions tab, or
+#   gh workflow run heavy-runs.yml --ref BRANCH -f kind=python -f datasets=speech \
+#     -f assets=models-kws8-r185 -f run="python tools/command_words.py ... --out out"
+# Several can run at once, each on its own machine (4 cores, up to 6 hours).
+# What the command writes to out/ comes back as the artifact heavy-out-RUN_ID:
+#   gh run download RUN_ID -D results
+# The repository is public, so these runs, their logs and their outputs are public too: only
+# public datasets and committed code go in, never recordings of people (docs/datasets.md).
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "python: Python 3.12 with the CPU build of PyTorch. ros: ROS 2 Jazzy with the workspace built (Gazebo included)"
+        type: choice
+        options: [python, ros]
+        default: python
+      run:
+        description: "The command, from the repository root. Write the results to out/"
+        required: true
+        type: string
+      datasets:
+        description: "Datasets to fetch first with tools/fetch_datasets.sh, for example: speech"
+        type: string
+        default: ""
+      assets:
+        description: "A release tag whose files go to assets/ first, for example a model's weights"
+        type: string
+        default: ""
+      timeout:
+        description: "Minutes before the run is stopped (at most 360)"
+        type: number
+        default: 120
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    if: inputs.kind == 'python'
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout }}
+    env:
+      RUN: ${{ inputs.run }}
+      DATASETS: ${{ inputs.datasets }}
+      ASSETS: ${{ inputs.assets }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        # the versions the BC-ResNet results were made with on the laptop
+        run: |
+          pip install numpy aiohttp pillow
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.11.0 torchaudio==2.11.0
+      - name: Keep the datasets between runs
+        if: inputs.datasets != ''
+        uses: actions/cache@v4
+        with:
+          path: datasets
+          key: datasets-${{ inputs.datasets }}-${{ hashFiles('tools/fetch_datasets.sh') }}
+      - name: Fetch the datasets
+        if: inputs.datasets != ''
+        run: tools/fetch_datasets.sh $DATASETS && rm -rf datasets/downloads
+      - name: Fetch the release files
+        if: inputs.assets != ''
+        run: gh release download "$ASSETS" -D assets
+      - name: Run
+        run: |
+          mkdir -p out
+          bash -c "$RUN"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heavy-out-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
+
+  ros:
+    if: inputs.kind == 'ros'
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: ${{ inputs.timeout }}
+    env:
+      RUN: ${{ inputs.run }}
+      DATASETS: ${{ inputs.datasets }}
+      ASSETS: ${{ inputs.assets }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-colcon-common-extensions python3-rosdep procps curl gh
+      - name: Build the workspace
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          rosdep init || true
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+          colcon build
+      - name: Fetch the datasets
+        if: inputs.datasets != ''
+        shell: bash
+        run: tools/fetch_datasets.sh $DATASETS && rm -rf datasets/downloads
+      - name: Fetch the release files
+        if: inputs.assets != ''
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          gh release download "$ASSETS" -D assets
+      - name: Run
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          mkdir -p out
+          bash -c "$RUN"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heavy-out-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
