@@ -489,6 +489,75 @@ python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
 
+Played on 17 November 2026 with `evaluate --world gazebo --compare`, one simulation for each controller and scenario: **MANA met 44 of 44 pass marks and the baseline 32 of 44**, and the baseline went over the drop in `manual_drop` (in manual mode it does not slow down for the drop, so it reaches the edge at full speed and goes over before its stop takes hold; MANA slows down at 0.7 m). One run each is a small sample, and MANA's own score in Gazebo is not always the same: an earlier run of the same code met 41 of 44, because `level` asks for tracks at the start of the run and stops for a step that is not there (#202).
+
+<!-- drives:start (written by mana_sim.drive_summary; do not edit) -->
+### Each drive, and the same drive with the baseline
+
+Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently (for a scenario in which the user speaks at set times, `stop`, the first moment instead, because the stop comes at a different place in each simulation). `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
+
+- **level:** 3.9 s, 4.1 m; 0.0 s on tracks; 0 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing down (0.6 s, at 0.5 m)
+  - mishaps: none
+- **ramp:** 31.1 s, 11.5 m; 0.0 s on tracks; 1 message; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the camera), slowing down (0.3 s, at 0.5 m); Ramp ahead, slowing down (29.4 s, at 1.3 m)
+  - mishaps: none
+- **stairs:** 24.5 s, 6.3 m; 17.6 s on tracks; 9 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.1 s, at 6.0 m)
+  - slow-downs: Possible step ahead, slowing down (20.1 s, at 0.5 m); Drop ahead, slowing down (3.3 s, at 6.0 m)
+  - mishaps: none
+- **curb:** 21.7 s, 5.8 m; 14.0 s on tracks; 6 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.0 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (17.6 s, at 0.5 m); Possible step ahead, slowing down (3.1 s, at 5.5 m)
+  - mishaps: none
+- **stop:** 6.9 s, 4.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Stopped by you (3.1 s, at 2.9 m)
+  - slow-downs: none
+  - mishaps: none
+- **stairs_down:** 38.0 s, 5.3 m; 14.2 s on tracks; 6 messages; 0 takeovers
+  - stops: Stairs down ahead. Say yes to go down on tracks (19.5 s, at 0.9 m); Step ahead, stopping (1.1 s, at 5.1 m)
+  - slow-downs: Drop ahead, slowing down (0.6 s, at 0.7 m); Going down the stairs on tracks (14.7 s, at 1.6 m); Possible step ahead, slowing down (1.2 s, at 5.1 m); Possible step ahead, slowing down (0.3 s, at 5.8 m)
+  - mishaps: none
+- **drop:** 29.9 s, 2.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Drop ahead, stopping (22.8 s, at 2.9 m)
+  - slow-downs: Drop ahead, slowing down (7.1 s, at 0.5 m)
+  - mishaps: none
+- **manual_drop:** 19.9 s, 2.1 m; 0.0 s on tracks; 1 message; 1 takeover
+  - stops: Drop ahead, stopping (18.1 s, at 2.6 m)
+  - slow-downs: Drop ahead, slowing down (0.2 s, at 0.7 m)
+  - mishaps: none
+- **picture:** 19.6 s, 8.6 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Possible step ahead, slowing down (13.6 s, at 0.5 m); Ramp ahead, slowing down (4.1 s, at 7.4 m)
+  - mishaps: none
+- **dark:** 19.9 s, 6.4 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: Obstacle ahead, stopping (11.4 s, at 6.9 m)
+  - slow-downs: Obstacle ahead, slowing down (2.1 s, at 6.0 m)
+  - mishaps: none
+- **imu_lost:** 19.9 s, 6.2 m; 18.4 s on tracks; 6 messages; 0 takeovers
+  - stops: Drop ahead, stopping (0.9 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (15.9 s, at 0.7 m); On tracks until the ground is level (3.1 s, at 5.7 m)
+  - mishaps: none
+
+| Drive | MANA stops | Baseline stops | MANA on tracks | Baseline on tracks | MANA mishaps | Baseline mishaps | First difference |
+|---|---|---|---|---|---|---|---|
+| `level` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `ramp` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs` | 1 (Step ahead, stopping) | 0 | 17.6 s | 26.7 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `curb` | 1 (Step ahead, stopping) | 0 | 14.0 s | 20.6 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.1 s: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Drop ahead, stopping); baseline wheels at 30% (Drop ahead, slowing down) |
+| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 1.9 s: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
+| `picture` | 0 | 0 | 0.0 s | 25.1 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline wheels at 100% (Level ground) |
+| `dark` | 1 (Obstacle ahead, stopping) | 1 (Obstacle ahead, stopping) | 0.0 s | 0.0 s | none | none | 6.9 m: MANA stops (Obstacle ahead, stopping); baseline wheels at 30% (Obstacle ahead, slowing down) |
+| `imu_lost` | 1 (Drop ahead, stopping) | 2 (Drop ahead, stopping) | 18.4 s | 30.4 s | none | none | 0.7 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+
+11 drives.
+<!-- drives:end -->
+
 ## Zero-shot detectors on the SANPO test split (#51, #49)
 
 Measured on 10 November 2026 with `tools/eval_detector.py`, on every SANPO test walk that has
@@ -683,72 +752,3 @@ What follows:
   node's default; until then the node keeps YOLO26n zero-shot.
 
 Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
-
-Played on 17 November 2026 with `evaluate --world gazebo --compare`, one simulation for each controller and scenario: **MANA met 44 of 44 pass marks and the baseline 32 of 44**, and the baseline went over the drop in `manual_drop` (in manual mode it has nothing to stop for the drop). One run each is a small sample, and MANA's own score in Gazebo is not always the same: an earlier run of the same code met 41 of 44, because `level` asks for tracks at the start of the run and stops for a step that is not there (#202).
-
-<!-- drives:start (written by mana_sim.drive_summary; do not edit) -->
-### Each drive, and the same drive with the baseline
-
-Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently (for a scenario in which the user speaks at set times, `stop`, the first moment instead, because the stop comes at a different place in each simulation). `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
-
-- **level:** 3.9 s, 4.1 m; 0.0 s on tracks; 0 messages; 0 takeovers
-  - stops: none
-  - slow-downs: Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing down (0.6 s, at 0.5 m)
-  - mishaps: none
-- **ramp:** 31.1 s, 11.5 m; 0.0 s on tracks; 1 messages; 0 takeovers
-  - stops: none
-  - slow-downs: Waiting for the ground sensors (1 of 2 up: the camera), slowing down (0.3 s, at 0.5 m); Ramp ahead, slowing down (29.4 s, at 1.3 m)
-  - mishaps: none
-- **stairs:** 24.5 s, 6.3 m; 17.6 s on tracks; 9 messages; 0 takeovers
-  - stops: Step ahead, stopping (1.1 s, at 6.0 m)
-  - slow-downs: Possible step ahead, slowing down (20.1 s, at 0.5 m); Drop ahead, slowing down (3.3 s, at 6.0 m)
-  - mishaps: none
-- **curb:** 21.7 s, 5.8 m; 14.0 s on tracks; 6 messages; 0 takeovers
-  - stops: Step ahead, stopping (1.0 s, at 5.5 m)
-  - slow-downs: Possible step ahead, slowing down (17.6 s, at 0.5 m); Possible step ahead, slowing down (3.1 s, at 5.5 m)
-  - mishaps: none
-- **stop:** 6.9 s, 4.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
-  - stops: Stopped by you (3.1 s, at 2.9 m)
-  - slow-downs: none
-  - mishaps: none
-- **stairs_down:** 38.0 s, 5.3 m; 14.2 s on tracks; 6 messages; 0 takeovers
-  - stops: Stairs down ahead. Say yes to go down on tracks (19.5 s, at 0.9 m); Step ahead, stopping (1.1 s, at 5.1 m)
-  - slow-downs: Drop ahead, slowing down (0.6 s, at 0.7 m); Going down the stairs on tracks (14.7 s, at 1.6 m); Possible step ahead, slowing down (1.2 s, at 5.1 m); Possible step ahead, slowing down (0.3 s, at 5.8 m)
-  - mishaps: none
-- **drop:** 29.9 s, 2.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
-  - stops: Drop ahead, stopping (22.8 s, at 2.9 m)
-  - slow-downs: Drop ahead, slowing down (7.1 s, at 0.5 m)
-  - mishaps: none
-- **manual_drop:** 19.9 s, 2.1 m; 0.0 s on tracks; 1 messages; 1 takeovers
-  - stops: Drop ahead, stopping (18.1 s, at 2.6 m)
-  - slow-downs: Drop ahead, slowing down (0.2 s, at 0.7 m)
-  - mishaps: none
-- **picture:** 19.6 s, 8.6 m; 0.0 s on tracks; 3 messages; 0 takeovers
-  - stops: none
-  - slow-downs: Possible step ahead, slowing down (13.6 s, at 0.5 m); Ramp ahead, slowing down (4.1 s, at 7.4 m)
-  - mishaps: none
-- **dark:** 19.9 s, 6.4 m; 0.0 s on tracks; 3 messages; 0 takeovers
-  - stops: Obstacle ahead, stopping (11.4 s, at 6.9 m)
-  - slow-downs: Obstacle ahead, slowing down (2.1 s, at 6.0 m)
-  - mishaps: none
-- **imu_lost:** 19.9 s, 6.2 m; 18.4 s on tracks; 6 messages; 0 takeovers
-  - stops: Drop ahead, stopping (0.9 s, at 5.5 m)
-  - slow-downs: Possible step ahead, slowing down (15.9 s, at 0.7 m); On tracks until the ground is level (3.1 s, at 5.7 m)
-  - mishaps: none
-
-| Drive | MANA stops | Baseline stops | MANA on tracks | Baseline on tracks | MANA mishaps | Baseline mishaps | First difference |
-|---|---|---|---|---|---|---|---|
-| `level` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
-| `ramp` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
-| `stairs` | 1 (Step ahead, stopping) | 0 | 17.6 s | 26.7 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
-| `curb` | 1 (Step ahead, stopping) | 0 | 14.0 s | 20.6 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
-| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | the same everywhere |
-| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.1 s: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
-| `drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Drop ahead, stopping); baseline wheels at 30% (Drop ahead, slowing down) |
-| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 1.9 s: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
-| `picture` | 0 | 0 | 0.0 s | 25.1 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline wheels at 100% (Level ground) |
-| `dark` | 1 (Obstacle ahead, stopping) | 1 (Obstacle ahead, stopping) | 0.0 s | 0.0 s | none | none | 6.9 m: MANA stops (Obstacle ahead, stopping); baseline wheels at 30% (Obstacle ahead, slowing down) |
-| `imu_lost` | 1 (Drop ahead, stopping) | 2 (Drop ahead, stopping) | 18.4 s | 30.4 s | none | none | 0.7 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
-
-11 drives.
-<!-- drives:end -->
