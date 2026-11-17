@@ -96,6 +96,37 @@ def test_a_landing_turn_is_one_flight():
     assert tr.floor == 1 and tr.events[-1]["text"] == "Floor 1: 21 steps up the stairs"
 
 
+def test_the_first_steps_of_a_climb_count_though_they_reach_the_track_together():
+    """A walk's first 4 steps reach the track together, once the walk is confirmed (Navigator);
+    later steps come one by one. Starting from rest at the foot of the stairs, all count."""
+    tr = FloorTracker(floor=0)
+    t = 0.0
+    for _ in range(3):  # seen, taken, but not on the track yet
+        t += 0.6
+        tr.on_stairs(t, +1, 0.8)
+        tr.on_steps(t, 0)
+    t, _ = climb(tr, t, 3, 16)  # the 4th step brings the first 4 at once
+    tr.tick(t + 6.0)
+    assert tr.floor == 1 and tr.events[-1]["text"] == "Floor 1: 19 steps up the stairs"
+
+
+def test_turning_round_on_the_stairs_counts_the_flight_so_far():
+    """Komail (#193): stairs seen the other way replaced the flight, and its steps were lost."""
+    tr = FloorTracker(floor=0)
+    t, steps = climb(tr, 0.0, 0, 8)
+    tr.on_stairs(t + 0.6, -1, 0.8)  # turned round: stairs down
+    assert tr.events[-1]["text"] == "8 steps on stairs: less than a floor"
+    assert tr.view(t + 0.6)["flight_steps"] == 0
+
+
+def test_a_reading_that_is_not_a_number_is_skipped():
+    tr = FloorTracker(floor=0)
+    tr.on_motion(0.0, float("nan"), 0.0, 9.81)  # JSON lets NaN through
+    tr.on_motion(0.01, 0.0, float("inf"), 9.81)
+    ride(tr, 0.02, STILL + UP_ONE + STILL)
+    assert tr.floor == 1
+
+
 def test_a_few_steps_on_stairs_are_not_a_floor_and_hand_corrections_win():
     tr = FloorTracker(floor=0)
     tr.on_stairs(0.0, -1)  # no distance (no tilt): taken as on them

@@ -308,7 +308,9 @@ phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
   left at the end is taken out as drift (a phone tilted on the way). Stairs: the camera's detector
   (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down within 1.5 m, and each step
   taken while it still sees them (up to a second after) is a riser (0.17 m); three quarters of a
-  floor's risers is a floor. Steps out of its sight, past a staircase or along a landing, do not
+  floor's risers is a floor. A walk's first four steps reach the count together, once the walk is
+  confirmed, and still count while the stairs are in view; turning round on the stairs counts the
+  flight so far. Steps out of its sight, past a staircase or along a landing, do not
   count. The detector misses stairs close up, where they fill the picture (the stairs row in
   `docs/results.md`), so a climb can come out short: a missed floor shows as "less than a floor",
   never a floor made up. Motion only measures changes, so the floor is "?" until there is a
