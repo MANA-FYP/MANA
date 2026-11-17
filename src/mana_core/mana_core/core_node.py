@@ -4,7 +4,9 @@ Listens to the module reports (ground, obstacle, motion, position, link and pres
 commands, decides at 10 Hz, and publishes a drive request for the host every tick. Messages for
 the user go through a queue (messages.py): one at a time, the most urgent first. With the parameter
 directions set, the node also says what is ahead, for a host with no chair such as a smart cane.
-The thresholds in Limits are ROS parameters with the same names.
+The thresholds in Limits are ROS parameters with the same names. With the parameter controller set
+to baseline, the if-else baseline (baseline.py) decides instead, so a drive can be repeated and
+compared (#81).
 """
 
 from dataclasses import fields
@@ -15,6 +17,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 
 from mana_core import decision as d
+from mana_core.baseline import BaselineController
 from mana_core.messages import Message, MessageQueue, direction
 from mana_msgs.msg import (
     DriveRequest,
@@ -30,8 +33,8 @@ from mana_msgs.msg import (
 
 
 class CoreNode(Node):
-    def __init__(self):
-        super().__init__("mana_core")
+    def __init__(self, **node_args):  # for example parameter_overrides, in tests
+        super().__init__("mana_core", **node_args)
         limits = d.Limits(
             **{f.name: self.declare_parameter(f.name, f.default).value for f in fields(d.Limits)}
         )
@@ -39,7 +42,15 @@ class CoreNode(Node):
         mount = d.Mount(
             **{f.name: self.declare_parameter(f.name, f.default).value for f in fields(d.Mount)}
         )
-        self.core = d.DecisionCore(limits, mount)
+        # "baseline" puts the if-else baseline in place of the core, for the same drive (#81)
+        controller = self.declare_parameter("controller", "mana").value
+        if controller == "mana":
+            self.core = d.DecisionCore(limits, mount)
+        elif controller == "baseline":
+            self.core = BaselineController(limits)
+        else:
+            raise ValueError(f"controller must be mana or baseline, not {controller!r}")
+        self.controller = controller
         self.last_reason = None
         # what the user hears: one message at a time, the most urgent first (see messages.py)
         self.queue = MessageQueue(
@@ -48,6 +59,9 @@ class CoreNode(Node):
         )
         # step directions ("Steps up ahead, 2 metres.") for a host with no chair, such as a cane
         self.directions = self.declare_parameter("directions", False).value
+        if self.directions and controller == "baseline":
+            self.get_logger().warning("the baseline does not say what is ahead: directions is off")
+            self.directions = False
         self.create_subscription(GroundReport, "ground", self.on_ground, 10)
         self.create_subscription(ObstacleReport, "obstacle", self.on_obstacle, 10)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)

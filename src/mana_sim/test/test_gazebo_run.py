@@ -22,7 +22,7 @@ def test_a_run_not_played_fails_every_mark_with_the_reason():
 
 
 def test_a_failed_run_is_scored_and_does_not_stop_the_others(monkeypatch, tmp_path):
-    def play(name, traces):
+    def play(name, traces, controller="mana"):
         if name == "level":
             raise gr.RunFailed("the runner did not finish in time")
         path = traces / f"{name}.json"
@@ -42,7 +42,9 @@ def test_a_trace_on_disk_is_scored_without_playing_unless_rerun(monkeypatch, tmp
     (tmp_path / "stop.json").write_text(gs.trace_to_json(Trace()))
     played = []
     monkeypatch.setattr(
-        gr, "play", lambda name, traces: played.append(name) or traces / "stop.json"
+        gr,
+        "play",
+        lambda name, traces, controller="mana": played.append(name) or traces / "stop.json",
     )
     gr.results("stop", tmp_path, rerun=False)
     assert played == []
@@ -65,3 +67,23 @@ def test_the_runner_writes_a_trace_for_a_run_and_none_for_a_setup_failure(tmp_pa
             node.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_the_baseline_is_played_into_its_own_folder_and_scored_like_the_core(monkeypatch, tmp_path):
+    played = []
+
+    def play(name, traces, controller="mana"):
+        played.append((name, controller, traces))
+        traces.mkdir(parents=True, exist_ok=True)
+        path = traces / f"{name}.json"
+        path.write_text(gs.trace_to_json(Trace()))
+        return path
+
+    monkeypatch.setattr(gr, "play", play)
+    assert gr.trace_dir(tmp_path) == tmp_path
+    assert gr.trace_dir(tmp_path, "baseline") == tmp_path / "baseline"
+    mana = gr.results("stop", tmp_path)
+    base = gr.results("stop", tmp_path, controller="baseline")
+    assert [m[:2] for m in mana] == [m[:2] for m in base]  # the same marks
+    assert played == [("stop", "mana", tmp_path), ("stop", "baseline", tmp_path / "baseline")]
+    assert (tmp_path / "stop.json").exists() and (tmp_path / "baseline" / "stop.json").exists()

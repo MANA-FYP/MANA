@@ -17,6 +17,7 @@ the server has made its key.
 from __future__ import annotations
 
 import argparse
+import collections
 import re
 import shutil
 import subprocess
@@ -52,18 +53,25 @@ def main(argv=None) -> int:
         return 1
     proc = subprocess.Popen(command(a.cloudflared, a.port), stderr=subprocess.PIPE, text=True)
     found = False
+    last = collections.deque(maxlen=8)  # what it said last, for when it stops with no address
     try:
         for line in proc.stderr:  # read to the end: a full pipe would stall cloudflared
+            last.append(line.rstrip())
             url = None if found else find_url(line)
             if url:
                 found = True
+                print(f"live:      {access.with_key(url + '/live', key)}")
                 print(f"phone:     {access.with_key(url + '/phone', key)}")
                 print(f"dashboard: {access.with_key(url + '/dashboard', key)}")
                 print("Anyone with these addresses can drive the device and see the camera:")
                 print("share them with no one. Ctrl+C ends the tunnel.", flush=True)
             elif " ERR " in line:
                 print(line.rstrip(), flush=True)
-        return proc.wait()
+        code = proc.wait()
+        if not found:
+            print(f"cloudflared stopped (exit {code}) before giving an address. It said last:")
+            print("\n".join(last) or "(nothing)", flush=True)
+        return code
     except KeyboardInterrupt:
         proc.terminate()
         return 0
