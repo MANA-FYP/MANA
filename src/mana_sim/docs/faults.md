@@ -52,7 +52,7 @@ Each switches its fault on at 10 s and off at 30 s (simulation time) and ends.
 | `imu_lost` | the IMU sends nothing | no motion reports; MANA does not rely on tilt |
 
 The scenarios say what to expect in words. Scoring them with pass marks comes with the scenario runner
-(the ten scenarios in Gazebo).
+(the scenarios in Gazebo).
 
 ## Known limits
 

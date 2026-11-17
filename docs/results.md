@@ -173,7 +173,23 @@ What the runs show:
 - **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
 - **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
 
-A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+### The jumps taken out before the EKF
+
+`ekf_global`'s own rejection threshold on the map pose either let a 1 m jump through (5 sigma) or, set tight, refused good poses too. So a small node sits between slam_toolbox and `ekf_global` (`mana_position.lidar_gate`). It compares each map pose with the one before it and with the wheels' move over that time. A difference over 0.5 m is a jump: it is taken off every pose after it, and that correction fades over 60 s, so a lasting change is taken in the end. `ekf_global` then fuses the gated pose with the wheels and the IMU.
+
+| Run | Driven | Map pose: mean / 95th / max | Jumps refused |
+|---|---|---|---|
+| Offline, 2 earlier recorded runs with a jump | | max 1.26 m to 0.59 m, and 1.13 m to 0.33 m | |
+| Offline, 2 earlier recorded runs with no jump | | max unchanged (0.35, 0.40 m) | |
+| Gazebo, map C: slam_toolbox alone, two laps | 88.9 m | 0.18 / 0.42 / 0.62 m | |
+| Gazebo, map C: the EKF with the gated lidar, two laps | 88.8 m | 0.17 / 0.37 / 0.60 m | 1 (1.47 m) |
+| Gazebo, map D: slam_toolbox alone, two laps | 88.9 m | 0.22 / 0.81 / 0.90 m | |
+| Gazebo, map D: the EKF with the gated lidar, two laps | 88.9 m | 0.18 / 0.39 / 0.58 m | 0 |
+
+The Gazebo rows are from `tools/indoor_localisation.sh` (plain) and `--ekf` (the gate and `ekf_global`, slam_toolbox's map > odom off, the wheels the only odom > base_link), measured on 16 November 2026 on two new maps, each driven both ways, after the loop driver's start-pose fix. The plain runs (means 0.18 and 0.22 m) sit with the remeasured ones above (0.19 to 0.23 m).
+- **A jump taken out in Gazebo.** In the EKF run on map C, slam_toolbox jumped 1.47 m and the gate took it out: the EKF's pose was never more than 0.60 m off. In the plain run on map D, slam_toolbox jumped on the south corridor (its worst, 0.90 m, at (14.4, 1.6)); the EKF run on that map had no jump, so these runs do not show the same jump both ways.
+- **No worse where nothing jumped.** On both maps the EKF's mean and 95th were at or under slam_toolbox's alone (0.17 and 0.18 m mean, 0.37 and 0.39 m 95th). Wheel odometry ended 1.54 and 1.55 m off; the EKF's pose ended 0.13 and 0.03 m off.
+- The gate's settings (0.5 m, 60 s) were tuned on the four offline runs, recorded before the start-pose fix; they were not tuned again. A jump back now clears the offset (Waqas, #181): before, a 1.2 m jump undone 15 s later left 0.26 m the other way.
 
 ## Camera depth and stairs on real phone frames (#131)
 
@@ -273,6 +289,46 @@ with `detector:=true`, and the detector's `ObstacleReport`s on `/obstacle` are c
 - Before #170 the detector found **nothing** here. It was given the camera's RGB array, which
   Ultralytics reads as BGR, and on the 5 m frame it found no person even at confidence 0.3.
 
+## Offline command words on Speech Commands (#46)
+
+`tools/command_words.py` tests a recogniser on the 11,005 test clips of Speech Commands v2 (`testing_list.txt`). Each clip is 1 s of one spoken word.
+- 4,074 clips are one of the ten command words. Each is right, wrong (another command word) or missed (no command word).
+- The other 6,931 are the dataset's 25 other words (bed, bird, two, nine, ...). If one of these gives a command word, that is a false activation: the device would act on a word not said to it.
+- Every clip is tested clean, and with the dataset's own background noise mixed in at 20, 10, 5 and 0 dB below the speech (white and pink noise, a tap, an exercise bike, dishes, a cat), with a fixed seed. The noise comes from the last quarter of each noise file, which `tools/train_commands.py` never mixes into training, so a trained model is not tested on noise it learnt (Waqas, #185).
+- The same is run on the authors' separate test set (`speech_commands_test_set_v0.02`, `--official`): 4,074 clips of the ten words, 408 of other words and 408 of background noise alone (`_silence_`), which measure false activations when nobody speaks, as when the device listens all day.
+- The clips are aligned 1 s recordings with the word in them. The demo's `Spotter` listens every 0.25 s to a running stream, which these numbers do not cover.
+
+**Vosk** (`vosk-model-small-en-us-0.15`) is the demo's offline recogniser (`--vosk-model`), limited to the ten words plus "[unk]". Each clip is given as the demo gives sound (16 kHz, 16-bit), with 0.3 s of silence after it. Measured on 17 November 2026 (the noisy rows are new: their noise is now from the held-out quarter):
+
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which "go" | Official set: other words (of 408) | Official set: noise alone (of 408) |
+|---|---|---|---|---|---|---|---|
+| clean | 97.2% (3,960) | 0.9% | 1.9% | 10.8% (750) | 195 | 10.8% (44) | 0 |
+| noise at 20 dB | 95.0% | 2.2% | 2.7% | 13.0% (903) | 198 | 13.0% (53) | 0 |
+| noise at 10 dB | 91.1% | 3.6% | 5.3% | 16.9% (1,172) | 255 | 17.2% (70) | 0 |
+| noise at 5 dB | 85.5% | 5.0% | 9.5% | 19.0% (1,316) | 268 | 15.2% (62) | 0 |
+| noise at 0 dB | 70.2% | 6.1% | 23.7% | 14.9% (1,035) | 151 | 14.0% (57) | 0 |
+
+The first three columns are the testing list's 4,074 command clips; on the official set's 4,074 they differ by at most 0.4 points (97.3% right clean, 70.6% at 0 dB).
+
+**Stop**, the word that has to work (411 clips; the official set gives the same within 0.9 points):
+
+| Sound | Stop missed | Stop heard as "go" | Stop heard as another word | "Go" heard as "stop" |
+|---|---|---|---|---|
+| clean | 1.0% (4) | 0 | 0.2% (1) | 0 |
+| noise at 20 dB | 1.7% (7) | 0.2% (1) | 1.7% (7) | 0 |
+| noise at 10 dB | 2.4% (10) | 1.0% (4) | 3.2% (13) | 1 |
+| noise at 5 dB | 6.6% (27) | 0.7% (3) | 6.6% (27) | 2 |
+| noise at 0 dB | 19.0% (78) | 0.7% (3) | 9.7% (40) | 3 |
+
+- **The ten words are recognised well when clean** (97.2%), but not to the 95% of #46 at 10 dB of noise or worse.
+- **Noise alone never woke it:** none of the 408 noise clips of the official set gave a command word, at any level. The false activations come from speech, other words.
+- **A missed stop grows with noise** (1% clean, 19% at 0 dB), and a stop heard as "go" stayed at 1.5% or under on both sets (none clean). The core's own stops (obstacles, drops) and the stop button do not depend on the voice.
+- **Other words are often heard as commands.** A grammar of only ten words has to fit everything into them. On the clean clips, the most common were "nine" heard as "no" (122), "one" as "on" (82), "two" as "go" (79) and "dog" as "down" (66). "Go" starts the device, so this matters most.
+- **A confidence threshold does not fix it.** Vosk gave a confidence of 1.0 to 4,168 of the 4,746 clean clips on which it heard a word. Acting only on 0.9 or more keeps 94.8% right and still leaves 4.5% false activations.
+- **Time:** a median of 46 to 100 ms per clip on this laptop's CPU.
+
+So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
+
 ## Does the detector's confidence mean what the core's trust assumes? (#87)
 
 Measured on 9 November 2026 with `tools/calibrate_detector.py`: `yolo26n.pt` at 416, as the ROS
@@ -339,11 +395,11 @@ Whether the tests would catch a broken rule: mutmut changes the code one small s
 <!-- gazebo results: made by python3 -m mana_sim.gazebo_results, do not edit by hand -->
 ## Scenarios in Gazebo (#16)
 
-The ten original scripted scenarios of `mana_core.scenarios`, played in Gazebo with the same pass
+Eleven scripted scenarios of `mana_core.scenarios`, played in Gazebo with the same pass
 marks (the same functions and limits; only the distances in them are the ones of the Gazebo route).
 Generated by `python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md` from
 the traces of `ros2 run mana_core evaluate --world gazebo`.
-**39 of 39 pass marks are met in Gazebo.**
+**43 of 44 pass marks are met in Gazebo.**
 
 ### How a scenario is played
 
@@ -376,47 +432,57 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 |---|---|---|---|---|---|
 | `level` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `level` | Full speed on wheels | PASS | PASS | slowest 100% of top speed |  |
-| `level` | Reaches the end of the route | PASS | PASS | reached 4.56 of 4.5 m |  |
+| `level` | Reaches the end of the route | PASS | PASS | reached 4.59 of 4.5 m |  |
 | `level` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `ramp` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `ramp` | Slower on the ramp, on wheels | PASS | PASS | at most 30% of top speed on the ramp |  |
 | `ramp` | Reaches the end of the route | PASS | PASS | reached 12.02 of 12 m |  |
 | `ramp` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.96 m before the first step |  |
-| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.80 m |  |
-| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.81 of 6.8 m |  |
+| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.97 m before the first step |  |
+| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.79 m |  |
+| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.80 of 6.8 m |  |
 | `stairs` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.91 m before the first step |  |
-| `curb` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 6.02 m |  |
-| `curb` | Reaches the end of the route | PASS | PASS | reached 6.23 of 6.2 m |  |
+| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.93 m before the first step |  |
+| `curb` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 6.00 m |  |
+| `curb` | Reaches the end of the route | PASS | PASS | reached 6.21 of 6.2 m |  |
 | `curb` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `stop` | Stop acted on within 1 s | PASS | PASS | stopped 0.20 s after the command |  |
 | `stop` | Stays stopped until the user says go | PASS | PASS | held the stop |  |
 | `stop` | Moving again within 1 s of go | PASS | PASS | moving 0.20 s after go |  |
-| `stop` | Says "Stopped by you" | PASS | PASS | at 2.1 s |  |
+| `stop` | Says "Stopped by you" | PASS | PASS | at 2.2 s |  |
 | `stop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `drop` | Stops before the drop | PASS | PASS | stopped 0.58 m before the drop, after rolling 0.03 m |  |
-| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.7 s |  |
+| `stairs_down` | Says "Stairs down ahead. Say yes to go down on tracks" | PASS | PASS | at 0.9 s |  |
+| `stairs_down` | Waits before the stairs until the user says YES | PASS | PASS | 1.58 m before the stairs until YES |  |
+| `stairs_down` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.14 m |  |
+| `stairs_down` | Reaches the end of the route | PASS | PASS | reached 6.01 of 6 m |  |
+| `stairs_down` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
+| `drop` | Stops before the drop | PASS | PASS | stopped 0.60 m before the drop, after rolling 0.01 m |  |
+| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.5 s |  |
 | `drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `manual_drop` | Follows the user in manual mode | PASS | PASS | manual from 0.3 s |  |
-| `manual_drop` | Stops before the drop | PASS | PASS | stopped 0.81 m before the drop, after rolling 0.22 m |  |
+| `manual_drop` | Follows the user in manual mode | PASS | PASS | manual from 0.2 s |  |
+| `manual_drop` | Stops before the drop | PASS | PASS | stopped 0.88 m before the drop, after rolling 0.25 m |  |
 | `manual_drop` | Says "Drop ahead, stopping" | PASS | PASS | at 2.0 s |  |
 | `manual_drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `picture` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `picture` | Slower on the way to the picture, on wheels | PASS | PASS | at most 30% of top speed on the way to the picture |  |
 | `picture` | Reaches the end of the route | PASS | PASS | reached 9.03 of 9 m |  |
 | `picture` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `dark` | Stops before the person | PASS | PASS | stopped 0.92 m before the person, after rolling 0.03 m |  |
-| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 7.5 s |  |
+| `dark` | Stops before the person | PASS | PASS | stopped 0.91 m before the person, after rolling 0.01 m |  |
+| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 6.8 s |  |
 | `dark` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.97 m before the first step |  |
+| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.93 m before the first step |  |
 | `imu_lost` | Stays on tracks while the tilt cannot be checked | PASS | PASS | stayed on tracks |  |
-| `imu_lost` | Shows "On tracks until the ground is level" | PASS | PASS | at 18.2 s |  |
+| `imu_lost` | Shows "On tracks until the ground is level" | PASS | FAIL | not told | #171 |
 | `imu_lost` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 
 What is known about the missed marks:
 
-- none
+- **Shows "On tracks until the ground is level" (#171):** in `imu_lost` the IMU goes quiet during
+  the climb. When it is missed, the chair reached the top with no tilt to judge the ground by, the
+  3D camera read the edge as stairs down, and the core asked about going down ("Say yes to go down
+  on tracks") and, with no yes, stopped at the edge ("Drop ahead, stopping"), so the message about
+  level ground never came. Stopping is the safe outcome; the mark is about the message. The same
+  scenario has met this mark in other runs.
 
 ### The routes
 
@@ -427,6 +493,7 @@ What is known about the missed marks:
 | `stairs` | 18.2 m | 25 m | 3 steps of 17 cm in 0.66 m; the run ends 1 m before the stairs down |
 | `curb` | 27 m | 33.2 m | the 12 cm curb is the edge of a 3 m platform; the end is 0.8 m before its end |
 | `stop` | -1 m | 8 m | same marks, same limits |
+| `stairs_down` | 23.5 m | 29.5 m | from the top of the stairs up (51 cm): 3 steps down of 17 cm in 0.66 m; the user says yes at 20 s |
 | `drop` | 34.5 m | 38 m | the drop is at 38 m, 4 m after the curb; a drop is 1 m deep |
 | `manual_drop` | 34.5 m | 38 m | in Gazebo nobody drives in manual mode: the speed stays at the last limit |
 | `picture` | -1 m | 8 m | the picture is only in what the camera stand-in reports; nothing is in the world |
@@ -441,7 +508,7 @@ stairs down (26 m) and the drop (38 m) are never driven over. A drop is 1 m deep
 
 ```bash
 colcon build && source install/setup.bash
-ros2 run mana_core evaluate --world gazebo               # all ten (about 20 minutes)
+ros2 run mana_core evaluate --world gazebo               # all eleven
 ros2 run mana_core evaluate --world gazebo stairs curb   # some of them
 ros2 run mana_core evaluate --world gazebo --rerun       # play again, also those with a trace
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
@@ -593,3 +660,52 @@ yolo detect train data=datasets/sanpo-stairs-yolo/data.yaml model=yolo26n.pt img
 python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
     --weights runs/detect/train/weights/best.pt   # train2, train3 ... if train already exists
 ```
+
+### YOLO26s against YOLOv8s, the same CPU run (#49)
+
+#49 compares YOLO26s with YOLOv8s trained the same way. Both were fine-tuned exactly as the
+YOLO26n above (same 1,166 training frames, 20 epochs, image size 416, batch 16, seed 0, the
+laptop CPU), from their COCO weights, and scored on the same 2,331 test frames. Training took
+168 minutes for YOLO26s and 126 for YOLOv8s. Near objects:
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned (416, 53 ms) | pedestrian | 2,993 | 0.80 | 0.84 | 0.77 | 0.89 | 0.72 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.62 |
+| | stairs | 37 | 0.22 | 0.15 | 0.24 | 0.31 | 0.24 |
+| | opening-door | 175 | 0.04 | 0.14 | 0.05 | 0.27 | 0.02 |
+| | pole | 1,942 | 0.14 | 0.36 | 0.14 | 0.47 | 0.07 |
+| YOLOv8s fine-tuned (416, 48 ms) | pedestrian | 2,993 | 0.77 | 0.87 | 0.72 | 0.92 | 0.67 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.64 |
+| | stairs | 37 | 0.20 | 0.18 | 0.27 | 0.28 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.14 | 0.03 | 0.38 | 0.03 |
+| | pole | 1,942 | 0.12 | 0.36 | 0.11 | 0.49 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 9 of the 65 test frames with stairs and YOLOv8s in
+10, both in 2 of the 6 walks (YOLO26n: 7 frames, 2 walks; YOLOE-26s: 1 frame, 1 walk).
+
+What follows:
+
+- **The two small models are close.** YOLO26s is ahead on people (AP50 0.80 against 0.77, recall
+  at 0.5 0.72 against 0.67, at 0.89 against 0.92 precision), and they tie on vehicles (AP50 0.74).
+  YOLOv8s was 5 ms a frame faster here. With one seed and 20 epochs each, a gap of 0.02 to 0.03 in
+  AP50 is within what a second run could change, so this does not settle the choice.
+- **Against the nano model and the demo's zero-shot model.** Both small models are ahead of the
+  fine-tuned YOLO26n (35 ms) on vehicles and in people's recall at 0.5, at a little less
+  precision: for YOLO26s, people at 0.5 go from 0.63 to 0.72 and vehicles from 0.56 to 0.62
+  (YOLOv8s ties it on people AP50, 0.77). Against YOLOE-26s zero-shot (82 ms, at image size
+  480), both are far ahead on vehicles (0.62 and 0.64 against 0.37 at 0.5). On people only
+  YOLO26s keeps up (0.72 against 0.71 at 0.5, 0.77 against 0.78 at 0.3); YOLOv8s is behind (0.67
+  at 0.5, AP50 0.77 against 0.78). YOLO26s takes about two thirds of YOLOE-26s's time, though
+  that one ran at 480, not 416.
+- **Stairs improve, but not near the target.** AP50 0.20 to 0.22 against 0.14 for the nano model,
+  and stairs precision at 0.3 rises from 0.06 to 0.15 (YOLO26s) and 0.18 (YOLOv8s). That is still
+  a quarter of the near staircases at 0.3, against the 0.85 target, and most stairs boxes are
+  wrong. The 37 near staircases of the test split are also too few to tell these models apart on
+  stairs.
+- **Doors and poles stay low** for both (door recall 0.03 to 0.05, pole 0.11 to 0.14 at 0.3).
+- These are CPU runs at 416 with 20 epochs and one frame in 20 of the stairs walks. The GPU runs of
+  #49 at 640, with more epochs and every frame, are still needed before one of them becomes the
+  node's default; until then the node keeps YOLO26n zero-shot.
+
+Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.

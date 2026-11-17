@@ -1,6 +1,6 @@
 """The scripted scenarios of mana_core, played on the Gazebo route with the same pass marks.
 
-mana_core.scenarios has 1-D routes and marks. Here each of the ten original scenarios gets a
+mana_core.scenarios has 1-D routes and marks. Here each of eleven scripted scenarios gets a
 start and an end on the route of worlds/mana_route.sdf, the objects it needs, and what is
 switched when. Every mark is the same function with the same limit as in the scripted scenario
 (`no_tracks`, `tracks_before`, `slower_on`, `stops_before` ...); only the distances in them are the
@@ -23,7 +23,11 @@ from mana_core.world import Fault, Obstacle, Route, Stretch
 from mana_core import scenarios as sc
 
 # the hazards of the route, metres along it (worlds/mana_route.sdf)
-STEP_ZONES = (("stairs", 22.0, 22.7), ("curb", 31.0, 31.3))  # on wheels here is a mishap
+STEP_ZONES = (  # on wheels here is a mishap
+    ("stairs", 22.0, 22.7),
+    ("stairs down", 26.0, 26.7),
+    ("curb", 31.0, 31.3),
+)
 DROP_X = 38.0
 FELL_Z = -0.3  # the chassis this low: it went over the drop
 NOT_PLAYED = "run not played: "  # what the runner logs when there is no run to score
@@ -86,6 +90,7 @@ class GazeboRun:
     faults: tuple[FaultStep, ...] = ()
     says: tuple[Say, ...] = ()
     note: str = ""  # how the route differs from the scripted one
+    start_z: float = 0.0  # the ground's height where the chair starts (the top of the stairs: 0.51)
 
     @property
     def length_m(self) -> float:
@@ -124,13 +129,16 @@ class GazeboRun:
         )
 
 
-# ---- the ten scenarios on the route
+# ---- the scenarios on the route
 
 PERSON = Box("person", 7.0, (0.4, 0.6, 1.7))
 PERSON_AT = PERSON.face_x + 1.0  # its face, from a start at -1 m
 STAIRS_AT = 3.8  # the stairs, 22 m along the route, from a start at 18.2 m (the ramp ends at 18 m)
 STAIRS_TOP = 4.5  # the top of the third step
 CAM_STAIRS = Stretch(STAIRS_AT, STAIRS_TOP, Ground.STAIRS_UP, pitch_rad=0.55, height_m=0.17)
+DOWN_AT = 2.5  # the stairs down, 26 m along the route, from a start on the top at 23.5 m
+DOWN_END = 3.16  # the foot of the third step
+CAM_DOWN = Stretch(DOWN_AT, DOWN_END, Ground.STAIRS_DOWN, pitch_rad=-0.55, height_m=0.17)
 
 RUNS = {
     r.scripted: r
@@ -184,6 +192,23 @@ RUNS = {
                 sc.moves_after_go(),
                 sc.tells("Stopped by you"),
             ),
+        ),
+        GazeboRun(
+            "stairs_down",
+            start_x=23.5,
+            start_z=0.51,
+            end_x=29.5,
+            camera=Route(6.0, (CAM_DOWN,)),
+            duration_s=90.0,
+            says=(Say(20.0, Command.YES),),
+            marks=(
+                sc.tells(sc.ASK_DOWN),
+                sc.waits_before(DOWN_AT, Command.YES, "stairs"),
+                sc.wheels_after(DOWN_END + 1.2),
+                sc.reaches_end(6.0),
+            ),
+            note="from the top of the stairs up (51 cm): 3 steps down of 17 cm in 0.66 m; "
+            "the user says yes at 20 s",
         ),
         GazeboRun(
             "drop",
@@ -289,7 +314,7 @@ def world_for(sdf: str, run: GazeboRun) -> str:
     marker = "<pose>1 0 0.38 0 0 0</pose>"
     if sdf.count(marker) != 1:
         raise ValueError("expected one chair pose in the world file")
-    out = sdf.replace(marker, f"<pose>{run.start_x:g} 0 0.38 0 0 0</pose>")
+    out = sdf.replace(marker, f"<pose>{run.start_x:g} 0 {0.38 + run.start_z:g} 0 0 0</pose>")
     boxes = "".join(_box_sdf(b) for b in run.boxes)
     if boxes:
         out = out.replace("  </world>", boxes + "  </world>")
