@@ -119,3 +119,47 @@ def test_a_cane_host_is_told_what_is_ahead():
 def test_a_chair_host_gets_no_step_directions_by_default():
     told = steps_ahead_messages([])
     assert told and not any(text.startswith("Steps up ahead") for text in told)
+
+
+def mode_after_one_source_sees_stairs(args):
+    """Run the node a while with only the camera reporting stairs 1.5 m ahead; its last mode."""
+    rclpy.init()
+    core, probe = CoreNode(parameter_overrides=args), rclpy.create_node("probe")
+    drives = []
+    probe.create_subscription(DriveRequest, "drive_request", drives.append, 10)
+    ground = probe.create_publisher(GroundReport, "ground", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    end = time.monotonic() + 3.0
+    while time.monotonic() < end:
+        step = GroundReport(
+            source=GroundReport.CAMERA, ground=GroundReport.STAIRS_UP, trust=0.9, distance_m=1.5
+        )
+        step.header.stamp = core.get_clock().now().to_msg()
+        ground.publish(step)
+        executor.spin_once(timeout_sec=0.05)
+    for node in (core, probe):
+        node.destroy_node()
+    rclpy.shutdown()
+    return drives[-1].mode
+
+
+def test_the_baseline_takes_one_source_for_tracks_and_the_core_wants_two():
+    from mana_core.decision import Mode
+    from rclpy.parameter import Parameter
+
+    baseline = [Parameter("controller", value="baseline")]
+    assert mode_after_one_source_sees_stairs(baseline) == int(Mode.TRACKS)
+    assert mode_after_one_source_sees_stairs([]) == int(Mode.WHEELS)
+
+
+def test_an_unknown_controller_is_refused():
+    from rclpy.parameter import Parameter
+
+    rclpy.init()
+    try:
+        with pytest.raises(ValueError, match="mana or baseline"):
+            CoreNode(parameter_overrides=[Parameter("controller", value="magic")])
+    finally:
+        rclpy.shutdown()
