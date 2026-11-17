@@ -9,7 +9,7 @@ pass mark. tests/test_scenarios.py runs it in CI; from a shell:
 It prints one line per pass mark and exits with 1 if any of them fails. --compare prints the pass
 marks each controller met and exits with 1 only if MANA misses one.
 
---world gazebo plays the original ten scenarios in Gazebo (mana_sim, a built and sourced workspace),
+--world gazebo plays eleven of the scenarios in Gazebo (mana_sim, a built and sourced workspace),
 one simulation each, and scores what the chair did with the same pass marks. The traces are kept in
 --traces DIR (default gazebo_traces); a scenario with a trace there is not played again unless
 --rerun is given.
