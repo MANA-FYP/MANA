@@ -32,19 +32,29 @@ def main(argv=None) -> int:
     if not (Path(a.folder) / "session.jsonl").exists():
         print(f"no recording in {a.folder}", file=sys.stderr)
         return 2
-    decisions = [] if a.decisions else None
+    out = None
+    if a.decisions:
+        try:  # before the walk plays: a folder that is not there fails now, not after it
+            out = open(a.decisions, "w", newline="", encoding="utf-8")  # noqa: SIM115
+        except OSError as e:
+            print(f"cannot write {a.decisions}: {e}", file=sys.stderr)
+            return 2
+    decisions = [] if out else None
     try:
         sent = asyncio.run(recording.play(a.server, a.folder, a.speed, decisions))
     except OSError as e:  # aiohttp's connection errors are OSErrors
         print(f"cannot reach the server at {a.server}: {e}", file=sys.stderr)
         return 1
+    finally:  # what was decided until then is kept, even when the walk is cut short
+        if out:
+            with out:
+                w = csv.DictWriter(
+                    out, FIELDS, extrasaction="ignore", restval="", lineterminator="\n"
+                )
+                w.writeheader()
+                w.writerows(decisions)
+            print(f"{len(decisions)} decisions written to {a.decisions}")
     print(f"{sent} messages played from {a.folder}")
-    if decisions is not None:
-        with open(a.decisions, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, FIELDS, extrasaction="ignore", restval="", lineterminator="\n")
-            w.writeheader()
-            w.writerows(decisions)
-        print(f"{len(decisions)} decisions written to {a.decisions}")
     return 0
 
 

@@ -156,8 +156,11 @@ With `--decisions`, what the server decided while the walk played is written to 
 into the recording (`walk_s`), the kind, the state (stop, slow, go), the reason and the sentence.
 That is the record to score against hazards marked by hand on the same walk (#89). Play into a
 server of its own (here on port 8001, started with the same models as the walk) at speed 1, so the
-models keep up. Played into a server with no camera models, the 19 s walk `2026-11-09_steps` gave
-11 decisions, from "Ground sensors not available, slowing down" at 0.1 s to GPS back at 2.3 s.
+models keep up. Decisions the server took before the replay began are left out, and if the walk is
+cut short the decisions so far are still written. `walk_s` is when the dashboard showed the
+decision, so it can come one server tick (0.1 s) or more after the server took it. Played
+into a server with no camera models (`--no-detector`), the 19 s walk `2026-11-09_steps` gave 8
+decisions, from "Wi-Fi is available" at 0.1 s to "GPS is available" at 3.9 s.
 
 The folder has `session.jsonl`, one line per message from the phone with its time, each camera
 frame as a JPEG in `frames/`, and `meta.json` with when the walk began (UTC), which stays right

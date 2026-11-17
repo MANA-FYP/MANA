@@ -115,6 +115,10 @@ def test_a_walk_recorded_by_the_server_plays_back_the_same_into_a_fresh_one(tmp_
             times = [d["walk_s"] for d in decided]
             assert times == sorted(times) and all(0 <= t <= 60 for t in times)
             assert all(d["text"] for d in decided)
+            # played again into the same server: the first walk's decisions are not the second's
+            again = []
+            await recording.play(url, folder, speed=50, decisions=again)
+            assert not {d["n"] for d in again} & {d["n"] for d in decided}
             return sent, snap["position"]["track"]
         finally:
             await client.close()
@@ -152,6 +156,30 @@ def test_replay_writes_what_the_server_decided(tmp_path, monkeypatch, capsys):
     assert rows[1]["state"] == "stop" and rows[0]["state"] == ""  # a missing field is blank
     assert list(rows[0]) == replay.FIELDS and b"\r" not in out.read_bytes()
     assert "2 decisions written" in capsys.readouterr().out
+
+
+def test_replay_keeps_the_decisions_when_the_walk_is_cut_short(tmp_path, monkeypatch, capsys):
+    import csv
+
+    from demo import recording, replay
+
+    (tmp_path / "walk").mkdir()
+    (tmp_path / "walk" / "session.jsonl").write_text("")
+    played = []
+
+    async def play(url, folder, speed, decisions):
+        played.append(folder)
+        decisions.append({"walk_s": 2.0, "n": 7, "kind": "decision", "text": "Level ground"})
+        raise ConnectionResetError("the server went away")
+
+    monkeypatch.setattr(recording, "play", play)
+    # a folder that is not there is refused before anything plays
+    missing = tmp_path / "no" / "decided.csv"
+    assert replay.main([str(tmp_path / "walk"), "--decisions", str(missing)]) == 2
+    assert not played and "cannot write" in capsys.readouterr().err
+    out = tmp_path / "decided.csv"
+    assert replay.main([str(tmp_path / "walk"), "--decisions", str(out)]) == 1
+    assert [r["n"] for r in csv.DictReader(out.open(encoding="utf-8"))] == ["7"]
 
 
 def test_replay_says_when_there_is_no_recording(tmp_path, capsys):

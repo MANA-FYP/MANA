@@ -82,6 +82,24 @@ def read(folder: Path | str) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+async def decided_so_far(dash, wait_s: float = 5.0) -> set[int]:
+    """The numbers of the decisions in a dashboard's first snapshot, the ones taken before."""
+    import aiohttp
+
+    end = asyncio.get_running_loop().time() + wait_s
+    while (left := end - asyncio.get_running_loop().time()) > 0:
+        try:
+            msg = await asyncio.wait_for(dash.receive(), left)
+        except TimeoutError:
+            break
+        if msg.type != aiohttp.WSMsgType.TEXT:
+            break
+        snap = msg.json()
+        if snap.get("type") == "snapshot":
+            return {d["n"] for d in snap.get("decisions", [])}
+    return set()
+
+
 async def play(
     url: str, folder: Path | str, speed: float = 1.0, decisions: list | None = None
 ) -> int:
@@ -106,13 +124,14 @@ async def play(
 
         reader = asyncio.create_task(drain())
         loop = asyncio.get_running_loop()
-        start = loop.time()
         watcher = None
         if decisions is not None:
             dash = await session.ws_connect(access.with_key(url + "/ws/dashboard", access.read()))
+            # what the server decided before the walk (its first snapshot carries the last 30)
+            # is not the walk's: seen now, so it is never written down as happening in it
+            seen = {d["n"] for d in decisions} | await decided_so_far(dash)
 
             async def watch():
-                seen = {d["n"] for d in decisions}
                 async for msg in dash:
                     snap = msg.json() if msg.type == aiohttp.WSMsgType.TEXT else {}
                     for d in snap.get("decisions", []) if snap.get("type") == "snapshot" else []:
@@ -123,6 +142,7 @@ async def play(
                             )
 
             watcher = asyncio.create_task(watch())
+        start = loop.time()  # the walk's clock starts with its first message
         for line in lines:
             wait = start + line["t"] / speed - loop.time()
             if wait > 0:
