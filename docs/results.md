@@ -334,6 +334,14 @@ So the trained model of #46 needs a class for "some other word". BC-ResNet (`dem
 - It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest that keeps 90% of the clean command clips right, 0.85.
 - "Stop at any": stop acts at any probability, the other nine words at 0.85, as the core obeys a stop at any trust (`on_command`). This was also set on the validation list.
 - The demo's `Spotter` acts at 0.9 by default.
+- CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
+
+```
+python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
+```
 
 The settings, on the testing list (stop: 411 clips):
 
