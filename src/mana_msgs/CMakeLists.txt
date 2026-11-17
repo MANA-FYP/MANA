@@ -13,6 +13,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MotionReport.msg"
   "msg/PositionReport.msg"
   "msg/LinkReport.msg"
+  "msg/PresenceReport.msg"
   "msg/UserCommand.msg"
   # decision core -> host and user
   "msg/DriveRequest.msg"

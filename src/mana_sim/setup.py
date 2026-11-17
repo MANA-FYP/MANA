@@ -52,6 +52,7 @@ setup(
             "keyboard = mana_sim.keyboard_node:main",
             "panel_node = mana_sim.panel_node:main",
             "loop_driver = mana_sim.loop_driver_node:main",
+            "zone_node = mana_sim.zone_node:main",
         ]
     },
 )

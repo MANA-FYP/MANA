@@ -118,11 +118,21 @@ class Spotter:
     """The command words in a stream of sound: the last 1 s is scored every hop_s, and a word
     that passes `threshold` is given once, then not again until rearm_s has gone by (a word lasts
     up to a second, so it is in several windows). Same use as speech.CommandRecognizer: feed()
-    takes 16 kHz 16-bit PCM and gives (word, confidence) pairs."""
+    takes 16 kHz 16-bit PCM and gives (word, confidence) pairs. With stop_threshold, "stop" acts
+    from that probability and the other words from threshold: a missed stop is the unsafe case
+    (docs/results.md, #46). Unset, stop has the same threshold as every word."""
 
-    def __init__(self, score, threshold: float = 0.9, hop_s: float = 0.25, rearm_s: float = 1.0):
+    def __init__(
+        self,
+        score,
+        threshold: float = 0.9,
+        hop_s: float = 0.25,
+        rearm_s: float = 1.0,
+        stop_threshold: float | None = None,
+    ):
         self.score = score  # 1 s of float sound -> a probability per class of LABELS
         self.threshold, self.hop, self.rearm = threshold, int(hop_s * RATE), int(rearm_s * RATE)
+        self.stop_threshold = threshold if stop_threshold is None else stop_threshold
         self.sound = np.zeros(0, dtype=np.float32)
         self.since_scored = 0  # samples heard since the last score
         self.since_said = self.rearm  # samples since a word was last given
@@ -138,13 +148,16 @@ class Spotter:
             p = self.score(self.sound)
             i = int(np.argmax(p))
             word = LABELS[i]
-            if word in COMMAND_WORDS and p[i] >= self.threshold and self.since_said >= self.rearm:
+            least = self.stop_threshold if word == "stop" else self.threshold
+            if word in COMMAND_WORDS and p[i] >= least and self.since_said >= self.rearm:
                 out.append((word, float(p[i])))
                 self.since_said = 0
         return out
 
     @classmethod
-    def load(cls, checkpoint: str, threshold: float = 0.9) -> Spotter | None:
+    def load(
+        cls, checkpoint: str, threshold: float = 0.9, stop_threshold: float | None = None
+    ) -> Spotter | None:
         """From a checkpoint of tools/train_commands.py; None when it cannot be loaded."""
         try:
             saved = torch.load(checkpoint, map_location="cpu")
@@ -160,4 +173,4 @@ class Spotter:
                 x = features(torch.from_numpy(wave)[None]).unsqueeze(1)
                 return torch.softmax(model(x), 1)[0].numpy()
 
-        return cls(score, threshold)
+        return cls(score, threshold, stop_threshold=stop_threshold)
