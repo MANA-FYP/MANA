@@ -3,7 +3,7 @@
 The Gazebo test route, the wheel-and-track test host and its sensors. The chair follows the core's
 `DriveRequest` and publishes a camera, a 3D camera, a lidar, an IMU, a GPS and wheel encoders on ROS 2
 ([docs/topics.md](docs/topics.md)), and `set_fault` switches sensor faults during a run
-([docs/faults.md](docs/faults.md)). The ten original scenarios play on the route in Gazebo with the
+([docs/faults.md](docs/faults.md)). Eleven scripted scenarios play on the route in Gazebo with the
 same pass marks (see below), and a smoke test runs in CI.
 
 ## Run it
@@ -122,11 +122,11 @@ topics, and it has no switches by design.
 
 ## The scenarios in Gazebo
 
-The ten original scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, `drop`, `manual_drop`,
-`picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
+Eleven scripted scenarios (`level`, `ramp`, `stairs`, `curb`, `stop`, `stairs_down`, `drop`,
+`manual_drop`, `picture`, `dark`, `imu_lost`) play on this route with the same pass marks:
 
 ```bash
-ros2 run mana_core evaluate --world gazebo                # all ten, one simulation each (about 20 minutes)
+ros2 run mana_core evaluate --world gazebo                # all eleven, one simulation each
 ros2 run mana_core evaluate --world gazebo stairs curb    # some of them
 ros2 run mana_core evaluate --world gazebo --rerun        # play again; traces are kept in gazebo_traces/
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
@@ -180,6 +180,46 @@ One straight course along +x, 3 m wide. The chair starts at x = 1 m.
 | 31 to 34 | curb, 12 cm high | tracks |
 | 34 to 38 | level ground | |
 | 38 to 46 | a drop of 1 m (the ground ends) | stop 0.5 m before the edge |
+
+## The campus: every hazard, from any side (#79)
+
+The route has its hazards in a row; the campus puts them where they can be reached in any order and
+from any side, for free drives and the autopilot. `mana_sim/campus.py` makes it from simple boxes,
+and `worlds/mana_campus.sdf` is its default (do not edit it by hand: the tests check it matches).
+
+| Where | What |
+|---|---|
+| y -16 to -6 | the street, with a curb cut at x 20 to 22 |
+| y -6 to 34 | the plaza, a curb above the street along its whole length |
+| x 0 to 24, y 6 to 26 | a building, its floor 3 risers up: steps and a ramp at the south door, stairs down at the north door; inside a lobby, a corridor, a dark room (roofed), a room with tables and a hall with tables and chairs, 1 m doors |
+| x -26 to -12, from y 6 | a terrace, a drop above the plaza on three sides, a ramp up from the south |
+
+```bash
+python3 -m mana_sim.campus --start before_steps > /tmp/campus.sdf    # another start
+python3 -m mana_sim.campus --seed 7 > /tmp/campus7.sdf               # a varied campus
+ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
+```
+
+- **Starts.** Named start poses are listed at the top of the file: the plaza, the street, before
+  the steps and each ramp, the lobby, the corridor, outside the dark room, the hall, behind the
+  building, the terrace. Each of the ten Gazebo scenarios has one too (`scenario_stairs` ...), at
+  the place of its hazard.
+- **Seeds** vary what the real world varies: the step height and the curb (10 to 20 cm), the ramp
+  slopes (3 to 6 and 5 to 9 degrees), the drop (0.5 to 1.5 m), the sunlight and the floor colours.
+  A long terrace ramp moves the terrace north, so the ramp never starts in the street.
+- **Zones** switch the faults (#15) of a place: GPS is lost indoors, the camera is dark in the dark
+  room, Wi-Fi fades in the hall. `ros2 run mana_sim zone_node --ros-args -p use_sim_time:=true`
+  follows the chair's true position and calls `set_fault` on entering or leaving; it leaves a
+  zone only 0.3 m outside it, so a doorway does not flicker. In Gazebo, with the chair moved from
+  the plaza to the lobby, the dark room and back, `fault_state` read none, GPS lost, camera dark
+  and GPS lost, then none.
+- **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
+  and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
+  for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
+  In Gazebo (WSL, 10 November 2026) the chair settled 0.3345 m above the ground it stood on, the
+  same as on the route: on the plaza (0.12 m) by default, and on the terrace (1.535 m) of seed 2.
+- **Not done yet:** walking people, the camera's mounting angle, a lidar map
+  for the autopilot, and the real-time factor (the one measured so far was with the computer busy).
 
 ## The host
 

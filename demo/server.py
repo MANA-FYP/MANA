@@ -691,6 +691,12 @@ def main(argv=None) -> None:
     p.add_argument("--imgsz", type=int, default=416, help="detector input size; 640 finds more")
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
+    p.add_argument("--kws", metavar="MODEL",
+                   help="BC-ResNet checkpoint, for offline command words")  # fmt: skip
+    p.add_argument("--kws-threshold", type=float, default=0.9,
+                   help="the least probability of a command word to act on")  # fmt: skip
+    p.add_argument("--kws-stop-threshold", type=float,
+                   help="the least probability of stop (default: --kws-threshold)")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     p.add_argument("--sounds", metavar="EFFICIENTAT",
                    help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
@@ -724,6 +730,10 @@ def main(argv=None) -> None:
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
+    if a.kws:  # needs torch and torchaudio
+        from demo import kws
+
+        recognizer = kws.Spotter.load(a.kws, a.kws_threshold, a.kws_stop_threshold)
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
     listener = sounds.Listener(sounds.load(a.sounds)) if a.sounds else None
     if listener is not None and recognizer is None:
