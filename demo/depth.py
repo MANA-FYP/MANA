@@ -168,7 +168,8 @@ class Reader:
     says how high it really is: the model gives metres, so the floor's own depth puts the camera
     at height_m / own scale. Sitting on our floor with the phone in hand that was 0.49 m, and the
     floor-learned scale (2.45) put a cupboard 0.46 m away at 1.13 m. So when the floor puts the
-    camera outside `held_m` (lower or higher than a phone held while walking), no scale is learned
+    camera outside `held_share` of the mount's height (0.72 to 1.98 m for 1.2 m: lower or higher
+    than a phone held while walking), no scale is learned
     from it: the model's own metres are kept with the camera at the height the floor gives, and
     the ground is not read. This is asked only while learning: once a scale is held, a lower floor
     at the bottom of the picture is a drop, as above.
@@ -177,10 +178,19 @@ class Reader:
     """
 
     def __init__(
-        self, mount: Mount, learn=3, follow=0.1, differ=0.15, relearn_steps=4, held_m=(0.7, 2.0)
+        self,
+        mount: Mount,
+        learn=3,
+        follow=0.1,
+        differ=0.15,
+        relearn_steps=4,
+        held_share=(0.6, 1.65),
     ):
         self.mount, self.learn, self.follow, self.differ = mount, learn, follow, differ
-        self.relearn_steps, self.held_m = relearn_steps, held_m
+        # a share of the mount's height, so a camera mounted low (a rover at 0.5 m, Komail #180)
+        # is not always taken for a phone held low
+        self.relearn_steps = relearn_steps
+        self.held_m = (held_share[0] * mount.height_m, held_share[1] * mount.height_m)
         self.held: float | None = None
         self._learning: list[float] = []
         self._differs_since: int | None = None  # the step count when the frames began to differ
