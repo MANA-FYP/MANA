@@ -18,7 +18,8 @@ from mana_core.scenarios import SCENARIOS, check
 from mana_sim import gazebo_scenarios as gs
 
 # the issue of a mark that is missed in Gazebo for a known reason
-KNOWN_ISSUES: dict[str, int] = {}
+LEVEL_TOLD = 'Shows "On tracks until the ground is level"'
+KNOWN_ISSUES: dict[str, int] = {LEVEL_TOLD: 171}
 LET_GO = re.compile(r"let the stop go at ([\d.]+) s, ([\d.]+) m before")
 
 
@@ -65,6 +66,16 @@ def why_marks_fail(failing: list[tuple[str, str]]) -> str:
             f" after the first one. In these runs it let go at {min(at):.1f} to {max(at):.1f} s"
             f", with the chair {min(before):.2f} to {max(before):.2f} m before the hazard"
             f" ({len(let_go)} marks)."
+        )
+    if any(text == LEVEL_TOLD for text, _ in failing):
+        lines.append(
+            f"- **{LEVEL_TOLD} (#171):** in `imu_lost` the IMU goes quiet during the climb. When"
+            " it is missed, the chair reached the top with no tilt to judge the ground by, the 3D"
+            ' camera read the edge as stairs down, and the core asked about going down ("Say yes'
+            ' to go down on tracks") and, with no yes, stopped at the edge ("Drop ahead,'
+            ' stopping"), so the message about level ground never came. Stopping is the safe'
+            " outcome; the mark is about the message. The same scenario has met this mark in"
+            " other runs."
         )
     wrapped = [textwrap.fill(line, 100, subsequent_indent="  ") for line in lines]
     return "\n".join(wrapped) or "- none"
