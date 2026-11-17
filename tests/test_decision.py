@@ -23,6 +23,8 @@ from mana_core.decision import (
     ObstacleReport,
     PositionReport,
     PositionSource,
+    PresenceReport,
+    PresenceSource,
     Priority,
     Source,
 )
@@ -686,6 +688,82 @@ def test_manual_mode_follows_the_user_with_the_link_lost():
     assert (d.reason, d.speed_limit) == ("Manual mode", 1.0)
 
 
+# ---- someone sensed by Wi-Fi, not seen: slow down, never stop (#194, D15)
+
+
+FLAT = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+
+
+def sensed(present=True, trust=0.9, age=0.0, zone="zone 1"):
+    return PresenceReport(NOW - age, trust, PresenceSource.WIFI_CSI, present, zone)
+
+
+def with_presence(*presence, reports=(), commands=()):
+    c = DecisionCore()
+    for command in commands:
+        c.on_command(command, 1.0)
+    for r in reports or (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)):
+        (c.on_obstacle if isinstance(r, ObstacleReport) else c.on_ground)(r)
+    for p in presence:
+        c.on_presence(p)
+    c.on_motion(level())
+    c.tick(NOW)
+    return c.decision
+
+
+def test_someone_sensed_by_wifi_slows_down_and_says_where():
+    d = with_presence(sensed())
+    assert (d.mode, d.stop, d.speed_limit) == (Mode.WHEELS, False, LIM.slow)
+    assert (d.reason, d.priority) == (
+        "Someone may be near (zone 1), slowing down",
+        Priority.WARNING,
+    )
+    assert with_presence(sensed(zone="")).reason == "Someone may be near, slowing down"
+
+
+@pytest.mark.parametrize(
+    "presence",
+    [sensed(present=False), sensed(age=LIM.presence_max_age_s + 0.5), sensed(trust=0.2)],
+    ids=["empty room", "stale", "untrusted"],
+)
+def test_an_empty_room_or_an_old_or_doubtful_verdict_keeps_full_speed(presence):
+    assert with_presence(presence).reason == "Level ground"
+
+
+def test_a_verdict_a_second_old_still_counts():
+    # one verdict a second: the last one is still current between them
+    assert with_presence(sensed(age=1.0)).speed_limit == LIM.slow
+
+
+def test_wifi_presence_never_stops_and_every_hazard_comes_first():
+    """It has no distance, so an obstacle the cameras or the lidar place decides, at its own
+    distance; the presence is only the last word before full speed."""
+    d = with_presence(sensed(), reports=(*FLAT, obstacle(0.5)))
+    assert (d.stop, d.reason) == (True, "Obstacle ahead, stopping")
+    d = with_presence(sensed(), reports=(*FLAT, obstacle(1.5)))
+    assert (d.stop, d.reason) == (False, "Obstacle ahead, slowing down")
+    ramp = (ground(CAM, Ground.RAMP), ground(DEPTH, Ground.RAMP, 1.0))
+    assert with_presence(sensed(), reports=ramp).reason == "Ramp ahead, slowing down"
+
+
+def test_the_user_stop_and_manual_mode_win_over_wifi_presence():
+    assert with_presence(sensed(), commands=[Command.STOP]).reason == "Stopped by you"
+    d = with_presence(sensed(), commands=[Command.MANUAL])
+    assert (d.reason, d.speed_limit) == ("Manual mode", 1.0)
+
+
+def test_the_newest_wifi_verdict_wins():
+    c = DecisionCore()
+    for r in (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT)):
+        c.on_ground(r)
+    c.on_motion(level())
+    c.tick(NOW)  # the core's clock is running, as in the node
+    c.on_presence(sensed(age=0.5))
+    c.on_presence(sensed(present=False))  # the room is empty now
+    c.on_presence(sensed(age=0.8))  # an older one, arriving late, does not undo that
+    assert c.tick(NOW).reason == "Level ground"
+
+
 # ---- the codes match mana_msgs
 
 
@@ -712,6 +790,7 @@ def constants(msg, field):
         ("ObstacleReport", "source", Source),
         ("PositionReport", "source", PositionSource),
         ("LinkReport", "link", Link),
+        ("PresenceReport", "source", PresenceSource),
         ("UserCommand", "command", Command),
         ("DriveRequest", "mode", Mode),
         ("UserMessage", "priority", Priority),

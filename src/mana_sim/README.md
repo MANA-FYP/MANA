@@ -207,14 +207,18 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
 - **Seeds** vary what the real world varies: the step height and the curb (10 to 20 cm), the ramp
   slopes (3 to 6 and 5 to 9 degrees), the drop (0.5 to 1.5 m), the sunlight and the floor colours.
   A long terrace ramp moves the terrace north, so the ramp never starts in the street.
-- **Zones** for the faults (#15) are written down in the file: indoors (GPS lost), the dark room,
-  the hall (weak Wi-Fi). Nothing switches them yet.
+- **Zones** switch the faults (#15) of a place: GPS is lost indoors, the camera is dark in the dark
+  room, Wi-Fi fades in the hall. `ros2 run mana_sim zone_node --ros-args -p use_sim_time:=true`
+  follows the chair's true position and calls `set_fault` on entering or leaving; it leaves a
+  zone only 0.3 m outside it, so a doorway does not flicker. In Gazebo, with the chair moved from
+  the plaza to the lobby, the dark room and back, `fault_state` read none, GPS lost, camera dark
+  and GPS lost, then none.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
   In Gazebo (WSL, 10 November 2026) the chair settled 0.3345 m above the ground it stood on, the
   same as on the route: on the plaza (0.12 m) by default, and on the terrace (1.535 m) of seed 2.
-- **Not done yet:** walking people, the camera's mounting angle, switching the zones, a lidar map
+- **Not done yet:** walking people, the camera's mounting angle, a lidar map
   for the autopilot, and the real-time factor (the one measured so far was with the computer busy).
 
 ## The host

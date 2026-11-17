@@ -308,3 +308,34 @@ camera and the lidar measure the distance, and ROS's detector keeps box height.
 Measured in Gazebo with the first version of change 1, before the #173 review narrowed it (any shallow drop after the yes counted as the stairs), not the code in this repository now: 44 of 44 marks. `stairs_down` asks at the top at 2.2 s and waits 1.56 m before the stairs until the yes (said at 20 s). It goes down on tracks, is back on wheels at 5.13 m, and reaches the end (6.01 of 6 m) with no mishap. The other ten meet all their marks, as before.
 
 With the narrower relabelling of the #173 review, all eleven again: 43 of 44 marks in one run. `stairs_down` asked at 1.0 s, waited 1.53 m before the stairs until the yes, was back on wheels at 5.15 m and reached 6.04 of 6 m with no mishap. `imu_lost` missed "Shows 'On tracks until the ground is level'" once: at the top of the stairs, with the IMU gone, it asked about stairs down and stopped there. Played again, it met every mark in 2 of 2 runs with this change and in 2 of 2 without it; the ask without a yes is not touched by this change, and it fits the 3D camera's reading with no IMU at the top of a climb (#171). A second run of all eleven on 17 November, whose traces make the table in `results.md`: again 43 of 44, the same `imu_lost` miss (it asked at 12.4 s and stopped at the edge at 19.2 s); `stairs_down` asked at 0.9 s, waited 1.58 m before the stairs, was back on wheels at 5.14 m and reached 6.01 of 6 m. So with this change `imu_lost` has missed that message in 2 of 4 runs.
+
+## D15. A person sensed by Wi-Fi slows the device and never stops it (#194)
+
+**Chosen:** a new report, `PresenceReport` (source `WIFI_CSI`, `present`, an optional `zone`, and
+the trust every report has), on the topic `presence`. While a recent (2.5 s), trusted one says a
+person is present, the core slows to 30 % with "Someone may be near (zone 1), slowing down". It comes
+after every other slow-down for a hazard, before the start-up, link and position checks: every stop, every change to tracks, manual
+mode and every hazard the cameras or the lidar place come first, and it never stops the device.
+
+**Why.** Wi-Fi sensing (#194, measured in #195's section of `docs/results.md`) tells whether a person is in the room, and in
+which zone, from how they change the channel state of a Wi-Fi link. It needs no light, and it
+found people standing still (in two of the three zones the movement stayed at the empty room's
+level). Radio also passes walls, so it could sense a person the cameras cannot see, round a corner
+or behind a door, but the recordings it was measured on are line of sight. And it gives a
+zone, not a distance or a bearing, so it cannot say whether the person is in the path. A stop on
+it would stop the device in any room with someone in it. Slowing down is what a careful driver
+does on hearing someone near and not seeing them; the cameras and the lidar still stop it once the
+person is in front.
+
+| Option | Problem |
+|---|---|
+| Send it as an `ObstacleReport` with an unknown distance | The obstacle rules stop or slow by distance; with none, it either does nothing or is taken as near and stops the device for a person anywhere in the room |
+| Stop while a person is sensed and not seen | The device would not move in any occupied room; one zone of a room is metres wide |
+| **A report of its own that only slows, below every hazard** | Slows the device in an occupied room even when the person is far from its path; at 30 % that costs time, not safety |
+| Ignore it until it gives a distance | Wastes the one sensor that works through walls and in the dark |
+
+**Limits.** Measured on one office's recordings (two ESP32-C6 boards), not yet on our own boards
+or on a moving device: the boards are fixed in a room, so this is for a device in a known place,
+such as a home or a ward, with its own few minutes of recordings. Sensing from the device itself,
+moving, is not covered. The demo's `/wifi` screen shows the verdict; feeding it to the core is the
+next step there.
