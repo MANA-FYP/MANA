@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   workflow_call:  # release.yml runs these checks before it publishes anything
+  workflow_dispatch:  # by hand: the Actions tab, or gh workflow run ci.yml --ref BRANCH
 
 permissions:
   contents: read
