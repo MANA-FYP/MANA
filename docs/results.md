@@ -571,14 +571,19 @@ What follows:
   at 0.5 0.72 against 0.67, at 0.89 against 0.92 precision), and they tie on vehicles (AP50 0.74).
   YOLOv8s was 5 ms a frame faster here. With one seed and 20 epochs each, a gap of 0.02 to 0.03 in
   AP50 is within what a second run could change, so this does not settle the choice.
-- **Both small models beat the nano one and the demo's zero-shot model.** Against YOLOE-26s
-  zero-shot (82 ms), YOLO26s matches it on people at 0.5 (0.72 against 0.71) and is far ahead on
-  vehicles (0.62 against 0.37), at about two thirds of the time. Against the fine-tuned YOLO26n
-  (35 ms), people at 0.5 go from 0.63 to 0.72 and vehicles from 0.56 to 0.62.
+- **Against the nano model and the demo's zero-shot model.** Both small models are ahead of the
+  fine-tuned YOLO26n (35 ms) on vehicles and in people's recall at 0.5, at a little less
+  precision: for YOLO26s, people at 0.5 go from 0.63 to 0.72 and vehicles from 0.56 to 0.62
+  (YOLOv8s ties it on people AP50, 0.77). Against YOLOE-26s zero-shot (82 ms, at image size
+  480), both are far ahead on vehicles (0.62 and 0.64 against 0.37 at 0.5). On people only
+  YOLO26s keeps up (0.72 against 0.71 at 0.5, 0.77 against 0.78 at 0.3); YOLOv8s is behind (0.67
+  at 0.5, AP50 0.77 against 0.78). YOLO26s takes about two thirds of YOLOE-26s's time, though
+  that one ran at 480, not 416.
 - **Stairs improve, but not near the target.** AP50 0.20 to 0.22 against 0.14 for the nano model,
-  and stairs precision at 0.3 rises from 0.06 to 0.15 (YOLO26s) and 0.18 (YOLOv8s). That is still a quarter of the near
-  staircases at 0.3, against the 0.85 target, and most stairs boxes are wrong. The 37 near
-  staircases of the test split are also too few to tell these models apart on stairs.
+  and stairs precision at 0.3 rises from 0.06 to 0.15 (YOLO26s) and 0.18 (YOLOv8s). That is still
+  a quarter of the near staircases at 0.3, against the 0.85 target, and most stairs boxes are
+  wrong. The 37 near staircases of the test split are also too few to tell these models apart on
+  stairs.
 - **Doors and poles stay low** for both (door recall 0.03 to 0.05, pole 0.11 to 0.14 at 0.3).
 - These are CPU runs at 416 with 20 epochs and one frame in 20 of the stairs walks. The GPU runs of
   #49 at 640, with more epochs and every frame, are still needed before one of them becomes the
