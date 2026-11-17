@@ -18,7 +18,7 @@ from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import Path
 
-from mana_core.decision import Command, Mode
+from mana_core.decision import WAITING, Command, Mode
 from mana_core.scenarios import Trace
 
 from mana_sim import gazebo_scenarios as gs
@@ -93,9 +93,16 @@ def same_decision(a, b) -> bool:
     )
 
 
+def starting(*samples) -> bool:
+    """Whether a sample is the start-up wait for the ground sensors."""
+    return any(s.reason.startswith(WAITING) for s in samples)
+
+
 def first_difference(mana: Trace, other: Trace):
     """The first place on the route where the two decided differently for a few samples in a row:
-    (x_m, MANA's sample, the other's sample), or None. The other's sample is the nearest in x."""
+    (x_m, MANA's sample, the other's sample), or None. The other's sample is the nearest in x.
+    The start-up, while the core waits for its ground sensors, is not a decision about the route
+    and is not compared."""
     if not mana.samples or not other.samples:
         return None
     xs = [s.x_m for s in other.samples]
@@ -104,7 +111,7 @@ def first_difference(mana: Trace, other: Trace):
         i = min(bisect_left(xs, s.x_m), len(xs) - 1)
         if i > 0 and abs(xs[i - 1] - s.x_m) < abs(xs[i] - s.x_m):
             i -= 1
-        if same_decision(s, other.samples[i]):
+        if same_decision(s, other.samples[i]) or starting(s, other.samples[i]):
             run = []
             continue
         run.append((s, other.samples[i]))

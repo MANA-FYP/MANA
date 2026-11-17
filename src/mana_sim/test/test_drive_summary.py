@@ -112,3 +112,10 @@ def test_the_section_is_written_from_the_traces_and_replaces_itself(tmp_path):
 def test_a_missing_folder_is_said(tmp_path, capsys):
     assert ds.main([str(tmp_path / "nothing")]) == 2
     assert "play the scenarios first" in capsys.readouterr().out
+
+
+def test_the_start_up_wait_for_the_ground_sensors_is_not_a_difference():
+    waiting = (W, False, 0.3, "Waiting for the ground sensors (1 of 2 up: the camera)")
+    mana = trace(*[(x, *waiting) for x in range(0, 3)], *[(x, *FREE) for x in range(3, 8)])
+    base = trace(*[(x, *FREE) for x in range(0, 8)])
+    assert ds.first_difference(mana, base) is None
