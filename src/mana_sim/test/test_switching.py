@@ -66,3 +66,35 @@ def test_time_on_each_source_and_a_clean_switch_passes():
     )
     (o,) = outcomes(r, [(25.0, 55.0)])
     assert o.on_s[ODOMETRY] == pytest.approx(1.0) and not o.passed  # a moment on odometry fails
+
+
+# GPS, the lidar map 1 s into each outage, GPS again after it
+CLEAN = "100,0,map,0.9,0\n126,0,map,0.9,1\n150,0,map,0.9,0\n186,0,map,0.9,1\n210,0,map,0.9,0\n"
+ON_OFF = "[INFO] [fault_script]: at {a} s (clock {t}): gps dropout {s}\n"
+
+
+def logs(tmp_path, events):
+    pos, log = tmp_path / "position.csv", tmp_path / "faults.log"
+    pos.write_text(CLEAN)
+    log.write_text("".join(ON_OFF.format(a=t - 100, t=t, s=s) for t, s in events))
+    return [str(pos), str(log)]
+
+
+def test_both_outages_of_the_scenario_must_be_scored(tmp_path, capsys):
+    from mana_sim.switching import expected_outages, main
+
+    assert expected_outages() == 2
+    both = [(125.0, "on"), (145.0, "off"), (185.0, "on"), (205.0, "off")]
+    assert main(logs(tmp_path, both)) == 0
+    # the drive ended during the second outage: one complete outage is a fail, not a pass
+    assert main(logs(tmp_path, both[:3])) == 1
+    assert "1 complete outages in the log, the scenario has 2" in capsys.readouterr().out
+    # a lost "off" line pairs nothing wrongly: the first start is dropped, not matched to 205
+    assert main(logs(tmp_path, [(125.0, "on"), (185.0, "on"), (205.0, "off")])) == 1
+
+
+def test_a_start_with_no_end_is_not_an_outage(tmp_path):
+    from mana_sim.switching import read_outages
+
+    _, log = logs(tmp_path, [(125.0, "on"), (145.0, "off"), (185.0, "on")])
+    assert read_outages(log) == [(125.0, 145.0)]

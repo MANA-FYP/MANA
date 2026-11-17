@@ -73,19 +73,39 @@ def read_reports(csv_path: str) -> list[tuple[float, int]]:
 
 
 def read_outages(log_path: str) -> list[tuple[float, float]]:
-    """(start, end) of each GPS dropout in fault_script's log ("(clock 123.45): gps dropout on")."""
+    """(start, end) of each complete GPS dropout in fault_script's log ("(clock 123.45): gps
+    dropout on", then "... off"). A start with no end after it, as when the drive ends during the
+    outage, is left out: it cannot be scored."""
     import re
 
-    times = re.findall(r"clock ([\d.]+)\): gps dropout (on|off)", open(log_path).read())
-    starts = [float(t) for t, s in times if s == "on"]
-    ends = [float(t) for t, s in times if s == "off"]
-    return list(zip(starts, ends, strict=False))
+    events = re.findall(r"clock ([\d.]+)\): gps dropout (on|off)", open(log_path).read())
+    out, start = [], None
+    for t, state in events:
+        if state == "on":
+            start = float(t)
+        elif start is not None:
+            out.append((start, float(t)))
+            start = None
+    return out
+
+
+def expected_outages(scenario: str = "gps_two_outages") -> int:
+    """How many GPS dropouts the fault scenario switches on."""
+    from mana_sim.fault_scenarios import FAULT_SCENARIOS
+
+    steps = FAULT_SCENARIOS[scenario].steps
+    return sum(s.sensor == "gps" and s.kind == "dropout" and s.active for s in steps)
 
 
 def main(argv=None) -> int:
+    """python3 -m mana_sim.switching position.csv faults.log [scenario]. Every outage of the
+    scenario must be in the log and pass: a drive that ends early, or a log that lost a line,
+    is a FAIL, not a pass on fewer outages (Komail, #182)."""
     import sys
 
-    position_csv, fault_log = (argv or sys.argv[1:])[:2]
+    args = argv if argv is not None else sys.argv[1:]
+    position_csv, fault_log = args[:2]
+    expected = expected_outages(*args[2:3])
     outs = outcomes(read_reports(position_csv), read_outages(fault_log))
     for i, o in enumerate(outs, 1):
         away = "never" if o.switch_s is None else f"{o.switch_s:.2f} s"
@@ -94,7 +114,9 @@ def main(argv=None) -> int:
         spent = ", ".join(f"{NAMES.get(s, s)} {v:.1f} s" for s, v in sorted((o.on_s or {}).items()))
         print(f"outage {i} ({o.end_s - o.start_s:.0f} s): to the {to} after {away}, "
               f"{o.changes} source changes, GPS back {back}; on {spent}")  # fmt: skip
-    ok = bool(outs) and all(o.passed for o in outs)
+    if len(outs) != expected:
+        print(f"{len(outs)} complete outages in the log, the scenario has {expected}")
+    ok = len(outs) == expected and all(o.passed for o in outs)
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
