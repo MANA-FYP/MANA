@@ -66,8 +66,8 @@ def test_the_gazebo_world_names_only_the_scenarios_that_play_there(capsys):
 def test_the_options_of_one_world_are_refused_with_the_other(capsys):
     assert main(["--rerun"]) == 2 and main(["--traces", "here"]) == 2
     assert "cannot be used with --world scripted" in capsys.readouterr().out
-    assert main(["--world=gazebo", "--compare"]) == 2
-    assert "--compare cannot be used with --world gazebo" in capsys.readouterr().out
+    assert main(["--world=gazebo", "--baseline", "--compare"]) == 2
+    assert "cannot be used together" in capsys.readouterr().out
     assert main(["--world=mars"]) == 2
 
 
@@ -80,7 +80,7 @@ def test_a_gazebo_run_that_could_not_be_played_fails_and_the_next_one_is_played(
     from mana_sim import gazebo_run as gr
     from mana_sim import gazebo_scenarios as gs
 
-    def play(name, traces):
+    def play(name, traces, controller="mana"):
         if name == "level":
             raise gr.RunFailed("the chair did not settle")
         (traces / f"{name}.json").write_text(gs.trace_to_json(Trace()))
@@ -90,3 +90,33 @@ def test_a_gazebo_run_that_could_not_be_played_fails_and_the_next_one_is_played(
     assert main(["--world", "gazebo", "level", "stop", "--traces", str(tmp_path)]) == 1
     out = capsys.readouterr().out
     assert "not played: the chair did not settle" in out and "[stop]" in out
+
+
+def test_gazebo_plays_the_baseline_in_place_of_the_core_and_compares_both(
+    monkeypatch, tmp_path, capsys
+):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "mana_sim"))
+    from mana_core.scenarios import Trace
+
+    from mana_sim import gazebo_run as gr
+    from mana_sim import gazebo_scenarios as gs
+
+    played = []
+
+    def play(name, traces, controller="mana"):
+        played.append(controller)
+        traces.mkdir(parents=True, exist_ok=True)
+        trace = Trace()
+        if controller == "baseline":
+            trace.mishaps.append("on a step on wheels")
+        (traces / f"{name}.json").write_text(gs.trace_to_json(trace))
+        return traces / f"{name}.json"
+
+    monkeypatch.setattr(gr, "play", play)
+    main(["--world", "gazebo", "--baseline", "stop", "--traces", str(tmp_path)])
+    assert played == ["baseline"]
+    played.clear()
+    main(["--world", "gazebo", "--compare", "--rerun", "stop", "--traces", str(tmp_path)])
+    assert played == ["mana", "baseline"]
+    out = capsys.readouterr().out
+    assert "Baseline mishap" in out and "on a step on wheels" in out
