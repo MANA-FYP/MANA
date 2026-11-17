@@ -195,3 +195,45 @@ def write(path, samples):
         w.setsampwidth(2)
         w.setframerate(SECOND)
         w.writeframes(np.clip(samples, -32768, 32767).astype(np.int16).tobytes())
+
+
+def test_other_words_taken_for_go_or_stop_are_counted():
+    rows = [
+        {"label": "bed", "heard": "go", "outcome": "false"},
+        {"label": "cat", "heard": "stop", "outcome": "false"},
+        {"label": "dog", "heard": "stop", "outcome": "false"},
+        {"label": "go", "heard": "go", "outcome": "right"},  # a command word: not another word
+        {"label": "_silence_", "heard": "stop", "outcome": "false"},  # noise alone: its own count
+    ]
+    s = cw.summary(rows)
+    assert (s["other_as_go"], s["other_as_stop"]) == (1, 2)
+
+
+@needs_torch
+def test_a_stop_lifted_to_act_keeps_the_models_own_probability():
+    segments = [("stop", Path("stop/b.wav"), np.concatenate([quiet(1), loud(1)]))]
+    [row], _ = stream(segments, 0.4, 0.85, stop_any=True)
+    assert row["outcome"] == "right" and row["conf"] == 0.4
+
+
+@needs_torch
+def test_noise_alone_is_streamed_without_clips_below_the_average_speech(tmp_path):
+    sc = tmp_path / "sc"
+    (sc / "_background_noise_").mkdir(parents=True)
+    (sc / "go").mkdir()
+    rng = np.random.default_rng(0)
+    write(sc / "_background_noise_" / "white.wav", (rng.standard_normal(330000) * 1000))
+    for name, scale in (("a", 2000), ("b", 4000)):
+        write(sc / "go" / f"{name}.wav", (rng.standard_normal(SECOND) * scale))
+    clips = [("go", sc / "go" / "a.wav"), ("go", sc / "go" / "b.wav")]
+    # noise 10 dB above the speech, loud enough for the stand-in model to fire on
+    [(label, _, noise)] = cw.noise_alone_sound(sc, clips, -10.0)
+    assert label == "_noise_" and noise.size % (SECOND // 4) == 0
+    assert noise.size == pytest.approx(330000 * cw.NOISE_TEST_SHARE, abs=SECOND // 4)
+    speech = np.mean([np.mean(cw.read_wav(p).astype(np.float64) ** 2) for _, p in clips])
+    level = 10 * np.log10(speech / np.mean(noise.astype(np.float64) ** 2))
+    assert level == pytest.approx(-10.0, abs=0.2)
+    # streamed with no clips, every word it gives is noise alone
+    probs, pieces, _ = cw.stream_scores([(label, None, noise)], fake_score(0.95, 0.5))
+    rows, alone = cw.stream_rows(probs, pieces, [], 0.85, False)
+    assert rows == [] and alone and set(alone) == {"stop"}
