@@ -1,0 +1,100 @@
+"""Scoring the switch between GPS and the lidar map in GPS outages (#42)."""
+
+import pytest
+from mana_sim.switching import outcomes
+
+GPS, LIDAR = 0, 1
+
+
+def reports(*spans):
+    """(source, from s, to s) spans, a report every 0.5 s."""
+    return [(t / 2, src) for src, a, b in spans for t in range(int(a * 2), int(b * 2))]
+
+
+def test_one_switch_away_and_one_back_with_their_delays():
+    r = reports((GPS, 0, 26.5), (LIDAR, 26.5, 61), (GPS, 61, 80))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.switch_s == pytest.approx(1.5) and o.back_s == pytest.approx(6.0)
+    assert o.changes == 2
+
+
+def test_switching_back_and_forth_in_one_outage_is_counted():
+    r = reports((GPS, 0, 26), (LIDAR, 26, 30), (GPS, 30, 31), (LIDAR, 31, 60), (GPS, 60, 70))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.changes == 4
+
+
+def test_each_outage_counts_up_to_the_next_and_none_means_it_never_switched():
+    r = reports((GPS, 0, 27), (LIDAR, 27, 60), (GPS, 60, 120))
+    first, second = outcomes(r, [(25.0, 55.0), (85.0, 115.0)])
+    assert (first.switch_s, first.changes) == (pytest.approx(2.0), 2)
+    assert (second.switch_s, second.changes, second.back_s) == (None, 0, pytest.approx(0.0))
+
+
+def test_the_logs_are_read(tmp_path):
+    from mana_sim.switching import read_outages, read_reports
+
+    pos = tmp_path / "position.csv"
+    pos.write_text("100,500000000,map,0.9,0,1.0,2.0,0.0,1.5\n101,0,map,0.8,1,1.0,2.0,0.0,0.3\n")
+    assert read_reports(str(pos)) == [(pytest.approx(100.5), 0), (101.0, 1)]
+    log = tmp_path / "faults.log"
+    log.write_text(
+        "[INFO] [fault_script]: at 25.0 s (clock 125.00): gps dropout on\n"
+        "[INFO] [fault_script]: at 55.0 s (clock 155.10): gps dropout off\n"
+    )
+    assert read_outages(str(log)) == [(125.0, 155.1)]
+
+
+def test_an_outage_covered_by_odometry_is_a_fail_not_a_switch_to_the_lidar_map():
+    """Waqas's case (#182): GPS until 26.5 s, odometry to 61 s, then GPS. Away from GPS after
+    1.5 s with 2 changes, which passed before; but the lidar map was never used."""
+    ODOMETRY = 2
+    r = reports((GPS, 0, 26.5), (ODOMETRY, 26.5, 61), (GPS, 61, 80))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.switch_s == pytest.approx(1.5) and o.changes == 2 and o.away_source == ODOMETRY
+    assert o.on_s[ODOMETRY] == pytest.approx(28.5) and not o.passed
+
+
+def test_time_on_each_source_and_a_clean_switch_passes():
+    ODOMETRY = 2
+    r = reports((GPS, 0, 26.5), (LIDAR, 26.5, 61), (GPS, 61, 80))
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.on_s[GPS] == pytest.approx(1.5) and o.on_s[LIDAR] == pytest.approx(28.5)
+    assert o.on_s.get(ODOMETRY, 0.0) == 0.0 and o.passed
+    r = reports(
+        (GPS, 0, 26.5), (LIDAR, 26.5, 40), (ODOMETRY, 40, 41), (LIDAR, 41, 61), (GPS, 61, 80)
+    )
+    (o,) = outcomes(r, [(25.0, 55.0)])
+    assert o.on_s[ODOMETRY] == pytest.approx(1.0) and not o.passed  # a moment on odometry fails
+
+
+# GPS, the lidar map 1 s into each outage, GPS again after it
+CLEAN = "100,0,map,0.9,0\n126,0,map,0.9,1\n150,0,map,0.9,0\n186,0,map,0.9,1\n210,0,map,0.9,0\n"
+ON_OFF = "[INFO] [fault_script]: at {a} s (clock {t}): gps dropout {s}\n"
+
+
+def logs(tmp_path, events):
+    pos, log = tmp_path / "position.csv", tmp_path / "faults.log"
+    pos.write_text(CLEAN)
+    log.write_text("".join(ON_OFF.format(a=t - 100, t=t, s=s) for t, s in events))
+    return [str(pos), str(log)]
+
+
+def test_both_outages_of_the_scenario_must_be_scored(tmp_path, capsys):
+    from mana_sim.switching import expected_outages, main
+
+    assert expected_outages() == 2
+    both = [(125.0, "on"), (145.0, "off"), (185.0, "on"), (205.0, "off")]
+    assert main(logs(tmp_path, both)) == 0
+    # the drive ended during the second outage: one complete outage is a fail, not a pass
+    assert main(logs(tmp_path, both[:3])) == 1
+    assert "1 complete outages in the log, the scenario has 2" in capsys.readouterr().out
+    # a lost "off" line pairs nothing wrongly: the first start is dropped, not matched to 205
+    assert main(logs(tmp_path, [(125.0, "on"), (185.0, "on"), (205.0, "off")])) == 1
+
+
+def test_a_start_with_no_end_is_not_an_outage(tmp_path):
+    from mana_sim.switching import read_outages
+
+    _, log = logs(tmp_path, [(125.0, "on"), (145.0, "off"), (185.0, "on")])
+    assert read_outages(log) == [(125.0, 145.0)]
