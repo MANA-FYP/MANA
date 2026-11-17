@@ -270,6 +270,7 @@ def evaluate(
     result = {
         "conf": confs,
         "imgsz": detector.imgsz,
+        "iou": IOU,
         "frames": frames,
         "not_named": sorted(set(sanpo) - classes),
         "ms_per_frame": 1000 * statistics.median(times) if times else float("nan"),
@@ -289,7 +290,8 @@ def table(name: str, r: dict) -> str:
     lines = [
         f"### {name}",
         "",
-        f"{r['frames']} frames, imgsz {r['imgsz']}, precision (P) and recall (R) at conf "
+        f"{r['frames']} frames, imgsz {r['imgsz']}, a match at IoU {r.get('iou', 0.5)}, "
+        f"precision (P) and recall (R) at conf "
         f"{' and '.join(str(c) for c in r['conf'])}, "
         f"{r['ms_per_frame']:.0f} ms per frame on this machine.",
     ]
@@ -297,7 +299,7 @@ def table(name: str, r: dict) -> str:
         lines += ["", f"Objects: {band}", ""]
         head = "".join(f" P {c} | R {c} |" for c in r["conf"])
         lines += [
-            f"| Class | Objects | AP50 |{head}",
+            f"| Class | Objects | AP{round(100 * r.get('iou', 0.5))} |{head}",
             "|---|---:|---:|" + "---:|" * 2 * len(r["conf"]),
         ]
         for c in b["classes"]:
@@ -318,6 +320,7 @@ def table(name: str, r: dict) -> str:
 
 
 def main(argv=None) -> int:
+    global IOU
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("datasets/sanpo_yolo"))
     ap.add_argument("--weights", nargs="+", default=["yolo26n.pt"])
@@ -335,7 +338,14 @@ def main(argv=None) -> int:
         "--min-height", type=float, default=0.1, help="near band: box height share of the frame"
     )
     ap.add_argument("--json", type=Path, help="also write the results here")
+    ap.add_argument(
+        "--iou",
+        type=float,
+        default=IOU,
+        help="the overlap a match needs (0.5; a looser one shows how much is box extent)",
+    )
     a = ap.parse_args(argv)
+    IOU = a.iou  # match() reads it at each call
 
     from mana_perception.detection import Detector
 

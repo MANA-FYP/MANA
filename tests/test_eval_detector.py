@@ -164,3 +164,21 @@ def test_precision_and_recall_at_the_kept_and_the_obstacle_threshold(tmp_path):
     assert row["at"][0.3]["recall"] == 1.0 and row["at"][0.5]["recall"] == 0.5
     assert row["recall"] == 1.0  # the first threshold
     assert "| stairs | 2 | 1.00 | 1.00 | 1.00 | 1.00 | 0.50 |" in ev.table("x.pt", r)
+
+
+def test_a_looser_iou_counts_a_box_of_a_different_extent(monkeypatch):
+    truth = [Box("pole", 0, 0, 10, 100)]
+    pred = Box("pole", 0, 0, 4, 100, 0.9)  # the same pole, boxed 4 px wide against 10: IoU 0.4
+    assert ev.iou(pred, truth[0]) == pytest.approx(0.4)
+    assert ev.match([pred], truth)[0] == [("pole", 0.9, False)]
+    monkeypatch.setattr(ev, "IOU", 0.3)
+    assert ev.match([pred], truth)[0] == [("pole", 0.9, True)]
+
+
+def test_the_table_names_the_iou_it_matched_at(tmp_path):
+    data = dataset(tmp_path, [("s1", ["1 0.5 0.5 0.4 0.4"])])
+    r = ev.evaluate(Fake({0: [("stairs", 0.9, 30, 30, 70, 70)]}), data, "test", conf=0.3)
+    assert r["iou"] == 0.5 and "| AP50 |" in ev.table("m", r)
+    assert "| AP30 |" in ev.table("m", {**r, "iou": 0.3}) and "IoU 0.3" in ev.table(
+        "m", {**r, "iou": 0.3}
+    )
