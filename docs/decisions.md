@@ -318,8 +318,8 @@ after every other slow-down for a hazard. Every stop, every change to tracks, ma
 hazard the cameras or the lidar place come before it, and it never stops the device. The checks
 for the ground sensors at start-up, the alert link and the position come after it. All three slow
 to the same 30 %, so the device's speed is the same either way, but while someone may be near,
-their message ("waiting for ground sensors (1 of 2 up: ...)" and the others) is not shown
-(Komail, #198).
+their message ("Waiting for the ground sensors (1 of 2 up: ...), slowing down" and the others) is
+not shown (#198).
 
 **Why.** Wi-Fi sensing (#194, measured in #195's section of `docs/results.md`) tells whether a person is in the room, and in
 which zone, from how they change the channel state of a Wi-Fi link. It needs no light, and it

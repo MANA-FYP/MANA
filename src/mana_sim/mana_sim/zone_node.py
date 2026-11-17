@@ -40,7 +40,11 @@ class ZoneNode(Node):
         self.waiting = []
 
     def answered(self, future, what: str) -> None:
-        """A refused change is said: the zone's fault is then not on (Komail, #190)."""
+        """A refused change, or a call that failed (fault_node gone), is said: the zone's fault is
+        then not as the log above says (#190)."""
+        if (err := future.exception()) is not None:
+            self.get_logger().warning(f"{what}: set_fault failed: {err}")
+            return
         res = future.result()
         if res is not None and not res.ok:
             self.get_logger().warning(f"{what}: refused by fault_node: {res.message}")
