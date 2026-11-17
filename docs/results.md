@@ -690,13 +690,15 @@ The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SAN
 `tools/failure_examples.py` finds every near box a model missed and every box it gave wrongly at
 confidence 0.3, scored exactly as `tools/eval_detector.py` scores them, and draws the strongest one
 per walk: SANPO's boxes in green (a missed one drawn thicker), the model's in orange with its
-confidence. At 0.3, near the chair:
+confidence. At 0.3, near the chair. 0.3 is what the detector node keeps, but only a box of 0.5
+or more becomes an obstacle (`min_confidence`, the core's `min_trust`), so the last column gives
+the wrong boxes the chair would act on:
 
-| Class | Near boxes missed | In walks | Boxes given wrongly | In walks |
-|---|---:|---:|---:|---:|
-| stairs | 28 of 37 | 4 | 52 | 13 |
-| opening-door | 166 of 175 | 13 | 55 | 13 |
-| pole | 1,674 of 1,942 | 44 | 485 | 41 |
+| Class | Near boxes missed | In walks | Boxes given wrongly | In walks | Of them at 0.5 or more |
+|---|---:|---:|---:|---:|---:|
+| stairs | 28 of 37 | 4 | 52 | 13 | 20 |
+| opening-door | 166 of 175 | 13 | 55 | 13 | 11 |
+| pole | 1,674 of 1,942 | 44 | 485 | 41 | 151 |
 
 **Stairs.** 22 of the 37 near staircases of the test split are in one walk, up an outdoor flight
 with railings, and 16 of the 28 misses are there (6 of its 22 found). Looked at by eye, the strongest wrong stairs box
@@ -726,7 +728,7 @@ costs, the same model was scored again with a match at IoU 0.3 (`--iou 0.3`), ne
 | opening-door | 0.04 | 0.05 | 0.05 | 0.06 | 0.14 | 0.16 |
 | pole | 0.14 | 0.23 | 0.14 | 0.17 | 0.36 | 0.45 |
 
-With the looser match, stairs are found in 12 of the 37 near frames instead of 9. So the box's
+With the looser match, 12 of the 37 near staircases are found instead of 9. So the box's
 extent explains part of the stairs and pole scores, not most of them: at either IoU most near
 stairs, doors and poles are missed.
 
@@ -759,7 +761,7 @@ What follows:
   a stairs figure from SANPO alone is not exact, and the 37 near staircases are too few for one.
   Stairs from our own recordings (#89) are still needed, as the two-source rule already requires
   the 3D camera too.
-- **Dark corridors are not in this set.** SANPO's walks are outdoors in daylight, so this cannot
+- **Dark corridors are not in this set.** SANPO's walks are mostly outdoors in daylight, so this cannot
   show the detector in the dark; that needs the dark frames of #89.
 
 Run it:

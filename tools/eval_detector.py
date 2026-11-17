@@ -125,9 +125,9 @@ def match(preds: list[Box], truth: list[Box], ignore: list[Box] = (), min_px: fl
     """(class, conf, right) for each prediction kept, and the truth boxes that were found.
 
     Highest confidence first, each prediction takes the unfound truth box of its class it overlaps
-    most, if at IoU 0.5 or more. One that finds none is dropped when it lies on a neighbouring
-    class's box, on an ignored box of its own class (one too small for the band), or is itself
-    shorter than min_px, as COCO scores its size bands; any other is wrong."""
+    most, if at IoU IOU or more (0.5 unless --iou). One that finds none is dropped when it lies on
+    a neighbouring class's box, on an ignored box of its own class (one too small for the band), or
+    is itself shorter than min_px, as COCO scores its size bands; any other is wrong."""
     found = [False] * len(truth)
     out = []
     for p in sorted(preds, key=lambda b: -b.conf):
