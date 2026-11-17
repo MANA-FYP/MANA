@@ -137,12 +137,17 @@ def kinds(items: tuple[Episode, ...]) -> str:
     return "; ".join(f"{e.reason} ({seconds(e.length_s)}, at {e.x_m:.1f} m)" for e in items)
 
 
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
 def drive_markdown(s: Summary) -> str:
     """The summary of one drive, as a short list."""
     return "\n".join(
         [
             f"- **{s.name}:** {seconds(s.duration_s)}, {s.distance_m:.1f} m; "
-            f"{seconds(s.tracks_s)} on tracks; {s.messages} messages; {s.takeovers} takeovers",
+            f"{seconds(s.tracks_s)} on tracks; {plural(s.messages, 'message')}; "
+            f"{plural(s.takeovers, 'takeover')}",
             f"  - stops: {kinds(s.stops)}",
             f"  - slow-downs: {kinds(s.slowdowns)}",
             f"  - mishaps: {'; '.join(s.mishaps) if s.mishaps else 'none'}",

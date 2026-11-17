@@ -160,3 +160,9 @@ def test_a_scenario_driven_by_time_is_compared_by_time_and_not_by_place():
         by_time=True,
     )
     assert "0.3 s:" in row
+
+
+def test_one_message_and_one_takeover_are_said_in_the_singular():
+    t = trace((0.0, *FREE), (1.0, *FREE), said=[(0.1, Command.MANUAL)])
+    text = ds.drive_markdown(ds.summarise("d", t))
+    assert "1 message;" in text and "1 takeover" in text and "takeovers" not in text
