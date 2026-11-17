@@ -309,12 +309,14 @@ GUIDE_EVERY_M = 15.0  # the way is said again after this much walking
 # and sooner, but no more often than this, when it moves 2 hours round: indoors the compass can
 # swing that far with the person standing still
 GUIDE_TURN_GAP_S = 10.0
+GUIDE_TURN_DEG = 60.0  # 2 hours round on a clock face
 
 
-def _clock_hour(way: tuple[float, float | None, str]) -> float:
-    """The way's direction in clock hours: from where the person faces, else from the compass."""
+def _direction_deg(way: tuple[float, float | None, str]) -> float:
+    """The way's direction in degrees: from where the person faces, else from the compass. Not
+    rounded to clock hours, so a turn is compared in degrees (Komail, #188)."""
     _, turn, compass = way
-    return round(turn / 30.0) % 12 if turn is not None else COMPASS.index(compass) * 1.5
+    return turn % 360.0 if turn is not None else COMPASS.index(compass) * 45.0
 
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
@@ -445,6 +447,7 @@ class Middleware:
         self.decisions: deque = deque(maxlen=30)  # every decision MANA took, as text
         self._decision_n = 0
         self._decision_key: tuple | None = None
+        self._restarted: str | None = None  # "Starting again", said after the next tick's lines
         self._last_link: str | None = None
         self._last_position: str | None = None
         self._last_manual: bool | None = None
@@ -503,6 +506,7 @@ class Middleware:
         priority: Priority | None = None,
         state: str | None = None,
         why: str = "",
+        say: bool = True,
     ) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
@@ -522,7 +526,7 @@ class Middleware:
                 **({"state": state, "why": why} if state else {}),
             }
         )
-        if kind != "detection":  # a detection is shown as a box, not said
+        if kind != "detection" and say:  # a detection is shown as a box, not said
             level = priority if priority is not None else KIND_PRIORITY.get(kind, Priority.WARNING)
             self.queue.push(Message(text, level, True, now), now)
 
@@ -757,7 +761,15 @@ class Middleware:
         """A place picked on the supervisor's map, in metres east and north of the start: its way
         is said now, again as the person walks, and "arrived" when they are there."""
         now = self.clock() if now is None else now
-        self.nav.track.marks[DESTINATION] = (float(east), float(north))
+        track = self.nav.track
+        track.marks[DESTINATION] = (float(east), float(north))
+        way = track.way_to(DESTINATION)
+        if way is not None and way[0] < ARRIVED_M:  # said once, not "set" and then "arrived"
+            track.marks.pop(DESTINATION)
+            self._guided = None
+            text = "That place is where you are now."
+            self._decide(now, "way", text, Priority.INFO)
+            return text
         return self.say_destination(now, "Destination set. ")
 
     def clear_destination(self, now: float | None = None) -> None:
@@ -775,13 +787,13 @@ class Middleware:
             text = "No destination yet. The supervisor picks one on the map."
         else:
             text = lead + way_text(way, DESTINATION)
-            self._guided = (now, track.distance_m, _clock_hour(way))
+            self._guided = (now, track.distance_m, _direction_deg(way))
         self._decide(now, "way", text, Priority.INFO)
         return text
 
     def _guide(self, now: float) -> None:
         """While a destination is set: arrived, or the way again after a stretch of walking, or
-        sooner when it has moved 2 hours round (a turn the wrong way)."""
+        sooner when it has moved 60 degrees, 2 hours round (a turn the wrong way)."""
         track = self.nav.track
         way = track.way_to(DESTINATION)
         if way is None:
@@ -794,9 +806,9 @@ class Middleware:
         if self._guided is None:
             self.say_destination(now)
             return
-        said_t, said_walked, said_hour = self._guided
-        apart = abs(_clock_hour(way) - said_hour) % 12
-        turned = min(apart, 12 - apart) >= 2 and now - said_t >= GUIDE_TURN_GAP_S
+        said_t, said_walked, said_deg = self._guided
+        apart = abs(_direction_deg(way) - said_deg) % 360.0
+        turned = min(apart, 360.0 - apart) >= GUIDE_TURN_DEG and now - said_t >= GUIDE_TURN_GAP_S
         if turned or track.distance_m - said_walked >= GUIDE_EVERY_M:
             self.say_destination(now)
 
@@ -805,13 +817,25 @@ class Middleware:
         said and decided. The track starts again where the person is now, tied to the map at the
         next GPS fix. The sensors, the core and the link are kept."""
         now = self.clock() if now is None else now
+        heading = self.nav.track.heading
         self.nav = Navigator()
+        if heading is not None:  # which way the phone faces is kept: no arrow lost till it turns
+            self.nav.track.on_heading(heading)
         self._guided = None
         for kept in (self.decisions, self.heard, self.log, self.inputs):
             kept.clear()
         self._said_at.clear()
+        # what was waiting to be said is forgotten too, so the line below is not held behind the
+        # end of the last one and dropped by the next decision; a stop waiting is still said
+        urgent = [m for m in self.queue.waiting if m.priority >= Priority.URGENT]
+        self.queue = MessageQueue()
+        for m in urgent:
+            self.queue.push(m, m.stamp)
         self._decision_key = None  # the current decision is written again, at the top
-        self._decide(now, "way", "Starting again from here.", Priority.INFO)
+        # written now, but said after the lines the next tick writes again: pushed first, the
+        # next decision pushed would drop it from the queue, and it was never said (#191)
+        self._restarted = "Starting again from here."
+        self._decide(now, "way", self._restarted, Priority.INFO, say=False)
 
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
@@ -1104,6 +1128,9 @@ class Middleware:
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
         self._guide(now)
+        if self._restarted is not None:
+            self.queue.push(Message(self._restarted, Priority.INFO, True, now), now)
+            self._restarted = None
         if self.directions:
             if ahead := direction(self.core, now):
                 self.queue.push(ahead, now)

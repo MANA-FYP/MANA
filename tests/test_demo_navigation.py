@@ -592,6 +592,17 @@ def test_the_way_to_a_destination_is_said_when_set_on_the_walk_and_on_arrival():
     assert said_ways(mw)[-1] == "You have arrived at the destination."  # said once
 
 
+def test_a_destination_picked_where_the_person_is_is_said_once():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=0)
+    assert mw.set_destination(1.0, 2.0, now=1.0) == "That place is where you are now."
+    mw.tick(2.0)
+    assert said_ways(mw) == ["That place is where you are now."]
+    assert "destination" not in mw.nav.track.marks
+
+
 def test_turning_away_from_the_destination_says_the_way_again_but_not_at_once():
     from demo.middleware import Middleware
 
@@ -605,6 +616,21 @@ def test_turning_away_from_the_destination_says_the_way_again_but_not_at_once():
     assert said_ways(mw)[-1] == "The destination is 30 metres away, at 9 o'clock."
     mw.nav.on_orientation(None, None, None, compass=60)  # 1 hour round: not a turn away
     mw.tick(30.0)
+    assert len(said_ways(mw)) == 2
+
+
+def test_a_turn_is_measured_in_degrees_not_rounded_clock_hours():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=0)
+    mw.set_destination(0.0, 30.0, now=1.0)  # at 12 o'clock
+    # 46 degrees: rounded to clock hours it was 2 hours round (12 to 10), a turn away
+    mw.nav.on_orientation(None, None, None, compass=46)
+    mw.tick(20.0)
+    assert len(said_ways(mw)) == 1
+    mw.nav.on_orientation(None, None, None, compass=61)  # 61 degrees is a turn away
+    mw.tick(21.0)
     assert len(said_ways(mw)) == 2
 
 
@@ -640,8 +666,24 @@ def test_starting_again_forgets_the_walk_and_counts_from_here():
     assert not mw.heard and not mw.inputs
     mw.tick(14.0)  # the current decision is written again, and no way to the old destination
     assert [d["kind"] for d in mw.decisions][-1] == "decision"
+    for t in range(15, 25):  # and "Starting again from here." is said, not dropped (#191)
+        mw.tick(float(t))
+    assert [h["text"] for h in mw.heard][0] == "Starting again from here."
     walk_legs(mw.nav, [(90, 10)], t0=14.0)
     assert mw.nav.view(30.0)["x"] == pytest.approx(7.0, abs=0.01)  # 7 m east of the new start
+
+
+def test_a_stop_waiting_to_be_said_is_still_said_after_starting_again():
+    from mana_core.messages import Message, Priority
+
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=90)
+    mw.queue.push(Message("Stop. Steps down ahead.", Priority.URGENT, True, 10.0), 10.0)
+    mw.start_again(now=10.0)
+    assert [m.text for m in mw.queue.waiting] == ["Stop. Steps down ahead."]
+    assert mw.nav.view(10.0)["heading"] == 90  # and which way the phone faces
 
 
 def test_held_fixes_do_not_stop_gps_correcting_the_steps():

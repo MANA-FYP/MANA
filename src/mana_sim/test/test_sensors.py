@@ -127,3 +127,13 @@ def test_the_cores_travel_after_a_stop_is_the_hosts():
     assert float(core["top_mps"]) == TOP_SPEED
     assert float(core["decel_mps2"]) == float(braking)
     assert float(core["reaction_s"]) > 0
+
+
+def test_dead_reckoning_drives_straight_and_turns():
+    x, y, yaw = c.dead_reckon(0.0, 0.0, 0.0, 1.0, 0.0, 2.0)
+    assert (x, y, yaw) == pytest.approx((2.0, 0.0, 0.0))
+    pose = (0.0, 0.0, 0.0)
+    for _ in range(1000):  # a quarter circle of radius 1 m at 1 m/s
+        pose = c.dead_reckon(*pose, 1.0, 1.0, math.pi / 2 / 1000)
+    assert pose == pytest.approx((1.0, 1.0, math.pi / 2), abs=1e-4)
+    assert c.dead_reckon(0.0, 0.0, 3.1, 0.0, 1.0, 0.1)[2] < 0  # yaw wraps to -pi..pi
