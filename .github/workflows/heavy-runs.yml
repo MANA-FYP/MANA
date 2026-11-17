@@ -28,10 +28,6 @@ on:
         description: "A release tag whose files go to assets/ first, for example a model's weights"
         type: string
         default: ""
-      timeout:
-        description: "Minutes before the run is stopped (at most 360)"
-        type: number
-        default: 120
 
 permissions:
   contents: read
@@ -40,7 +36,7 @@ jobs:
   python:
     if: inputs.kind == 'python'
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ inputs.timeout }}
+    timeout-minutes: 360  # GitHub's limit for a job
     env:
       RUN: ${{ inputs.run }}
       DATASETS: ${{ inputs.datasets }}
@@ -89,7 +85,7 @@ jobs:
     if: inputs.kind == 'ros'
     runs-on: ubuntu-24.04
     container: ros:jazzy-ros-base
-    timeout-minutes: ${{ inputs.timeout }}
+    timeout-minutes: 360  # GitHub's limit for a job
     env:
       RUN: ${{ inputs.run }}
       DATASETS: ${{ inputs.datasets }}
