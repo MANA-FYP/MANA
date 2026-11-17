@@ -98,7 +98,9 @@ def outcome(label: str, heard: list[tuple[str, float]]) -> str:
 
 def summary(rows: list[dict], held_out: frozenset = frozenset()) -> dict:
     said = [r for r in rows if r["label"] in COMMAND_WORDS]
-    other = [r for r in rows if r["label"] not in COMMAND_WORDS]
+    # other spoken words; noise alone (the official set's _silence_) is counted on its own
+    other = [r for r in rows if r["label"] not in COMMAND_WORDS and r["label"] != "_silence_"]
+    silence = [r for r in rows if r["label"] == "_silence_"]
     stop = [r for r in said if r["label"] == "stop"]
     held = [r for r in other if r["label"] in held_out]
     count = lambda rs, o: sum(r["outcome"] == o for r in rs)  # noqa: E731
@@ -109,8 +111,8 @@ def summary(rows: list[dict], held_out: frozenset = frozenset()) -> dict:
         "missed": count(said, "missed"),
         "other": len(other),
         "false": count(other, "false"),
-        "silence": sum(r["label"] == "_silence_" for r in other),
-        "silence_false": sum(r["label"] == "_silence_" and r["outcome"] == "false" for r in other),
+        "silence": len(silence),
+        "silence_false": count(silence, "false"),
         # the unsafe case: a stop not heard, or heard as another word (go above all)
         "stop": len(stop),
         "stop_missed": count(stop, "missed"),

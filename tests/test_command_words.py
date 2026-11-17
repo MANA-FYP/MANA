@@ -73,6 +73,8 @@ def test_stop_gets_its_own_counts_and_held_out_words_theirs():
     assert s["go_as_stop"] == 1
     assert (s["silence"], s["silence_false"]) == (2, 1)
     assert (s["held"], s["held_false"]) == (1, 1)
+    # noise alone is not another word: the official set's 408 other words are their own rate
+    assert (s["other"], s["false"]) == (2, 1)
 
 
 def test_the_test_noise_is_never_the_training_noise():
