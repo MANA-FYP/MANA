@@ -504,9 +504,11 @@ What follows:
   - RSSI alone missed the person in 115 windows (same model) or 108 (forest), all but one in
     zone 2, and called 7 or 9 empty windows occupied.
   - Balanced (the mean of the two rates): 99.9 % for CSI, 97.5 % and 97.7 % for RSSI.
-- **Which zone needs the subcarriers.** Zone 1 goes from 0.71 (same model) or 0.56 (forest) with
-  RSSI to 0.99. Zones 2 and 5 are confused in a quarter of zone 2's windows; where the zones are in
-  the room is not published.
+- **Zone 1 is where the subcarriers clearly help:** 0.99 with CSI, against 0.71 (same model) or
+  0.56 (forest) with RSSI. In zone 2 the three are close (0.76, 0.68, 0.73) and in zone 5 nearer
+  (0.98, 0.85, 0.90), each from one session against one session, so that is not shown for them.
+  Zones 2 and 5 are confused in a quarter of zone 2's windows; where the zones are in the room is
+  not published.
 - **Movement is not presence.** The movement level (the median flicker) went over the empty room's
   99th percentile in 77 % of zone 2's windows but only 2 % of zone 5's and 13 % of zone 1's: those
   people were mostly still. They are found by the shape of the subcarriers, not by flicker. The

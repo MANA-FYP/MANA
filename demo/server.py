@@ -37,6 +37,7 @@ import math
 import re
 import sys
 import threading
+import time
 import warnings
 from array import array
 from pathlib import Path
@@ -227,11 +228,14 @@ async def csi_task(app: web.Application) -> None:
                 queue.put_nowait(p)
 
         def read() -> None:
+            parse = csi.LineParser()
             try:
                 for line in csi.serial_lines(port, baud, stop):
-                    p = csi.parse_line(line)
+                    p = parse(line)
                     if p is not None:
                         loop.call_soon_threadsafe(put, p)
+                    elif why := parse.unread(time.monotonic()):
+                        print(f"wifi: the ESP32 on {port}: {why}", flush=True)
             except Exception as e:  # unplugged, or the port is busy: said once
                 if not stop.is_set():
                     print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
