@@ -416,7 +416,31 @@ The official set's 4,074 command clips give the same within 0.6 points, and its 
 - **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
 - **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
 
-These favour 0.85 with stop at any over the demo's 0.9. The demo is not changed here: its `Spotter` listens to a running stream every 0.25 s, which these aligned clips do not cover, and a stop at any probability should be tried on a stream first. One false stop is safe, but many would make the device unusable.
+On aligned clips these favour 0.85 with stop at any over the demo's 0.9. But the demo's `Spotter` listens to a running stream every 0.25 s, which aligned clips do not cover, and on a stream (below) a stop at any probability stops the device for noise. One false stop is safe, but many would make the device unusable.
+
+**On a running stream** (`--stream 0.85 0.9`): the 11,005 test clips one after another, in a shuffled order, each after 1 s of silence (or of the same noise), fed to the demo's own `Spotter` in 0.25 s pieces as the phone's sound comes. A word it gives goes to the clip its 1 s window overlaps most. A word given while no clip is in the window is counted in the gaps (3.1 hours of them per run). Noise alone is also streamed on its own, with no clips (below).
+
+| Sound | Setting | Right | Wrong | Missed | False activations (of 6,931) | of which held-out words (of 818) | Other words heard as "go" | Other words heard as "stop" | Stop missed (of 411) | Stop heard as "go" | Words in the gaps |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| clean | 0.9, the demo's | 90.3% (3,679) | 0.6% | 9.1% | 6.4% (447) | 9.4% | 34 | 15 | 2.7% (11) | 0 | 0 |
+| clean | 0.9, stop at any | 90.3% (3,677) | 1.1% | 8.6% | 9.6% (665) | 11.2% | 34 | 245 | 0.2% (1) | 0 | 0 |
+| clean | 0.85 | 92.3% (3,760) | 1.0% | 6.8% | 9.6% (666) | 15.4% | 54 | 19 | 1.5% (6) | 0 | 0 |
+| clean | 0.85, stop at any | 92.1% (3,751) | 1.4% | 6.5% | 12.6% (875) | 17.2% | 54 | 243 | 0.2% (1) | 0 | 0 |
+| noise at 10 dB | 0.9, the demo's | 82.5% | 1.0% | 16.5% | 6.1% (421) | 9.7% | 20 | 22 | 9.0% (37) | 0 | 0 |
+| noise at 10 dB | 0.9, stop at any | 82.2% | 2.9% | 14.9% | 13.5% (935) | 16.5% | 19 | 563 | 2.2% (9) | 0 | 48 |
+| noise at 10 dB | 0.85 | 85.9% | 1.5% | 12.5% | 9.4% (651) | 14.3% | 41 | 37 | 6.6% (27) | 0 | 0 |
+| noise at 10 dB | 0.85, stop at any | 85.5% | 3.3% | 11.3% | 16.4% (1,138) | 20.7% | 36 | 560 | 2.2% (9) | 0 | 48 |
+| noise at 0 dB | 0.9, the demo's | 60.9% | 0.7% | 38.3% | 3.6% (252) | 4.4% | 16 | 15 | 36.0% (148) | 3 | 0 |
+| noise at 0 dB | 0.9, stop at any | 63.1% | 4.3% | 32.6% | 12.9% (896) | 14.5% | 16 | 675 | 7.5% (31) | 3 | 148 |
+| noise at 0 dB | 0.85 | 67.5% | 1.1% | 31.4% | 6.5% (448) | 8.6% | 33 | 26 | 29.0% (119) | 3 | 0 |
+| noise at 0 dB | 0.85, stop at any | 68.9% | 4.3% | 26.8% | 15.4% (1,064) | 18.1% | 31 | 670 | 7.3% (30) | 3 | 148 |
+
+- **On a stream there are about three times as many false activations as on aligned clips** (9.6% clean at 0.85, against 3.0%). The `Spotter` scores each word in several overlapping windows, and one passing window is enough.
+- **0.9, the demo's setting, misses more stops in noise:** 2.7% clean, 9.0% at 10 dB and 36.0% at 0 dB, against 1.5%, 6.6% and 29.0% at 0.85. It has fewer false activations (6.4% against 9.6% clean).
+- **Stop at any probability keeps stops from being missed** (0.2% clean, 2.2% at 10 dB, 7.5% at 0 dB), **but it stops for noise:** in the 3.1 hours of gaps it fired 48 times at 10 dB and 148 times at 0 dB, each time as "stop" (with a threshold on stop, none). That is a floor. Only one window per 1 s gap lies wholly in it; a firing in a window that also overlaps a clip is charged to that clip. So a noise "stop" just before a stop clip counts as right, which also flatters stop at any's stop-missed figures. Streamed on its own with no clips, at the clips' average speech level less 10 or 0 dB, the 1.7 minutes of held-out noise (the test quarter of each noise file) made stop at any fire once at 10 dB and 3 times at 0 dB, at 0.9 and at 0.85, and a threshold never. That is about 36 and 109 an hour, but from very few firings. Other words were heard as "stop" 245 times clean and 675 times at 0 dB, of 6,931 (at 0.9).
+- **So neither suits "stop" on a stream:** a threshold misses too many in noise, and any probability stops the device for noise alone: at least 15 times an hour at 10 dB and 48 at 0 dB counted in the gaps, and about 36 and 109 an hour on the short sample of noise alone. A threshold of stop's own, between the two, is the next thing to measure, chosen on the validation list; the demo keeps 0.9 until then.
+- **"Go" by mistake:** another word started it 34 times clean at 0.9 and 54 at 0.85, of 6,931. Stop was heard as "go" 3 times in 411 at 0 dB, and never clean or at 10 dB.
+- No word was given in the gaps of silence (clean), at any setting.
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
