@@ -257,7 +257,50 @@ The footprint is now the chair with its tracks, 2.2 by 0.8 m, with an inflation 
 
 - **The full chair does not get round the east corner.** For the second goal the path turns north at the end of the south corridor. Nav2's controller (Regulated Pure Pursuit) checks the footprint along the path ahead and logged "detected collision ahead" each time, until "controller patience exceeded" aborted the goal. The later goals start from the same place and end the same way. With the chassis-only footprint the same turn was made in every run above, so those 12 goals were reached with half the chair's length in Nav2's checks.
 - **An abort ends the goal, as intended:** the behaviour server ran no spin, back-up or wait in any of the three runs (its log has only their set-up).
-- So with the tracks the autopilot drives the straight south corridor and stops at the first corner. Getting round it needs either more room to turn (the east corridor it turns into is 2 m wide, less than the 2.34 m a 2.2 m chair sweeps turning on the spot; the south one is 2.75 m) or a planner that plans the turn with the footprint (Nav2's Smac planners take a non-round footprint); neither is done yet.
+- So with the tracks and Regulated Pure Pursuit the autopilot drives the straight south corridor and stops at the first corner. That was before the planner and controller below; the following section is the current setup.
+
+### Round the east corner, with the tracks in the footprint (18 November 2026)
+
+What changed (`config/nav2.yaml`, `config/navigate_no_recovery.xml`, `tools/autopilot.sh`):
+- the Smac lattice planner replaces NavFn: it plans with the full footprint and turns on the spot;
+- the MPPI controller replaces Regulated Pure Pursuit: it scores sampled trajectories with the full footprint;
+- the planner's `cost_penalty` is 4 (was 2), to keep the path off the walls of the narrow corridors;
+- the tree plans again only when the path is blocked or the goal changes (it did every second);
+- the chair rolls about 0.5 m forward before the first goal, in the simulation only, since it starts 1.0 m from the west wall and its tracks reach 1.08 m back ("Start occupied" otherwise);
+- `autopilot.sh` starts Nav2 once more when its bring-up is aborted.
+
+Goals reached, in Gazebo on GitHub's machines (the footprint, the 1.2 m inflation and the lack of recoveries are unchanged):
+
+| Goal | Pure Pursuit (6 runs) | MPPI (9 runs) | and `cost_penalty` 4 (8 runs) | and planning again only when blocked (6 runs) |
+|---|---|---|---|---|
+| 13, 0 | 6 of 6 | 8 of 9 | 8 of 8 | 6 of 6 |
+| 13.9, 6.6 (the corner) | 0 of 6 | 5 of 9 | 6 of 8 | 6 of 6 |
+| 7, 7.2 | 1 of 6 | 3 of 9 | 5 of 8 | 6 of 6 |
+| 0.5, 0 | 1 of 6 | 2 of 9 | 2 of 4 | 6 of 6 |
+
+In 4 of the 8 runs at `cost_penalty` 4 the last goal was moved to 1.0, 0.3 as a trial; they are left out of that cell.
+
+The local costmap was 4 by 4 m, while MPPI looks 40 steps of 0.1 s ahead (up to 2.4 m at 0.6 m/s) with a footprint reaching 1.1 m ahead of the chair's centre; a footprint corner off the costmap counts as lethal. With 8 by 8 m, in 6 runs of the same code otherwise:
+
+| | 4 by 4 m (6 runs) | 8 by 8 m (6 runs) |
+|---|---|---|
+| Goals reached | 24 of 24 | 24 of 24 |
+| Mean time, goal 1 (drive time, see below) | 48.4 s | 33.1 s |
+| Mean time, goal 2 | 33.8 s | 24.5 s |
+| Mean time, goal 3 | 30.6 s | 22.1 s |
+| Mean time, goal 4 | 42.8 s | 39.5 s |
+| "Optimizer fail to compute path" per run | 3, 3, 2, 2, 3, 4 | 0 in every run |
+| Nav2 started a second time | 2 of 6 | 1 of 6 |
+
+8 by 8 m is in `nav2.yaml` now. What it costs the computer was not measured.
+
+Trade-offs and limits:
+- **The path is no longer refreshed every second.** The chair follows its path until it is blocked or the goal changes, so a change in the map that does not block the path is not planned around.
+- **The last goal ends 28 degrees off its heading** (29 in one run at 8 by 8 m), against a yaw tolerance of 0.5 rad, 29 degrees. In the 4 by 4 m runs it was 28 degrees in all six.
+- **One run ended 0.36 m from the first goal by Gazebo's ground truth** (run 44357630751), against a tolerance of 0.35 m: the goal checker uses the position the localisation believes, which is off by 0.19 to 0.23 m on average (#43). By ground truth the first goal ended 0.33 to 0.36 m off in the 6 runs at 4 by 4 m and 0.34 to 0.38 m at 8 by 8 m, so it is at the edge of the tolerance in both.
+- **The first goal read 151 to 171 s in 6 of 12 runs and 33 to 50 s in the others.** The controller's log shows the drive took 47 to 50 s in all 6 runs at 4 by 4 m, so it was not slower; the time was counted from the start of the run's clock. The script's clock for simulation time reads 0 until its first message from the simulation, and `autopilot_goal.py` now waits for it. The times above for goal 1 use the runs that read under 100 s (3 of 6 each). That the clock is the cause is deduced from the logs, not seen directly.
+- **Start-up:** Nav2's bring-up was aborted and Nav2 started once more in 2 of the 6 runs at 4 by 4 m and 1 of 6 at 8 by 8 m; all of those drove.
+- The roll is a blind drive outside Nav2's checks, with only MANA between the chair and the wall; it is for the simulation's start pose. `autopilot.sh` now reads the pose after it and stops with a clear message if the chair is not at least 0.5 m along.
 
 ## Camera depth and stairs on real phone frames (#131)
 
