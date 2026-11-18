@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import json
 import math
 import os
+import re
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -30,9 +32,14 @@ OVERPASS_S = 12  # per instance: a full one is given up on, not waited for
 WIKIPEDIA = (
     "https://en.wikipedia.org/w/api.php?action=query&generator=geosearch"
     "&ggscoord={lat}|{lon}&ggsradius=1000&ggslimit=20&prop=pageimages|info|coordinates"
-    "&piprop=thumbnail&pithumbsize=320&inprop=url&format=json&formatversion=2"
+    "&piprop=thumbnail|name&pithumbsize=320&inprop=url&format=json&formatversion=2"
 )
+# the author and licence of the photos: the files' own details, in one call for all of them
+FILEINFO = "https://en.wikipedia.org/w/api.php"
 RADIUS_M = 300
+OVERPASS_SLOTS = asyncio.Semaphore(
+    2
+)  # the public Overpass allows a couple per IP: a fast pan waits
 # Wikimedia's image hosts: the API now gives its thumbnails from thumb.wikimedia.org
 PHOTO_HOSTS = ("upload.wikimedia.org", "thumb.wikimedia.org")
 PHOTO_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -115,13 +122,35 @@ def from_overpass(reply: dict) -> list[dict]:
     return out
 
 
-def from_wikipedia(reply: dict) -> list[dict]:
+def plain(text) -> str:
+    """Commons' extmetadata values are HTML: the text only."""
+    return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", str(text or ""))).split())
+
+
+def from_fileinfo(reply: dict) -> dict:
+    """{file name: (artist, licence)} from imageinfo's extmetadata; a missing field is ""."""
+    out = {}
+    for p in (reply.get("query") or {}).get("pages", []):
+        meta = ((p.get("imageinfo") or [{}])[0].get("extmetadata")) or {}
+        name = str(p.get("title", "")).removeprefix("File:").replace(" ", "_")
+        out[name] = (
+            plain((meta.get("Artist") or {}).get("value")),
+            plain((meta.get("LicenseShortName") or {}).get("value")),
+        )
+    return out
+
+
+def from_wikipedia(reply: dict, files: dict | None = None) -> list[dict]:
+    files = files or {}
     out = []
     for p in (reply.get("query") or {}).get("pages", []):
         coords = (p.get("coordinates") or [{}])[0]
         if "lat" not in coords or "lon" not in coords:
             continue
         thumb = (p.get("thumbnail") or {}).get("source")
+        photo = thumb if thumb and photo_allowed(thumb) else None
+        name = p.get("pageimage") if photo else None
+        artist, licence = files.get(name, ("", ""))
         out.append({
             "name": p.get("title", "?"),
             "kind": "Wikipedia article",
@@ -132,7 +161,10 @@ def from_wikipedia(reply: dict) -> list[dict]:
             "detail": None,
             "source": "wikipedia",
             "page": p.get("fullurl"),
-            "photo": thumb if thumb and photo_allowed(thumb) else None,
+            "photo": photo,
+            "photo_file": name,  # its page on Commons carries the author and licence
+            "photo_artist": artist or None,
+            "photo_licence": licence or None,
         })  # fmt: skip
     return out
 
@@ -142,7 +174,12 @@ def photo_allowed(url: str) -> bool:
     to make the laptop fetch anything else."""
     u = urlsplit(url)
     suffix = os.path.splitext(u.path)[1].lower()
-    return u.scheme == "https" and u.hostname in PHOTO_HOSTS and suffix in PHOTO_TYPES
+    return (
+        u.scheme == "https"
+        and u.hostname in PHOTO_HOSTS
+        and u.port is None
+        and suffix in PHOTO_TYPES
+    )
 
 
 def metres(lat0: float, lon0: float, lat: float, lon: float) -> float:
@@ -214,23 +251,42 @@ async def fetch_both(lat: float, lon: float) -> dict:
 
     async def osm(s):
         q, wait = {"data": overpass_query(lat, lon)}, aiohttp.ClientTimeout(total=OVERPASS_S)
-        for url in OVERPASS:  # busy or down: the next instance
-            try:
-                async with s.post(url, data=q, timeout=wait) as r:
-                    if r.status == 200:
-                        return from_overpass(await r.json(content_type=None))
-            except (aiohttp.ClientError, TimeoutError, ValueError):
-                continue
+        async with OVERPASS_SLOTS:
+            for url in OVERPASS:  # busy or down: the next instance
+                try:
+                    async with s.post(url, data=q, timeout=wait) as r:
+                        if r.status == 200:
+                            return from_overpass(await r.json(content_type=None))
+                except (aiohttp.ClientError, TimeoutError, ValueError):
+                    continue
         return None
 
     async def wiki(s):
         try:
             async with s.get(WIKIPEDIA.format(lat=lat, lon=lon)) as r:
-                if r.status == 200:
-                    return from_wikipedia(await r.json(content_type=None))
+                if r.status != 200:
+                    return None
+                reply = await r.json(content_type=None)
         except (aiohttp.ClientError, TimeoutError, ValueError):
-            pass
-        return None
+            return None
+        names = {p.get("pageimage") for p in (reply.get("query") or {}).get("pages", [])}
+        files = {}
+        if names - {None}:  # the credit is best effort: no answer, the card still links the file
+            q = {
+                "action": "query",
+                "prop": "imageinfo",
+                "iiprop": "extmetadata",
+                "format": "json",
+                "formatversion": "2",
+                "titles": "|".join(f"File:{n}" for n in sorted(names - {None})),
+            }
+            try:
+                async with s.get(FILEINFO, params=q) as r:
+                    if r.status == 200:
+                        files = from_fileinfo(await r.json(content_type=None))
+            except (aiohttp.ClientError, TimeoutError, ValueError):
+                pass
+        return from_wikipedia(reply, files)
 
     timeout = aiohttp.ClientTimeout(total=25)
     async with aiohttp.ClientSession(headers={"User-Agent": AGENT}, timeout=timeout) as s:
@@ -281,12 +337,20 @@ async def download(url: str) -> bytes | None:
     try:
         async with (
             aiohttp.ClientSession(headers={"User-Agent": AGENT}, timeout=timeout) as s,
-            s.get(url) as r,
+            s.get(url, allow_redirects=False) as r,
         ):
             if r.status != 200 or not r.content_type.startswith("image/"):
                 return None
             if (r.content_length or 0) > PHOTO_MAX:
                 return None
-            return await r.read()
+            data = b""
+            while (
+                len(data) <= PHOTO_MAX
+            ):  # read() gives what has arrived: loop, and stop at the cap
+                chunk = await r.content.read(PHOTO_MAX + 1 - len(data))
+                if not chunk:
+                    return data
+                data += chunk
+            return None
     except (aiohttp.ClientError, TimeoutError):
         return None

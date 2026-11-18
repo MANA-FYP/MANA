@@ -59,6 +59,13 @@ const Places = (() => {
     (drawn || []).forEach(([px, py, p]) => { const e = Math.hypot(px - x, py - y); if (e < d) { d = e; best = p; } });
     return best;
   }
+  // the photo's author and licence, linked to its file page on Commons; a missing one is left out
+  function photoCredit(p) {
+    const who = [p.photo_artist, p.photo_licence].filter(Boolean).map(esc).join(", ");
+    const text = "Photo: " + (who || "Wikimedia Commons");
+    return p.photo_file ? '<a href="https://commons.wikimedia.org/wiki/File:' + encodeURIComponent(p.photo_file) +
+      '" target="_blank" rel="noopener">' + text + "</a>" : text;
+  }
   function card(el, p) {
     if (!p) { el.hidden = true; el.innerHTML = ""; return; }
     const link = (url, text) => url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + text + "</a>" : text;
@@ -67,7 +74,7 @@ const Places = (() => {
       "<b>" + esc(p.name) + '</b><span class="pc-kind">' + esc(p.kind) + "</span>" +
       '<span class="pc-wc"><i style="background:' + (p.small ? "#1c2024" : COLOUR[p.wheelchair]) + '"></i>' + WORD[p.wheelchair] + "</span>" +
       (p.detail ? '<span class="pc-detail">' + esc(p.detail) + "</span>" : "") +
-      "<small>" + (p.photo ? link(p.page, "Photo: Wikipedia") + " · " : "") +
+      "<small>" + (p.photo ? photoCredit(p) + " · " : "") +
       (p.source === "osm" ? link(p.page, "Map data © OpenStreetMap contributors") : link(p.page, "From Wikipedia")) + "</small>";
     el.querySelector(".pc-x").onclick = () => card(el, null);
     el.hidden = false;
@@ -85,7 +92,7 @@ const Places = (() => {
   function credit(layer, labels, places) {
     const c = [];
     if (layer === "satellite") c.push("Imagery: Esri, Maxar, Earthstar Geographics");
-    if (layer === "satellite" && labels) c.push("Labels: Esri, HERE, Garmin");
+    if (layer === "satellite" && labels) c.push("Labels: Esri, HERE, Garmin, and the GIS user community");
     if (layer === "streets" || (layer === "satellite" && labels) || places) c.push("© OpenStreetMap contributors");
     if (places) c.push("Wikipedia");
     return c.join(" · ");

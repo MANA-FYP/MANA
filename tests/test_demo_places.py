@@ -35,7 +35,7 @@ WIKI_REPLY = {
         "pages": [
             {"title": "Faisal Mosque", "fullurl": "https://en.wikipedia.org/wiki/Faisal_Mosque",
              "coordinates": [{"lat": 33.7295, "lon": 73.0372}],
-             "thumbnail": {"source": WIKI_THUMB}},
+             "thumbnail": {"source": WIKI_THUMB}, "pageimage": "Mosque.jpg"},
             {"title": "Elsewhere photo", "fullurl": "https://en.wikipedia.org/wiki/E",
              "coordinates": [{"lat": 33.65, "lon": 73.01}],
              "thumbnail": {"source": "https://example.com/x.jpg"}},  # not Wikimedia: no photo
@@ -43,6 +43,34 @@ WIKI_REPLY = {
         ]
     }
 }  # fmt: skip
+
+
+FILE_REPLY = {
+    "query": {
+        "pages": [
+            {"title": "File:Mosque.jpg",
+             "imageinfo": [{"extmetadata": {
+                 "Artist": {"value": '<a href="//x/User:Ann">Ann &amp; Bob</a> <b>Lee</b>'},
+                 "LicenseShortName": {"value": "CC BY-SA 4.0"}}}]},
+        ]
+    }
+}  # fmt: skip
+
+
+def test_the_photo_credit_is_the_file_its_author_as_text_and_its_licence():
+    files = places.from_fileinfo(FILE_REPLY)
+    assert files == {"Mosque.jpg": ("Ann & Bob Lee", "CC BY-SA 4.0")}
+    got = places.from_wikipedia(WIKI_REPLY, files)[0]
+    assert got["photo_file"] == "Mosque.jpg"
+    assert got["photo_artist"] == "Ann & Bob Lee" and got["photo_licence"] == "CC BY-SA 4.0"
+    # no details came back: the file is still named, so the card can link its page
+    bare = places.from_wikipedia(WIKI_REPLY)[0]
+    assert bare["photo_file"] == "Mosque.jpg"
+    assert bare["photo_artist"] is None and bare["photo_licence"] is None
+    # a page with no photo from Wikimedia has no credit either
+    assert places.from_wikipedia(WIKI_REPLY, files)[1]["photo_file"] is None
+    assert places.from_fileinfo({}) == {}
+    assert places.plain(None) == "" and places.plain("a<br/>b") == "a b"
 
 
 def test_overpass_places_get_a_kind_and_their_wheelchair_tag():
@@ -91,6 +119,7 @@ def test_the_cell_is_about_100_m_and_the_query_asks_300_m_around_it():
         ("https://upload.wikimedia.org@example.com/a.jpg", False),  # the host is example.com
         ("https://upload.wikimedia.org.example.com/a.jpg", False),
         ("https://upload.wikimedia.org/a.svg", False),  # not a picture the phone is sent
+        ("https://upload.wikimedia.org:22/a.jpg", False),  # not the https port
         ("", False),
     ],
 )
@@ -111,7 +140,7 @@ def test_places_come_from_both_services_are_kept_and_served_offline(tmp_path, mo
     from demo.server import build_app
     from demo.tiles import TileCache
 
-    asked = {"busy": 0, "osm": 0, "wiki": 0}
+    asked = {"busy": 0, "osm": 0, "wiki": 0, "files": 0}
     up = {"osm": True, "wiki": True}
 
     async def busy(request):  # the main instance, full
@@ -125,6 +154,11 @@ def test_places_come_from_both_services_are_kept_and_served_offline(tmp_path, mo
             return web.Response(status=504)
         return web.json_response(OVERPASS_REPLY)
 
+    async def files(request):
+        asked["files"] += 1
+        assert request.query["titles"] == "File:Mosque.jpg"
+        return web.json_response(FILE_REPLY)
+
     async def wiki(request):
         asked["wiki"] += 1
         assert request.query["ggscoord"] == "33.656|73.014"
@@ -135,11 +169,13 @@ def test_places_come_from_both_services_are_kept_and_served_offline(tmp_path, mo
         fake.router.add_post("/busy", busy)
         fake.router.add_post("/osm", osm)
         fake.router.add_get("/wiki", wiki)
+        fake.router.add_get("/files", files)
         service = TestServer(fake)
         await service.start_server()
         base = str(service.make_url("/"))
         monkeypatch.setattr(places, "OVERPASS", [base + "busy", base + "osm"])
         monkeypatch.setattr(places, "WIKIPEDIA", base + "wiki?ggscoord={lat}|{lon}")
+        monkeypatch.setattr(places, "FILEINFO", base + "files")
         client = TestClient(TestServer(build_app(tile_cache=TileCache(tmp_path))))
         await client.start_server()
         try:
@@ -151,7 +187,10 @@ def test_places_come_from_both_services_are_kept_and_served_offline(tmp_path, mo
             assert got["sources"] == {"osm": True, "wikipedia": True}
             assert len(got["places"]) == 8 and got["places"][0]["name"] == "Campus Cafe"
             assert got["places"][-1]["name"] == "Faisal Mosque"  # nearest first: 8 km away
-            assert asked == {"busy": 1, "osm": 1, "wiki": 1}  # the full one, then the next
+            assert asked == {"busy": 1, "osm": 1, "wiki": 1, "files": 1}  # full one, then next
+            mosque = next(p for p in got["places"] if p["name"] == "Faisal Mosque")
+            assert mosque["photo_artist"] == "Ann & Bob Lee"
+            assert mosque["photo_licence"] == "CC BY-SA 4.0"
             assert (tmp_path / "places" / "33.656_73.014.json").exists()
             # 30 m away: the same cell, from memory, nothing asked
             r = await client.get("/api/places?lat=33.65629&lon=73.01371")
@@ -226,4 +265,42 @@ def test_photos_and_place_names_come_through_the_laptop_which_keeps_them(tmp_pat
         assert "/static/places.js" in html and 'id="pcard"' in html and 'id="credit"' in html
         assert "/tiles/labels/" in js and "Places.want(" in js
     shared = (WEB / "places.js").read_text(encoding="utf-8")
+    assert "commons.wikimedia.org/wiki/File:" in shared and "photo_licence" in shared
     assert "Earthstar Geographics" in shared and "© OpenStreetMap contributors" in shared
+
+
+@needs_aiohttp
+def test_a_photo_is_read_up_to_the_cap_and_redirects_are_not_followed(monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    async def go():
+        app = web.Application()
+
+        async def big(request):  # no Content-Length: chunked
+            r = web.StreamResponse(headers={"Content-Type": "image/jpeg"})
+            await r.prepare(request)
+            for _ in range(places.PHOTO_MAX // 65536 + 2):
+                await r.write(b"x" * 65536)
+            return r
+
+        async def small(request):
+            return web.Response(body=b"abc" * 100000, content_type="image/jpeg")
+
+        async def moved(request):
+            raise web.HTTPFound("/small")
+
+        for path, h in (("/big", big), ("/small", small), ("/moved", moved)):
+            app.router.add_get(path, h)
+        server = TestServer(app)
+        await server.start_server()
+        try:
+            base = str(server.make_url("/"))
+            monkeypatch.setattr(places, "AGENT", "t")
+            assert await places.download(base + "big") is None
+            assert len(await places.download(base + "small")) == 300000
+            assert await places.download(base + "moved") is None
+        finally:
+            await server.close()
+
+    asyncio.run(go())

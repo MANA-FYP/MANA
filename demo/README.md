@@ -286,7 +286,9 @@ asked for the ~100 m cell the map is on, only while the button is on and again o
 has moved about 100 m; nothing is fetched ahead. The laptop keeps each cell's answer
 (`tile-cache/places/`) and each photo (`tile-cache/photos/`, Wikimedia's hosts only), so the phone
 needs no internet and a place seen once works offline. Overpass is a shared public service and is
-often full: the main instance is given 12 s, then OSM France's; a half answer is shown but not kept.
+often full (at most two Overpass requests run at once): the main instance is given 12 s, then OSM France's; a half answer is shown but not kept. A photo's card says who took it and under which licence
+(from Commons) and links its file page. `tile-cache/photos/` and `tile-cache/places/` have no size
+limit and only grow; delete them to start over.
 
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
 place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA leads back
