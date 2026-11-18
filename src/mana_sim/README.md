@@ -177,6 +177,28 @@ and every mark of that scenario fails; the next scenario is still played. The lo
 route are in `gazebo_scenarios.py`; the results are in the Gazebo section of
 [docs/results.md](../../docs/results.md).
 
+### The same drive with the baseline in place of the core (#81)
+
+`core_node` takes the parameter `controller`: `mana` (the default) or `baseline`, the if-else
+controller of `mana_core/baseline.py`. With `baseline` the node decides with the same thresholds
+and sends the same drive requests and messages, so a drive can be repeated with only the decider
+changed. The step directions of `directions:=true` are not available for it.
+
+```bash
+ros2 run mana_core evaluate --world gazebo --baseline      # every scenario with the baseline deciding
+ros2 run mana_core evaluate --world gazebo --compare       # both, one simulation each, side by side
+python3 -m mana_sim.drive_summary gazebo_traces --update docs/results.md
+```
+
+The baseline's traces go in `gazebo_traces/baseline/`. `drive_summary` reads both folders and
+writes a section of `docs/results.md`: for each drive its time and distance, each stop and
+slow-down with its cause and place, the time on tracks, the messages, the takeovers and the
+mishaps, and, for the same drive with the baseline, the first place on the route where the two
+decided differently. The two are separate simulations, so they are compared at the same place on
+the route, not at the same time. For a drive with a person at the controls (the test drive,
+#76 to #80) the same parameter puts the baseline between the driver and the chair; the summary
+reads any trace in the format of `gazebo_scenarios.trace_to_json`.
+
 ## Smoke test
 
 `tools/sim_smoke.sh` starts the world headless with no cameras and no lidar (`sensors:=false`, for a machine
@@ -242,8 +264,10 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   room, Wi-Fi fades in the hall. `ros2 run mana_sim zone_node --ros-args -p use_sim_time:=true`
   follows the chair's true position and calls `set_fault` on entering or leaving; it leaves a
   zone only 0.3 m outside it, so a doorway does not flicker. In Gazebo, with the chair moved from
-  the plaza to the lobby, the dark room and back, `fault_state` read none, GPS lost, camera dark
-  and GPS lost, then none.
+  the plaza to the lobby, the dark room and back, `fault_state` read `none`, `gps dropout`,
+  `camera dark, gps dropout`, then `none`. A change `fault_node` refuses is logged as a
+  warning. Leaving a zone switches its fault off even when `fault_script`, the `dark` scenario or
+  the panel's "Darkness" toggle switched it on, so do not use them with `zone_node`.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.

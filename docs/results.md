@@ -397,6 +397,63 @@ The first three columns are the testing list's 4,074 command clips; on the offic
 
 So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
 
+**BC-ResNet-8** (`--kws`) was trained by `tools/train_commands.py --tau 8 --epochs 5 --hold-out backward forward follow learn visual` on this laptop's CPU, at about 28 minutes an epoch. The paper trains for 200 epochs on a GPU. Its best accuracy on `validation_list.txt` was 95.9%, after the fifth epoch.
+- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The testing list has 818 clips of them (backward 165, forward 155, follow 172, learn 161, visual 165). The other 20 words are in its "other word" class.
+- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest, in steps of 0.05, that keeps 90% of the clean command clips right. That is 0.85 (3,366 of 3,703, 90.9%; 0.9 keeps 88.9%). `--choose` makes this choice from the validation run's CSVs (`choose_threshold()`).
+- "Stop at any": stop acts at any probability when it is the top class, and the other nine words at 0.85 (`--stop-any`). This was also decided on the validation list, by what it does to stop. At 0.85, stop was missed 14 times in 350 clean and 33 at 10 dB. At any probability it was missed 7 and 11 times, while other words were heard as "stop" 46 and 80 times of 6,278, against 3 and 14. A missed stop is the unsafe case and a stop not asked for the safe one, and the core already obeys a spoken stop at any trust (`on_command`), so stop acts at any probability. `--choose` prints these figures too.
+- The demo's `Spotter` acts at 0.9 by default.
+- CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
+
+```
+python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --choose datasets/speech_commands/val_kws_0_clean.csv datasets/speech_commands/val_kws_0_snr10.csv
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
+```
+
+The tables below were scored from the threshold-0 CSVs at each setting (`rethreshold()`, as `--choose` does). `--threshold 0.85 --stop-any` runs the model at that setting directly. It can differ by a clip whose probability rounds to 0.85 in the CSV.
+
+The settings, on the testing list (stop: 411 clips):
+
+| Setting | Right, clean | Right, 10 dB | False activations, clean | False activations, 10 dB | Stop missed, clean | Stop missed, 10 dB |
+|---|---|---|---|---|---|---|
+| top class (threshold 0) | 96.3% | 94.3% | 14.6% | 21.0% | 0 | 0.5% |
+| 0.9, the demo's default | 88.3% | 81.3% | 1.9% | 2.1% | 3.6% | 10.0% |
+| 0.85 | 90.5% | 84.3% | 3.0% | 3.3% | 2.2% | 8.0% |
+| 0.85, stop at any | 90.6% | 85.0% | 3.6% | 4.2% | 0.5% | 1.7% |
+| Vosk, above | 97.2% | 91.1% | 10.8% | 16.9% | 1.0% | 2.4% |
+
+0.85 with stop at any, at every noise level (measured on 17 November 2026):
+
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 818) | Official set: other words (of 408) | Official set: noise alone (of 408) |
+|---|---|---|---|---|---|---|---|
+| clean | 90.6% (3,693) | 0.5% | 8.8% | 3.6% (249) | 7.2% (59) | 3.2% (13) | 0 |
+| noise at 20 dB | 89.4% | 0.8% | 9.8% | 3.7% (258) | 6.8% (56) | 2.9% (12) | 0 |
+| noise at 10 dB | 85.0% | 1.1% | 13.9% | 4.2% (294) | 7.2% (59) | 4.4% (18) | 0 |
+| noise at 5 dB | 79.5% | 1.2% | 19.3% | 4.8% (330) | 6.4% (52) | 3.4% (14) | 1 |
+| noise at 0 dB | 66.7% | 1.4% | 31.8% | 5.0% (347) | 5.1% (42) | 3.2% (13) | 3 |
+
+| Sound | Stop missed | Stop heard as "go" | Stop heard as another word | "Go" heard as "stop" |
+|---|---|---|---|---|
+| clean | 0.5% (2) | 0 | 0 | 2 |
+| noise at 20 dB | 1.0% (4) | 0 | 0 | 1 |
+| noise at 10 dB | 1.7% (7) | 1 | 1 | 2 |
+| noise at 5 dB | 2.7% (11) | 2 | 1 | 4 |
+| noise at 0 dB | 9.0% (37) | 1 | 1 | 4 |
+
+The official set's 4,074 command clips give the same within 0.6 points, and its stop clips within 0.9.
+
+- **The threshold trades commands for false activations.** At its top class BC-ResNet is close to Vosk clean (96.3%, Vosk 97.2%) and holds up better in noise (88.7% right at 0 dB, Vosk 70.2%), but it hears other words as commands more often (14.6%, Vosk 10.8%). At 0.85 it acts on 3.6% of them, and misses 8.8% of the commands clean and 31.8% at 0 dB: a missed command is said again.
+- **Stop, with stop at any:** 0.5% missed clean and 9.0% at 0 dB (Vosk 1.0% and 19.0%), and heard as "go" at most twice in 411 at any level.
+- **"Go" by mistake is rare:** another word started it 29 times in 6,931 clean clips (Vosk 195). The most common false activations were "dog" heard as "down" (27), "learn" as "no" (22), "dog" as "stop" (20) and "two" as "go" (17). A stop not asked for stops the device, the safe side.
+- **Words it never heard in training are taken for commands about twice as often** as the words it was trained to reject: 7.2% (59 of 818) against 3.1% (190 of 6,113) clean. Words outside the dataset are likely to be closer to the first rate.
+- **Noise alone** woke it once at 5 dB and 3 times at 0 dB (of 408), each time as "stop", and never with less noise.
+- **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
+- **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
+
+These favour 0.85 with stop at any over the demo's 0.9. The demo is not changed here: its `Spotter` listens to a running stream every 0.25 s, which these aligned clips do not cover, and a stop at any probability should be tried on a stream first. One false stop is safe, but many would make the device unusable.
+
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
 `tools/sound_hazards.py` scores both AudioSet taggers as they come, with no training, on all 8,732 clips of UrbanSound8K.
@@ -422,6 +479,58 @@ What the runs show:
 - **Time:** a median 79 ms per clip for EfficientAT and 132 ms for YAMNet, on this laptop's CPU. Other heavy jobs ran at the same time, so these are upper bounds. Either keeps up with a microphone heard once a second.
 
 Not done here: the model on the phone's microphone stream, and the hazard report to the core.
+
+## Does the detector's confidence mean what the core's trust assumes? (#87)
+
+Measured on 9 November 2026 with `tools/calibrate_detector.py`: `yolo26n.pt` at 416, as the ROS
+node runs it, on SANPO-Real frames with masks (`tools/fetch_sanpo.py`, 30 train and 30 test
+sessions, one annotated frame in 30). That is 197 train frames and 194 test frames, with 2705 and
+1803 detections of an obstacle class at confidence 0.05 or more. A detection is right when its box
+meets an object of that kind in the mask with IoU 0.5 or more, each object once: a person a
+pedestrian or a rider, a car, bus or truck a vehicle, a dog an animal, and every other obstacle
+label (a chair, a bench, a potted plant, a fire hydrant...) SANPO's broad "obstacle" class, a loose
+match. Boxes under 40 pixels high are left out. SANPO's masks can still miss objects, so "right" is
+a lower bound.
+
+| Confidence | Train: n | Train: right | Test: n | Test: right |
+|---|---|---|---|---|
+| 0.0 to 0.1 | 1175 | 8% | 780 | 8% |
+| 0.1 to 0.2 | 761 | 18% | 409 | 21% |
+| 0.2 to 0.3 | 231 | 34% | 151 | 26% |
+| 0.3 to 0.4 | 133 | 56% | 101 | 44% |
+| 0.4 to 0.5 | 94 | 80% | 78 | 77% |
+| 0.5 to 0.6 | 92 | 88% | 66 | 80% |
+| 0.6 to 0.7 | 87 | 92% | 71 | 89% |
+| 0.7 to 0.8 | 79 | 95% | 80 | 93% |
+| 0.8 to 1.0 | 53 | 92% | 67 | 97% |
+| **Expected calibration error** | | 0.074 | | 0.071 |
+
+On the test split by kind: people 876 detections (ECE 0.106), vehicles 699 (0.070), the other
+obstacles 228 (0.074). People and vehicles are under-confident from 0.4 up (a person at 0.4 to 0.5
+was right 81 percent of the time, 36 boxes); the other obstacles are right about half the time at
+0.4 to 0.6 and do not follow their confidence above it (2 to 12 boxes a bin).
+
+- **The confidence is under-confident from 0.3 to 0.8, though its overall error is low.** The error
+  is 0.07, low because most detections sit in the well-calibrated bins under 0.2 (1189 of the 1803
+  on the test split). A confidence of 0.4 to 0.5 was right 77 to 80 percent of the time, of 0.5 to
+  0.6 80 to 88 percent, and of 0.6 to 0.8 89 to 95 percent: 18 to 24 points over the confidence.
+- **What a map does is move the core's gate.** Platt scaling (a logistic map of the confidence's
+  logit) and isotonic regression lowered the test error to 0.028 and 0.027. Both put a trust of 0.5
+  at a confidence of 0.30. Near the gate neither is exact: their trusts of 0.5 to 0.6 were right 39
+  percent of the time on the test split (about 16 points under), where the raw confidence of 0.5 to
+  0.6 was right 80 percent (about 25 points over). So a map does not make the gate more accurate;
+  it lowers it, from a confidence of 0.5 to 0.30: more objects passed to the core, at a lower share
+  right. Waqas's run on 2,331 SANPO test frames shows the trade: the raw gate passed 2,857 boxes,
+  89 percent right (2,554 of the 5,802 right ones); Platt passed 5,314, 76 percent right (4,025).
+- So the detector's trust stays its confidence, times the light factor (D14): that keeps the core's
+  operating point where it is until min_trust itself is chosen (below), rather than moving it as a
+  side effect of calibration. The ground
+  classifier's calibration needs the trained model (#38), and the light factor needs dark frames
+  (#89); both are still open.
+- **What it means for min_trust (0.5):** the core drops every report under 0.5, and a confidence
+  of 0.4 to 0.5 was right 77 to 80 percent of the time (172 boxes on both splits). For obstacles a
+  missed person costs more than a needless stop, so this table is the evidence for lowering the
+  detector's threshold. That is a separate decision, not made here.
 
 ## Mutation testing (#83)
 
@@ -556,6 +665,75 @@ ros2 run mana_core evaluate --world gazebo --rerun       # play again, also thos
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+Played on 17 November 2026 with `evaluate --world gazebo --compare`, one simulation for each controller and scenario: **MANA met 44 of 44 pass marks and the baseline 32 of 44**, and the baseline went over the drop in `manual_drop` (in manual mode it does not slow down for the drop, so it reaches the edge at full speed and goes over before its stop takes hold; MANA slows down at 0.7 m). One run each is a small sample, and MANA's own score in Gazebo is not always the same: an earlier run of the same code met 41 of 44, because `level` asks for tracks at the start of the run and stops for a step that is not there (#202).
+
+<!-- drives:start (written by mana_sim.drive_summary; do not edit) -->
+### Each drive, and the same drive with the baseline
+
+Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently (for a scenario in which the user speaks at set times, `stop`, the first moment instead, because the stop comes at a different place in each simulation). `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
+
+- **level:** 3.9 s, 4.1 m; 0.0 s on tracks; 0 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing down (0.6 s, at 0.5 m)
+  - mishaps: none
+- **ramp:** 31.1 s, 11.5 m; 0.0 s on tracks; 1 message; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the camera), slowing down (0.3 s, at 0.5 m); Ramp ahead, slowing down (29.4 s, at 1.3 m)
+  - mishaps: none
+- **stairs:** 24.5 s, 6.3 m; 17.6 s on tracks; 9 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.1 s, at 6.0 m)
+  - slow-downs: Possible step ahead, slowing down (20.1 s, at 0.5 m); Drop ahead, slowing down (3.3 s, at 6.0 m)
+  - mishaps: none
+- **curb:** 21.7 s, 5.8 m; 14.0 s on tracks; 6 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.0 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (17.6 s, at 0.5 m); Possible step ahead, slowing down (3.1 s, at 5.5 m)
+  - mishaps: none
+- **stop:** 6.9 s, 4.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Stopped by you (3.1 s, at 2.9 m)
+  - slow-downs: none
+  - mishaps: none
+- **stairs_down:** 38.0 s, 5.3 m; 14.2 s on tracks; 6 messages; 0 takeovers
+  - stops: Stairs down ahead. Say yes to go down on tracks (19.5 s, at 0.9 m); Step ahead, stopping (1.1 s, at 5.1 m)
+  - slow-downs: Drop ahead, slowing down (0.6 s, at 0.7 m); Going down the stairs on tracks (14.7 s, at 1.6 m); Possible step ahead, slowing down (1.2 s, at 5.1 m); Possible step ahead, slowing down (0.3 s, at 5.8 m)
+  - mishaps: none
+- **drop:** 29.9 s, 2.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Drop ahead, stopping (22.8 s, at 2.9 m)
+  - slow-downs: Drop ahead, slowing down (7.1 s, at 0.5 m)
+  - mishaps: none
+- **manual_drop:** 19.9 s, 2.1 m; 0.0 s on tracks; 1 message; 1 takeover
+  - stops: Drop ahead, stopping (18.1 s, at 2.6 m)
+  - slow-downs: Drop ahead, slowing down (0.2 s, at 0.7 m)
+  - mishaps: none
+- **picture:** 19.6 s, 8.6 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Possible step ahead, slowing down (13.6 s, at 0.5 m); Ramp ahead, slowing down (4.1 s, at 7.4 m)
+  - mishaps: none
+- **dark:** 19.9 s, 6.4 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: Obstacle ahead, stopping (11.4 s, at 6.9 m)
+  - slow-downs: Obstacle ahead, slowing down (2.1 s, at 6.0 m)
+  - mishaps: none
+- **imu_lost:** 19.9 s, 6.2 m; 18.4 s on tracks; 6 messages; 0 takeovers
+  - stops: Drop ahead, stopping (0.9 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (15.9 s, at 0.7 m); On tracks until the ground is level (3.1 s, at 5.7 m)
+  - mishaps: none
+
+| Drive | MANA stops | Baseline stops | MANA on tracks | Baseline on tracks | MANA mishaps | Baseline mishaps | First difference |
+|---|---|---|---|---|---|---|---|
+| `level` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `ramp` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs` | 1 (Step ahead, stopping) | 0 | 17.6 s | 26.7 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `curb` | 1 (Step ahead, stopping) | 0 | 14.0 s | 20.6 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.1 s: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Drop ahead, stopping); baseline wheels at 30% (Drop ahead, slowing down) |
+| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 1.9 s: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
+| `picture` | 0 | 0 | 0.0 s | 25.1 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline wheels at 100% (Level ground) |
+| `dark` | 1 (Obstacle ahead, stopping) | 1 (Obstacle ahead, stopping) | 0.0 s | 0.0 s | none | none | 6.9 m: MANA stops (Obstacle ahead, stopping); baseline wheels at 30% (Obstacle ahead, slowing down) |
+| `imu_lost` | 1 (Drop ahead, stopping) | 2 (Drop ahead, stopping) | 18.4 s | 30.4 s | none | none | 0.7 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+
+11 drives.
+<!-- drives:end -->
 
 ## Zero-shot detectors on the SANPO test split (#51, #49)
 
@@ -751,3 +929,92 @@ What follows:
   node's default; until then the node keeps YOLO26n zero-shot.
 
 Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
+
+## Where the detector fails on SANPO, with pictures (#51)
+
+The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SANPO test frames.
+`tools/failure_examples.py` finds every near box a model missed and every box it gave wrongly at
+confidence 0.3, scored exactly as `tools/eval_detector.py` scores them, and draws the strongest one
+per walk: SANPO's boxes in green (a missed one drawn thicker), the model's in orange with its
+confidence. At 0.3, near the chair. 0.3 is what the detector node keeps, but only a box of 0.5
+or more becomes an obstacle (`min_confidence`, the core's `min_trust`), so the last column gives
+the wrong boxes the chair would act on:
+
+| Class | Near boxes missed | In walks | Boxes given wrongly | In walks | Of them at 0.5 or more |
+|---|---:|---:|---:|---:|---:|
+| stairs | 28 of 37 | 4 | 52 | 13 | 20 |
+| opening-door | 166 of 175 | 13 | 55 | 13 | 11 |
+| pole | 1,674 of 1,942 | 44 | 485 | 41 | 151 |
+
+**Stairs.** 22 of the 37 near staircases of the test split are in one walk, up an outdoor flight
+with railings, and 16 of the 28 misses are there (6 of its 22 found). Looked at by eye, the strongest wrong stairs box
+in each of the 13 walks was on:
+
+| What the wrong stairs box was on | Walks |
+|---|---:|
+| Real stairs: entrance steps and a subway stair seen from above, neither labelled in SANPO, and the lower part of a staircase whose SANPO box covers more | 3 |
+| Probably a stoop (brick steps behind a railing) | 1 |
+| A single raised edge: a curb, a planter's edge, a block | 5 |
+| A railing | 2 |
+| Crosswalk stripes | 2 |
+
+So a few of the "wrong" stairs are stairs that SANPO does not label, but most are things with
+stripes or an edge that look like a step: railings, crosswalks and curbs.
+
+**The box's extent.** SANPO's boxes are drawn round its masks, so one box can cover a whole flight
+of stairs or a whole scaffold labelled "pole", where the model boxes the part in view; and a pole is
+so thin that a box a few pixels narrower falls under IoU 0.5. To see how much of the score that
+costs, the same model was scored again with a match at IoU 0.3 (`--iou 0.3`), near objects:
+
+| Class | AP at IoU 0.5 | AP at IoU 0.3 | Recall at 0.3, IoU 0.5 | Recall at 0.3, IoU 0.3 | Precision at 0.3, IoU 0.5 | Precision at 0.3, IoU 0.3 |
+|---|---:|---:|---:|---:|---:|---:|
+| pedestrian | 0.80 | 0.86 | 0.77 | 0.80 | 0.84 | 0.89 |
+| vehicle | 0.74 | 0.82 | 0.70 | 0.75 | 0.80 | 0.86 |
+| stairs | 0.22 | 0.26 | 0.24 | 0.32 | 0.15 | 0.20 |
+| opening-door | 0.04 | 0.05 | 0.05 | 0.06 | 0.14 | 0.16 |
+| pole | 0.14 | 0.23 | 0.14 | 0.17 | 0.36 | 0.45 |
+
+With the looser match, 12 of the 37 near staircases are found instead of 9. So the box's
+extent explains part of the stairs and pole scores, not most of them: at either IoU most near
+stairs, doors and poles are missed.
+
+Pictures (SANPO frames, CC BY 4.0, Google Research; the walk and frame of each are listed under
+the pictures):
+
+| | |
+|---|---|
+| ![](failures/stairs-box-extent.jpg) | ![](failures/stairs-unlabelled-from-above.jpg) |
+| **Stairs, the box's extent.** SANPO's box covers the whole flight from underfoot; the model boxed the steps ahead (0.42). Under IoU 0.5, so a miss. | **Stairs seen from above, not labelled.** A subway stair going down, found at 0.63; SANPO has no stairs there, so it counts as wrong. |
+| ![](failures/stairs-railing.jpg) | ![](failures/door-glass-missed.jpg) |
+| **A railing taken for stairs** (0.74). | **Glass doors missed.** Shop doors of glass at close range, with nothing found. |
+| ![](failures/door-sign.jpg) | ![](failures/pole-thin-box.jpg) |
+| **A sign board taken for a door** (0.77). | **A thin pole.** Found at 0.94, but SANPO's box also takes in the base, so the overlap is under 0.5. |
+
+SANPO test frames, in the order above (walk, camera, frame): `i2jglnBfoIqIIA7ojQGe-4vK07hUm4T3`,
+chest, 510; `wta4PcYCd4Kfjw_DuB8Bd-dO2Du3ZcnN`, chest, 120; `ZR3hpsQxnbI8C4aSV2UMIKf15QvS6qvQ`,
+chest, 410; `6lm2fRHPl4AtOLKJkEXRJo9MQJVeCT_y`, head, 180; `WCzpj9Vid4Wo4Y0mForLrXk9idQqqxxi`,
+chest, 390; `y-W7aubs2gI5x5AioURb0dPfr9qWveYC`, chest, 110. Scaled to 640 pixels wide, boxes drawn.
+
+What follows:
+
+- **Glass doors are missed, and doors in general.** 166 of the 175 near doors, in all 13 walks
+  that have them. The looser match does not change that, so these are real misses; the ones looked
+  at were doors set into shop fronts at the side of the path, glass ones among them. The detector
+  alone cannot be relied on for doors. Glass is also hard for the lidar and the 3D camera, which
+  can see through it, so a glass door is a case to test on the chair itself (#89).
+- **Stairs are confused with striped and edged ground**, and are missed in the one walk that has
+  most of them. Some of SANPO's stairs labels are loose (a box over a whole flight) or missing, so
+  a stairs figure from SANPO alone is not exact, and the 37 near staircases are too few for one.
+  Stairs from our own recordings (#89) are still needed, as the two-source rule already requires
+  the 3D camera too.
+- **Dark corridors are not in this set.** SANPO's walks are mostly outdoors in daylight, so this cannot
+  show the detector in the dark; that needs the dark frames of #89.
+
+Run it:
+
+```
+python3 tools/failure_examples.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
+    --weights runs/detect/train/weights/best.pt --out datasets/failures
+python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 --iou 0.3 \
+    --weights runs/detect/train/weights/best.pt
+```

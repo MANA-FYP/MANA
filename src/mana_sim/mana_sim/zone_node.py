@@ -34,9 +34,20 @@ class ZoneNode(Node):
             return
         for sensor, kind, on, value, zone in self.waiting:
             req = SetFault.Request(sensor=sensor, kind=kind, active=on, value=value)
-            self.client.call_async(req)
-            self.get_logger().info(f"{'into' if on else 'out of'} {zone}: {sensor} {kind} {on}")
+            what = f"{'into' if on else 'out of'} {zone}: {sensor} {kind} {on}"
+            self.client.call_async(req).add_done_callback(lambda f, w=what: self.answered(f, w))
+            self.get_logger().info(what)
         self.waiting = []
+
+    def answered(self, future, what: str) -> None:
+        """A refused change, or a call that failed (fault_node gone), is said: the zone's fault is
+        then not as the log above says (#190)."""
+        if (err := future.exception()) is not None:
+            self.get_logger().warning(f"{what}: set_fault failed: {err}")
+            return
+        res = future.result()
+        if res is not None and not res.ok:
+            self.get_logger().warning(f"{what}: refused by fault_node: {res.message}")
 
 
 def main() -> None:
