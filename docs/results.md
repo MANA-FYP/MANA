@@ -294,6 +294,8 @@ The local costmap was 4 by 4 m, while MPPI looks 40 steps of 0.1 s ahead (up to 
 
 8 by 8 m is in `nav2.yaml` now. What it costs the computer was not measured.
 
+The branch as it is now (8 by 8 m, the lattice file from the package, the roll check, the clock wait) was run 6 more times: 23 of 24 goals were reached, and the corner goal was missed once. That run's goal 2 ended "Failed to make progress" after 81.6 s, with the chair at 13.82, 4.98, short of the corner; the log has no "Optimizer fail to compute path" in it, and why it stood still is not known. Over all 12 runs at 8 by 8 m, 47 of 48 goals were reached (11 of 12 for the corner goal), against 24 of 24 at 4 by 4 m, so 8 by 8 m is not shown to be better at reaching the goals; the 6 runs are too few to tell a 1 in 12 miss from none. The failures of the controller and the times are lower. No "Optimizer fail to compute path" in any of the 12.
+
 Trade-offs and limits:
 - **The path is no longer refreshed every second.** The chair follows its path until it is blocked or the goal changes, so a change in the map that does not block the path is not planned around.
 - **The last goal ends 28 degrees off its heading** (29 in one run at 8 by 8 m), against a yaw tolerance of 0.5 rad, 29 degrees. In the 4 by 4 m runs it was 28 degrees in all six.
