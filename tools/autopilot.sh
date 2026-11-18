@@ -56,15 +56,19 @@ start "$OUT/core.log" ros2 run mana_core core_node --ros-args --params-file "$SH
 start "$OUT/slam.log" ros2 run slam_toolbox localization_slam_toolbox_node \
   --ros-args --params-file "$SHARE/config/slam_localisation.yaml" -p map_file_name:="$MAP" \
   -p transform_publish_period:=0.0
-# the ros2 command line itself can take more than 5 s to start on a busy computer
-deadline=$((SECONDS + 120))
-until timeout 20 ros2 lifecycle get /slam_toolbox >/dev/null 2>&1; do
-  [ $SECONDS -ge $deadline ] && { echo "FAIL slam_toolbox was not found"; exit 1; }
+# Step slam_toolbox to active, reading its state each time. On a busy computer (a CI machine)
+# the ros2 command line can take more than 5 s to start, and the daemon's graph can lose the node
+# between a get and a set ("Node not found"), so the daemon is not used and each step is retried.
+lc() { timeout 40 ros2 lifecycle "$1" --no-daemon --spin-time 5 /slam_toolbox "${@:2}" 2>/dev/null; }
+deadline=$((SECONDS + 180))
+until [[ "$(lc get)" == active* ]]; do
+  [ $SECONDS -ge $deadline ] && { echo "FAIL slam_toolbox did not activate"; exit 1; }
+  case "$(lc get)" in
+    unconfigured*) lc set configure >/dev/null ;;
+    inactive*) lc set activate >/dev/null ;;
+  esac
   sleep 2
 done
-timeout 40 ros2 lifecycle set /slam_toolbox configure >/dev/null \
-  && timeout 40 ros2 lifecycle set /slam_toolbox activate >/dev/null \
-  || { echo "FAIL slam_toolbox did not activate"; exit 1; }
 start "$OUT/gate.log" ros2 run mana_position lidar_gate --ros-args -p use_sim_time:=true \
   -r pose:=/pose -r odom:=/odom
 # ekf_global owns map -> odom (slam_toolbox publishes none, transform_publish_period 0)
