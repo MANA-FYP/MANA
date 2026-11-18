@@ -79,7 +79,28 @@ start "$OUT/ekf.log" ros2 run robot_localization ekf_node --ros-args -r __node:=
 # computer the EKF can take a while: wait for the chair's pose in the map first
 python3 "$HERE/wait_tf.py" map base_link --seconds 120 \
   || { echo "FAIL no map -> base_link transform"; exit 1; }
-start "$OUT/nav2.log" ros2 launch mana_sim autopilot.launch.py
+# Even then, on a busy computer (a CI machine with Gazebo, slam_toolbox and the EKF running) the
+# local costmap can miss odom -> base_link for its whole minute and the lifecycle manager aborts
+# the bring-up. Wait for bt_navigator to be active, and start Nav2 once more if it gave up.
+nav2_up() {
+  local deadline=$((SECONDS + 240))
+  while [ $SECONDS -lt $deadline ]; do
+    [[ "$(timeout 40 ros2 lifecycle get --no-daemon --spin-time 5 /bt_navigator 2>/dev/null)" \
+      == active* ]] && return 0
+    grep -q "Aborting bringup" "$OUT/nav2.log" 2>/dev/null && return 1
+    sleep 3
+  done
+  return 1
+}
+for attempt in 1 2; do
+  start "$OUT/nav2.log" ros2 launch mana_sim autopilot.launch.py
+  nav2=${PIDS[-1]}
+  nav2_up && break
+  [ $attempt = 2 ] && { echo "FAIL Nav2 did not come up"; exit 1; }
+  echo "Nav2 did not come up: starting it again"
+  cp "$OUT/nav2.log" "$OUT/nav2_attempt$attempt.log"
+  kill -TERM -- "-$nav2" 2>/dev/null; sleep 5; kill -KILL -- "-$nav2" 2>/dev/null
+done
 start "$OUT/drive_request.csv" ros2 topic echo /drive_request mana_msgs/msg/DriveRequest --csv
 # The chair starts 1.0 m from the west wall and its tracks reach 1.08 m back, so the footprint the
 # lattice planner checks touches the wall there and it will not plan ("Start occupied"). Roll it
