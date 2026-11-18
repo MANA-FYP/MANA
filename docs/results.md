@@ -175,6 +175,17 @@ Not tested in this world: the switch from GPS to the lidar map, which needs the 
 - **Coming back:** 5.1 to 5.3 s after each outage ended, its `back_s` of 5 s.
 - **The failure in run 1:** the extra two changes were not in the outage. All times here are the simulation clock, which both `fault_script`'s log ("clock") and `/position` use: the outages ran from 46.5 to 76.5 s and from 106.5 to 136.5 s. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, between the two outages, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
 - **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Runs 1, 3 and 4 all ran alongside other CPU-heavy jobs on the laptop, so load alone does not explain it.
+- **Five more runs, no flap (#201):** played on 18 November 2026 on GitHub's machines (`heavy-runs.yml`, one run on each 4-core machine, the map from #43 as the release `maps-indoor-sim`), with the fixes logged. All five pass:
+
+  | Run | Outage 1: to the lidar map after / changes / GPS back after its end | Outage 2 | Result |
+  |---|---|---|---|
+  | 9 | 1.6 s / 2 / 5.2 s | 1.6 s / 2 / 5.1 s | pass |
+  | 10 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.1 s | pass |
+  | 11 | 1.6 s / 2 / 5.1 s | 1.6 s / 2 / 5.3 s | pass |
+  | 12 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+  | 13 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+
+  Outside the outages the fixes never came more than 0.2 s apart in any of them. So the flap of run 1 has not come back in 5 runs on other machines (12 of 13 runs pass in all), and its cause is still not known: it is the one fail in 26 outages.
 
 ## Lidar localisation indoors (#43)
 
