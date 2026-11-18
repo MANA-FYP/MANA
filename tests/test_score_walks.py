@@ -11,8 +11,8 @@ from tools.score_walks import Decision, Mark
 def test_a_reaction_in_the_window_for_a_fitting_reason_catches_the_hazard():
     marks = [Mark("w", "stairs_up", 10.0, 15.0)]
     decided = [
-        Decision(9.0, "slow", "Stairs ahead, changing to tracks"),  # before it is in view
-        Decision(11.5, "go", "Level ground"),  # not a reaction
+        Decision(9.0, "slow", "Stairs ahead, changing to tracks"),  # before it is in view,
+        Decision(9.5, "go", "Level ground"),  # and over before start_s: not a reaction to it
         Decision(12.0, "slow", "Ramp ahead"),  # the wrong hazard
         Decision(12.5, "slow", "Stairs ahead, changing to tracks"),
     ]
@@ -99,3 +99,44 @@ def test_a_recording_with_no_decisions_is_named(tmp_path, capsys):
     (tmp_path / "marks.csv").write_text("recording,hazard,start_s,end_s\nz,ramp,1,2\n")
     assert sw.main(["--marks", str(tmp_path / "marks.csv"), "--decisions", str(tmp_path)]) == 2
     assert "no decisions for z" in capsys.readouterr().err
+
+
+def test_a_reaction_held_from_just_before_the_mark_is_caught_not_a_false_alarm():
+    """Mushahid's case on #221: MANA slows at 9.6 s for a step marked from 10.0 s and holds it
+    past the hazard; the demo writes one row, at its start."""
+    marks = [Mark("w", "stairs_up", 10.0, 15.0)]
+    decided = [
+        Decision(9.6, "slow", "Possible step ahead, slowing down"),
+        Decision(16.0, "go", "Level ground"),
+    ]
+    (row,), false = sw.score(marks, decided)
+    assert row["caught"] and row["reaction_s"] == 0.0 and row["lead_s"] == 5.0
+    assert false == []
+
+
+def test_a_reaction_held_from_long_before_does_not_answer_a_later_mark():
+    marks = [Mark("w", "person", 30.0, 34.0)]
+    decided = [Decision(20.0, "stop", "Obstacle ahead, stopping")]  # held to the end
+    (row,), false = sw.score(marks, decided)
+    assert not row["caught"] and [d.walk_s for d in false] == [20.0]
+    (row,), false = sw.score(marks, decided, early_s=10.0)  # unless --early allows it
+    assert row["caught"] and false == []
+
+
+def test_a_walk_with_nothing_marked_is_scored_too(tmp_path, capsys):
+    (tmp_path / "marks.csv").write_text("recording,hazard,start_s,end_s\na,ramp,5,9\n")
+    out = tmp_path / "decided"
+    out.mkdir()
+    head = "walk_s,n,kind,state,why,text\n"
+    (out / "a.csv").write_text(head + '6,1,decision,slow,"Ramp ahead",x\n')
+    (out / "flat.csv").write_text(
+        head
+        + '30,1,decision,stop,"Obstacle ahead, stopping",x\n'
+        + '31,2,decision,go,"Level ground",x\n'
+        + "60,3,decision,go,,x\n"
+    )
+    assert sw.main(["--marks", str(tmp_path / "marks.csv"), "--decisions", str(out)]) == 0
+    text = capsys.readouterr().out
+    assert "2 walks scored, 1 of them with no hazard marked" in text
+    assert "false alarm in flat at 30.0 s: stop: Obstacle ahead, stopping" in text
+    assert "False alarms: 1 in 1.1 minutes" in text  # 0.1 min for a, 1.0 for flat

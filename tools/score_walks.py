@@ -18,10 +18,14 @@ The marks are a CSV with one row per hazard, marked by hand while watching the r
   is too late and counts as a miss.
 
 A hazard is caught when MANA slows down or stops for a reason that fits it (REASONS) between
-start_s and end_s. The reaction time is from start_s to the first such decision, and the lead is
-what was left until end_s. A stop or slow-down for a hazard's reason that falls in no window of a
-hazard it fits is a false alarm, given per minute of walking (the recording's length, from its
-session.jsonl when --recordings is given, else its last decision). Slow-downs that report MANA's own
+start_s and end_s, or when such a stop or slow-down began up to --early seconds (3) before start_s
+and still held at start_s: the demo writes a decision only when it changes, and MANA may see a
+hazard a moment before the person marking it does. That one counts with a reaction of 0 s.
+The reaction time is from start_s to the first such decision, and the lead is what was left
+until end_s. A stop or slow-down for a hazard's reason that answers no mark is a
+false alarm, given per minute of walking over every walk in --decisions, marked or not (each
+walk's length from its session.jsonl when --recordings is given, else its last decision). A walk
+with nothing to mark is replayed and scored too. Slow-downs that report MANA's own
 state (a sensor not ready, position unknown, no alert link, wheel slip, on tracks) are neither:
 they are not about the ground ahead.
 
@@ -34,6 +38,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import statistics
 import sys
 from dataclasses import dataclass
@@ -128,15 +133,38 @@ def walk_minutes(recording: Path | None, decisions: list[Decision]) -> float:
     return max((d.walk_s for d in decisions), default=0.0) / 60
 
 
-def score(marks: list[Mark], decisions: list[Decision]) -> tuple[list[dict], list[Decision]]:
+def held(decisions: list[Decision]) -> list[tuple[Decision, float]]:
+    """Each stop or slow-down with the time it held until: the demo writes a decision only when it
+    changes, so one row stands until the next one (or the end of the walk)."""
+    ordered = sorted(decisions, key=lambda d: d.walk_s)
+    ends = [d.walk_s for d in ordered[1:]] + [math.inf]
+    return [(d, end) for d, end in zip(ordered, ends, strict=True) if d.state in ("stop", "slow")]
+
+
+EARLY_S = 3.0  # how long before a mark's start_s a reaction may begin and still answer it
+
+
+def explains(d: Decision, until: float, m: Mark, early_s: float = EARLY_S) -> bool:
+    """Whether a stop or slow-down answers a mark: it fits the hazard and starts in its window,
+    or it began at most early_s before start_s and still held then (MANA saw the hazard a moment
+    before the person marking did; start_s is a judgement by eye)."""
+    if not fits(d.why, m.hazard):
+        return False
+    began_early = m.start_s - early_s <= d.walk_s < m.start_s < until
+    return m.start_s <= d.walk_s <= m.end_s or began_early
+
+
+def score(
+    marks: list[Mark], decisions: list[Decision], early_s: float = EARLY_S
+) -> tuple[list[dict], list[Decision]]:
     """One row per mark (caught or not, the reaction time and the lead), and the false alarms,
-    for one recording."""
-    acting = [d for d in decisions if d.state in ("stop", "slow")]
+    for one recording. A reaction already in force at start_s counts with a reaction of 0 s."""
+    acting = held(decisions)
     rows = []
     for m in marks:
-        hit = next(
-            (d for d in acting if m.start_s <= d.walk_s <= m.end_s and fits(d.why, m.hazard)), None
-        )
+        answers = [d for d, until in acting if explains(d, until, m, early_s)]
+        hit = min(answers, key=lambda d: max(d.walk_s, m.start_s)) if answers else None
+        at = max(hit.walk_s, m.start_s) if hit else None
         rows.append(
             {
                 "recording": m.recording,
@@ -144,17 +172,16 @@ def score(marks: list[Mark], decisions: list[Decision]) -> tuple[list[dict], lis
                 "start_s": m.start_s,
                 "end_s": m.end_s,
                 "caught": hit is not None,
-                "reaction_s": round(hit.walk_s - m.start_s, 2) if hit else None,
-                "lead_s": round(m.end_s - hit.walk_s, 2) if hit else None,
+                "reaction_s": round(at - m.start_s, 2) if hit else None,
+                "lead_s": round(m.end_s - at, 2) if hit else None,
                 "decision": f"{hit.state}: {hit.why}" if hit else "",
                 "note": m.note,
             }
         )
     false = [
         d
-        for d in acting
-        if about_ground(d.why)
-        and not any(m.start_s <= d.walk_s <= m.end_s and fits(d.why, m.hazard) for m in marks)
+        for d, until in acting
+        if about_ground(d.why) and not any(explains(d, until, m, early_s) for m in marks)
     ]
     return rows, false
 
@@ -193,22 +220,31 @@ def main(argv=None) -> int:
         "--recordings", type=Path, help="the recordings' folder, for each walk's length"
     )
     ap.add_argument("--out", type=Path, help="also write one row per mark here (CSV)")
+    ap.add_argument(
+        "--early", type=float, default=EARLY_S,
+        help="seconds before a mark a held reaction may begin and still count (3)",
+    )  # fmt: skip
     a = ap.parse_args(argv)
 
     marks = read_marks(a.marks)
-    rows, false, minutes = [], 0, 0.0
     for name in dict.fromkeys(m.recording for m in marks):
-        path = a.decisions / f"{name}.csv"
-        if not path.exists():
-            print(f"no decisions for {name} ({path}): replay it with --decisions", file=sys.stderr)
+        if not (a.decisions / f"{name}.csv").exists():
+            print(f"no decisions for {name}: replay it with --decisions", file=sys.stderr)
             return 2
-        decided = read_decisions(path)
-        mine, wrong = score([m for m in marks if m.recording == name], decided)
+    # every walk replayed, marked or not: a walk with nothing to mark still counts its minutes
+    # and its false alarms, and those are the walks that show false alarms most plainly
+    names = sorted(p.stem for p in a.decisions.glob("*.csv"))
+    rows, false, minutes = [], 0, 0.0
+    for name in names:
+        decided = read_decisions(a.decisions / f"{name}.csv")
+        mine, wrong = score([m for m in marks if m.recording == name], decided, a.early)
         rows += mine
         false += len(wrong)
         minutes += walk_minutes(a.recordings / name if a.recordings else None, decided)
         for d in wrong:
             print(f"false alarm in {name} at {d.walk_s:.1f} s: {d.state}: {d.why}")
+    unmarked = [n for n in names if n not in {m.recording for m in marks}]
+    print(f"{len(names)} walks scored, {len(unmarked)} of them with no hazard marked")
     print(table(rows, false, minutes))
     if a.out and rows:
         with open(a.out, "w", newline="", encoding="utf-8") as f:
