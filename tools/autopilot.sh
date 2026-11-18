@@ -77,10 +77,8 @@ start "$OUT/ekf.log" ros2 run robot_localization ekf_node --ros-args -r __node:=
   -r odometry/filtered:=/odometry/global -r lidar/pose:=/lidar/pose
 # Nav2's costmaps give up if map -> odom -> base_link is not there when they start, and on a busy
 # computer the EKF can take a while: wait for the chair's pose in the map first
-deadline=$((SECONDS + 120))
-until timeout 15 ros2 run tf2_ros tf2_echo map base_link 2>&1 | grep -q "At time"; do
-  [ $SECONDS -ge $deadline ] && { echo "FAIL no map -> base_link transform"; exit 1; }
-done
+python3 "$HERE/wait_tf.py" map base_link --seconds 120 \
+  || { echo "FAIL no map -> base_link transform"; exit 1; }
 start "$OUT/nav2.log" ros2 launch mana_sim autopilot.launch.py
 start "$OUT/drive_request.csv" ros2 topic echo /drive_request mana_msgs/msg/DriveRequest --csv
 # The chair starts 1.0 m from the west wall and its tracks reach 1.08 m back, so the footprint the
