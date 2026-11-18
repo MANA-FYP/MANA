@@ -1,6 +1,6 @@
 """Plays the scenarios of gazebo_scenarios.py in Gazebo, one simulation for each, and scores them.
 
-    python3 -m mana_sim.gazebo_run [scenario ...]    # play them (workspace sourced), then score
+    python3 -m mana_sim.gazebo_run [--baseline] [scenario ...]   # play (workspace sourced), score
 
 For every scenario it writes the world of the run (the chair at the start, the boxes), starts the
 simulation headless, the core and the scenario runner, waits for the runner to write its trace,
@@ -8,7 +8,9 @@ and stops everything. A fresh simulation for each run keeps the runs apart: the 
 wheels, the slides are down and no fault is on. The core gets config/core.yaml, as in the launch
 files. A run that could not be played (the chair did not settle, the core did not answer, the time
 ran out) leaves no trace and is scored as failing every mark, and the next scenario is played.
-mana_core.evaluate --world gazebo calls this.
+mana_core.evaluate --world gazebo calls this. With --baseline the if-else baseline decides in
+place of the core (the controller parameter of core_node), and the traces go in the baseline folder
+next to the others, so the same scenario can be scored with both (#81).
 """
 
 import os
@@ -71,8 +73,9 @@ def _stop(procs: list[subprocess.Popen]) -> None:
         p.wait()
 
 
-def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
-    """Run one scenario; returns the path of its trace. Raises RunFailed if it wrote none."""
+def play(name: str, out_dir: Path, extra_s: float = 120.0, controller: str = "mana") -> Path:
+    """Run one scenario; returns the path of its trace. Raises RunFailed if it wrote none.
+    controller is what decides: mana, or baseline (the if-else baseline, #81)."""
     run = gs.RUNS[name]
     out_dir.mkdir(parents=True, exist_ok=True)
     trace = out_dir / f"{name}.json"
@@ -114,7 +117,17 @@ def play(name: str, out_dir: Path, extra_s: float = 120.0) -> Path:
         if ready.exists():
             procs.append(
                 _start(
-                    ["ros2", "run", "mana_core", "core_node", *clock, *params], logs / "core.log"
+                    [
+                        "ros2",
+                        "run",
+                        "mana_core",
+                        "core_node",
+                        *clock,
+                        *params,
+                        "-p",
+                        f"controller:={controller}",
+                    ],
+                    logs / "core.log",
                 )
             )
         try:
@@ -142,13 +155,21 @@ def not_played(name: str, why: str) -> list[tuple[str, bool, str]]:
     return [(m.text, False, f"not played: {why}") for m in marks]
 
 
-def results(name: str, traces: Path, rerun: bool = True) -> list[tuple[str, bool, str]]:
+def trace_dir(traces: Path, controller: str = "mana") -> Path:
+    """Where the traces of a controller are kept: the baseline's go in their own folder."""
+    return traces if controller == "mana" else traces / controller
+
+
+def results(
+    name: str, traces: Path, rerun: bool = True, controller: str = "mana"
+) -> list[tuple[str, bool, str]]:
     """Play the scenario (or take its trace, unless rerun) and score it."""
+    traces = trace_dir(traces, controller)
     path = traces / f"{name}.json"
     if rerun or not path.exists():
-        print(f"{name}: playing in Gazebo ...", flush=True)
+        print(f"{name}: playing in Gazebo with {controller} ...", flush=True)
         try:
-            path = play(name, traces)
+            path = play(name, traces, controller=controller)
         except RunFailed as e:
             return not_played(name, str(e))
     return score(name, path)
@@ -156,6 +177,8 @@ def results(name: str, traces: Path, rerun: bool = True) -> list[tuple[str, bool
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    controller = "baseline" if "--baseline" in args else "mana"
+    args = [a for a in args if a != "--baseline"]
     names = args or list(gs.RUNS)
     if bad := [n for n in names if n not in gs.RUNS]:
         print(f"unknown scenario {', '.join(bad)}; choose from: {', '.join(gs.RUNS)}")
@@ -163,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     out = Path("gazebo_traces")
     failed = 0
     for name in names:
-        scored = results(name, out)
+        scored = results(name, out, controller=controller)
         print(f"\n{gs.RUNS[name].scenario().title} [{name}]")
         for text, ok, said in scored:
             failed += not ok
