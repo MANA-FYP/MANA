@@ -111,6 +111,23 @@ class Ramp:
         return (cx, cy + back, cz, a * sign, 0.0, 0.0), (self.x1 - self.x0, length, self.thick)
 
 
+# a person walking, from Gazebo Fuel's actor model (downloaded once, then kept in ~/.gz/fuel)
+WALK_MESH = "https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae"
+HIP_M = 1.0  # the walking mesh's origin above the ground it walks on
+TURN_S = 1.0  # a person turning round at the end of their path
+
+
+@dataclass(frozen=True)
+class Walker:
+    """A person walking a fixed path, there and back, again and again (#79). Gazebo's actors are
+    moved, not pushed: they pass through the chair, but the lidar and the camera see them
+    (README, checked in Gazebo)."""
+
+    name: str
+    path: tuple[tuple[float, float], ...]
+    speed_m_s: float = 1.0
+
+
 @dataclass
 class Campus:
     variation: Variation
@@ -119,6 +136,7 @@ class Campus:
     starts: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
     zones: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
     roofed: list[str] = field(default_factory=list)
+    walkers: list[Walker] = field(default_factory=list)
 
     @property
     def plaza(self) -> float:
@@ -297,6 +315,12 @@ def build(v: Variation | None = None) -> Campus:
         starts[f"scenario_{scenario}"] = starts[at]
     for name, (x, y, yaw) in starts.items():
         c.starts[name] = (round(x, 3), round(y, 3), round(yaw, 4), round(c.ground(x, y), 3))
+    # people walking where a start looks: across the plaza, along the corridor, across the hall
+    c.walkers = [
+        Walker("walker_plaza", ((-8.0, 4.5), (4.0, 4.5)), 1.2),
+        Walker("walker_corridor", ((4.0, 15.8), (20.0, 15.8)), 1.0),
+        Walker("walker_hall", ((14.0, 24.0), (22.0, 24.0)), 0.8),
+    ]
     c.zones = {
         "indoors": (0, 24, 6, 26),  # GPS lost (#15)
         "dark_room": (0, 6, 6, 14),  # darkness (#15)
@@ -326,7 +350,40 @@ def _shape(name: str, pose, size, rgb, collide: bool) -> str:
     return "\n".join(out)
 
 
-def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None) -> str:
+def waypoints(c: Campus, w: Walker) -> list[tuple[float, tuple[float, ...]]]:
+    """(time, pose) of a walker, there and back: it faces where it goes, and turns round at each
+    end in TURN_S. The pose is the walking mesh's, HIP_M above the ground there."""
+    there = list(w.path)
+    legs = there + there[-2::-1]  # and back the same way
+    out, t = [], 0.0
+    for (x0, y0), (x1, y1) in zip(legs, legs[1:], strict=False):
+        yaw = math.atan2(y1 - y0, x1 - x0)
+        if out:  # turn on the spot to face the next leg
+            t += TURN_S
+        out.append((t, (x0, y0, c.ground(x0, y0) + HIP_M, 0.0, 0.0, yaw)))
+        t += math.hypot(x1 - x0, y1 - y0) / w.speed_m_s
+        out.append((t, (x1, y1, c.ground(x1, y1) + HIP_M, 0.0, 0.0, yaw)))
+    out.append((t + TURN_S, out[0][1]))  # back at the start: turn to set off again, not jump
+    return out
+
+
+def _actor(c: Campus, w: Walker) -> str:
+    points = "".join(
+        f"<waypoint><time>{_f(t)}</time><pose>{' '.join(_f(v) for v in pose)}</pose></waypoint>"
+        for t, pose in waypoints(c, w)
+    )
+    return f"""    <actor name="{w.name}">
+      <skin><filename>{WALK_MESH}</filename></skin>
+      <animation name="walking">
+        <filename>{WALK_MESH}</filename><interpolate_x>true</interpolate_x>
+      </animation>
+      <script><loop>true</loop><auto_start>true</auto_start>
+        <trajectory id="0" type="walking">{points}</trajectory>
+      </script>
+    </actor>"""
+
+
+def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None, walkers=False) -> str:
     v = c.variation
     shapes = []
     for b in c.boxes:
@@ -346,6 +403,7 @@ def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None) -> str:
     zones = "\n".join(
         f"    {n:<12} x {z[0]} to {z[1]}, y {z[2]} to {z[3]}" for n, z in c.zones.items()
     )
+    people = "".join(_actor(c, w) + "\n" for w in c.walkers) if walkers else ""
     return f"""<?xml version="1.0"?>
 <!--
   MANA open test world (#79): a small campus with every hazard, made by mana_sim/campus.py
@@ -411,7 +469,7 @@ def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None) -> str:
       <name>mana_chair</name>
       <pose>{_f(x)} {_f(y)} {_f(round(ground + CHAIR_Z, 3))} 0 0 {_f(yaw)}</pose>
     </include>
-  </world>
+{people}  </world>
 </sdf>
 """
 
@@ -420,11 +478,13 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Write the campus world (#79) as SDF")
     p.add_argument("--seed", type=int, help="vary the world (step height, slopes, light...)")
     p.add_argument("--start", default="plaza", help="where the chair starts (a name in the file)")
+    p.add_argument("--walkers", action="store_true",
+                   help="people walking across the plaza, the corridor and the hall")  # fmt: skip
     a = p.parse_args(argv)
     c = build(None if a.seed is None else Variation.from_seed(a.seed))
     if a.start not in c.starts:
         p.error(f"no start {a.start!r}: one of {', '.join(c.starts)}")
-    sys.stdout.write(to_sdf(c, a.start, a.seed))
+    sys.stdout.write(to_sdf(c, a.start, a.seed, a.walkers))
     return 0
 
 
