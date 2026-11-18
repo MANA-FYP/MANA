@@ -475,7 +475,7 @@ So stop acts from **0.3**, by one clip: within 1 point of 7 of 350 is at most 10
 - For this 5-epoch model, 0.3 for stop: at 10 dB about 1 in 20 other words is then heard as "stop" and stops the device. The 100-epoch model below needs 0.7, and the demo's default follows it.
 - The full table, every setting at 0.9 and 0.85 for the clean, 10 dB and 0 dB runs, is printed by the command above. The validation and testing runs were played on GitHub's machines (`heavy-runs.yml`). The testing run gave exactly the same table as the same run on the laptop.
 
-**BC-ResNet-8 trained for 100 epochs on a GPU.** The same training, held-out words and seed, with `--epochs 100 --device cuda`, on a free Kaggle notebook (a T4): 1 minute an epoch, against about 28 on the laptop's CPU. Its best validation accuracy was 98.2% (epoch 98), against 95.9% after 5 epochs. The weights and the log are the release `models-kws8-gpu100`. It was scored by the same commands as above, on GitHub's machines.
+**BC-ResNet-8 trained for 100 epochs on a GPU.** The same training, held-out words and seed, with `--epochs 100 --device cuda`, on a free Kaggle notebook (a T4): 1 minute an epoch, against about 28 on the laptop's CPU. Its best validation accuracy was 98.2% (epoch 98), against 95.9% after 5 epochs. The weights and the log are the release `models-kws8-gpu100`. It was scored by the same commands as above, on GitHub's machines. `--device` comes from #217 (`tools/train_commands.py`, commit 487a27a), which this branch now has. GPU training is not bit-for-bit repeatable (cuDNN is not set to be deterministic), so a retrain with the same seed gives a close model, not the same weights: the model measured here is the release `models-kws8-gpu100`'s `model.pt`.
 
 On aligned clips, testing list, its top class (threshold 0):
 
@@ -487,7 +487,7 @@ On aligned clips, testing list, its top class (threshold 0):
 | noise at 5 dB | 95.2% | | 11.9% |
 | noise at 0 dB | 92.8% | 88.7% | 17.7% |
 
-- **#46's 95% at 10 dB is met:** 96.6% of the command clips right at its top class, where the 5-epoch model gave 94.3%. It also holds 95.2% at 5 dB.
+- **#46's 95% at 10 dB is met, at its top class:** 96.6% of the command clips right, where the 5-epoch model gave 94.3%. It also holds 95.2% at 5 dB.
 - **The threshold**, chosen on the validation list by the same rule (the highest, in steps of 0.05, that keeps 90% of the clean command clips right): **0.95** (93.1%), with stop at any probability (`--choose`). At 0.95 with stop at any, on the testing list:
 
 | Sound | Right | Missed | False activations (of 6,931) | Held-out words (of 818) | Stop missed (of 411) | Stop heard as "go" |
@@ -507,7 +507,7 @@ On aligned clips, testing list, its top class (threshold 0):
 | 0.5 | 1.4% | 6 |
 | **0.7** | **2.0%** | **0** |
 
-This model is surer of itself on noise than the 5-epoch one, so stop needs a higher bar: **0.7**, where the 5-epoch model needed 0.3. On the testing list:
+This model is surer of itself on noise than the 5-epoch one, so stop needs a higher bar: **0.7**, the highest of 0.3, 0.5 and 0.7 that passes the rule (0.8 was not tried), where the 5-epoch model needed 0.3. On the testing list:
 
 | Sound | Stop acts from | Right | Stop missed (of 411) | Other words heard as "stop" | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
 |---|---|---|---|---|---|---|---|
@@ -520,9 +520,17 @@ This model is surer of itself on noise than the 5-epoch one, so stop needs a hig
 | 0 dB | any | 82.8% | 2.2% (9) | 838 | 17.8% | 65 | 1 |
 | 0 dB | **0.7** | **83.0%** | **6.1% (25)** | **125** | **7.8%** | **0** | **0** |
 
-- **On the stream the 100-epoch model with stop from 0.7 does as well as or better than the 5-epoch one with stop from 0.3 on every figure measured** (stops missed clean are the same, 0.2%): 92.7% of commands right at 10 dB (against 82.8%), 1.7% of stops missed (against 2.7%), and 106 other words heard as "stop" (against 376). At 0 dB it misses 6.1% of stops, against 9.5%, and gives no word in the gaps, against 2.
-- Stop was never heard as "go", at any level.
-- The stream at 0.95, the aligned clips' threshold, was not run. The demo acts at 0.9 on the stream, as measured here.
+- **On the stream the 100-epoch model with stop from 0.7 beats the 5-epoch one with stop from 0.3 on commands right and on stop, but not on "go" by mistake or on the held-out words** (stops missed clean are the same, 0.2%): 92.7% of commands right at 10 dB (against 82.8%), 1.7% of stops missed (against 2.7%), and 106 other words heard as "stop" (against 376). At 0 dB it misses 6.1% of stops, against 9.5%, and gives no word in the gaps, against 2. With stop at any probability, the same model misses 9 of 411 (2.2%) at 0 dB, so stop from 0.7 costs 16 more missed stops there.
+
+| Sound | Other words heard as "go", 100 epochs (0.7) | 5 epochs (0.3) | Held-out words, 100 epochs (0.7), of 818 | 5 epochs (0.3) |
+|---|---|---|---|---|
+| clean | 41 | 34 | 118 (14.4%) | 89 (10.9%) |
+| noise at 10 dB | 51 | 20 | 136 (16.6%) | 107 (13.1%) |
+| noise at 0 dB | 42 | 16 | 124 (15.2%) | 79 (9.7%) |
+
+- **"Go" given by mistake went up on the stream at 0.9** (of 6,931 other words, at 10 dB from 20 to 51). This is the unsafe direction: the chair moves without being asked. It is the same 51 with no stop threshold at all, so it comes from this model at 0.9, not from stop's 0.7. The held-out words heard as a command also went up.
+- On the stream, stop was never heard as "go", at any level. On aligned clips at its top class, stop was heard as "go" once at 10 dB and 5 times at 0 dB.
+- The other nine words still act from 0.9, the demo's value, not this model's own 0.95. A stream run at 0.95 (`--stream 0.95 0.9`) is running on GitHub's machines (heavy-runs run 44392294750), so its numbers are not in this section yet.
 - The demo's default stop threshold is now 0.7 (`--kws-stop-threshold`), for this model (`--kws` with `models-kws8-gpu100`'s `model.pt`). At 10 dB about 1 in 65 other words (106 of 6,931) is then heard as "stop".
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
