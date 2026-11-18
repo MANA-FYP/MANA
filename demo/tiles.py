@@ -19,6 +19,12 @@ UPSTREAM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 SATELLITE = (
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 )
+# place names drawn over the satellite view: Esri's World Boundaries and Places, PNG with the rest
+# left clear, on the same terms as the imagery. It names cities and areas, not buildings.
+LABELS = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places"
+    "/MapServer/tile/{z}/{y}/{x}"
+)
 AGENT = "MANA-FYP-demo/1.0 (+https://github.com/MANA-FYP/MANA)"
 FRESH_S = 7 * 24 * 3600  # OSM's tiles say they keep a week
 # when and by what the satellite picture at a point was taken (Esri's World Imagery metadata)

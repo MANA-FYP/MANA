@@ -57,6 +57,7 @@ from demo import (  # noqa: E402
     csi,
     floors,
     navigation,
+    places,
     recording,
     sounds,
     speech,
@@ -143,11 +144,20 @@ def build_app(
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
     )
+    app["labels"] = (  # place names over the satellite view
+        None if tile_cache is None else tile_cache.layer("labels", tiles.LABELS, "image/png")
+    )
+    # places near the map and their photos, kept beside the tiles (memory only without a folder)
+    kept = None if tile_cache is None else tile_cache.folder
+    app["places"] = places.Places(None if kept is None else kept / "places")
+    app["photos"] = places.Photos(None if kept is None else kept / "photos")
 
     app.router.add_get("/", index)
     app.router.add_get("/live", live_page)
     app.router.add_get("/indoor", indoor_page)
     app.router.add_get("/api/imagery", imagery)
+    app.router.add_get("/api/places", places_near)
+    app.router.add_get("/api/photo", photo)
     app.router.add_get("/wifi", wifi_page)
     app.router.add_get("/api/csi", csi_view)
     app.router.add_post("/api/csi/play", csi_play)
@@ -165,6 +175,7 @@ def build_app(
     app.router.add_get("/api/walk.geojson", walk_geojson)
     app.router.add_get(r"/tiles/{z:\d+}/{x:\d+}/{y:\d+}.png", tile)
     app.router.add_get(r"/tiles/satellite/{z:\d+}/{x:\d+}/{y:\d+}.jpg", tile)
+    app.router.add_get(r"/tiles/labels/{z:\d+}/{x:\d+}/{y:\d+}.png", tile)
     app.router.add_static("/static/", WEB, show_index=False)
     app.on_startup.append(start_loop)
     app.on_cleanup.append(stop_loop)
@@ -286,6 +297,32 @@ async def imagery(request: web.Request) -> web.Response:
     if kept[key] is None:
         raise web.HTTPNotFound(text="no date for the imagery here")
     return web.json_response(kept[key])
+
+
+async def places_near(request: web.Request) -> web.Response:
+    """Places around a point (OSM and Wikipedia), kept per ~100 m cell. 503 offline, never seen."""
+    try:
+        lat, lon = float(request.query["lat"]), float(request.query["lon"])
+    except (KeyError, ValueError) as e:
+        raise web.HTTPBadRequest(text="lat and lon") from e
+    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+        raise web.HTTPBadRequest(text="lat and lon")
+    got = await request.app["places"].get(lat, lon)
+    if got is None:
+        raise web.HTTPServiceUnavailable(text="no answer from OpenStreetMap or Wikipedia")
+    return web.json_response(got)
+
+
+async def photo(request: web.Request) -> web.Response:
+    """A place's photo from Wikimedia, through the laptop, which keeps it: the phone needs no
+    internet of its own. Only images from Wikimedia's hosts are fetched."""
+    try:
+        got = await request.app["photos"].get(request.query.get("u", ""))
+    except ValueError as e:
+        raise web.HTTPBadRequest(text="only Wikimedia images") from e
+    if got is None:
+        raise web.HTTPNotFound()
+    return web.Response(body=got[0], content_type=got[1])
 
 
 async def dashboard_page(request: web.Request) -> web.FileResponse:
@@ -535,8 +572,10 @@ async def walk_gpx(request: web.Request) -> web.Response:
 
 
 async def tile(request: web.Request) -> web.Response:
-    """A map tile, street or satellite: from the laptop's copy, or fetched when online (#161)."""
-    cache = request.app["satellite" if request.path.startswith("/tiles/satellite/") else "tiles"]
+    """A map tile, street, satellite or place names: from the laptop's copy, or fetched when
+    online (#161)."""
+    layer = request.path.split("/")[2]
+    cache = request.app[layer if layer in ("satellite", "labels") else "tiles"]
     if cache is None:
         raise web.HTTPNotFound()
     try:
@@ -879,7 +918,7 @@ async def stop_loop(app: web.Application) -> None:
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
-    for cache in (app["tiles"], app["satellite"]):
+    for cache in (app["tiles"], app["satellite"], app["labels"]):
         if cache is not None:
             await cache.close()
     if app["recorder"] is not None:

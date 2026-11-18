@@ -211,14 +211,21 @@ function roundRect(ctx, x, y, w, h, r) {
 // ---- the map: the path walked, north up. Under it a grid, the street map or the satellite view,
 // once a GPS fix has tied the path to the earth. Tiles come through the laptop, which keeps them,
 // so a place seen online has its map offline too. Off until chosen: each tile asked for tells the
-// map's server roughly where the person is.
+// map's server roughly where the person is. The satellite view has place names over it (Esri), and
+// Places (places.js) pins what OpenStreetMap and Wikipedia know around the map; off until chosen too.
 const LAYERS = { grid: ["Grid", "grid-four"], streets: ["Streets", "map-trifold"], satellite: ["Satellite", "globe-hemisphere-west"] };
-const CREDIT = { streets: "© OpenStreetMap contributors", satellite: "Imagery: Esri, Maxar, Earthstar Geographics" };
-const view = { layer: "grid", zoom: 1, panX: 0, panY: 0 };   // zoom 1 fits the whole path; pan in metres
-try { view.layer = localStorage.getItem("mana.layer") || "grid"; } catch (e) { /* storage off: the grid */ }
+const TOGGLES = { labels: ["Place names on the satellite view", "text-aa"], places: ["Places: access and photos", "map-pin-area"] };
+const view = { layer: "grid", labels: true, places: false, zoom: 1, panX: 0, panY: 0 };   // zoom 1 fits the whole path; pan in metres
+try {
+  view.layer = localStorage.getItem("mana.layer") || "grid";
+  view.labels = localStorage.getItem("mana.labels") !== "off";
+  view.places = localStorage.getItem("mana.places") === "on";
+} catch (e) { /* storage off: the grid */ }
 if (!LAYERS[view.layer]) view.layer = "grid";
 const tiles = new Map();   // url -> its Image
-let tilesLoaded = 0, mapKey = "", drawn = null;   // drawn: the last map's scale and centre
+let tilesLoaded = 0, mapKey = "", drawn = null, pins = [];   // drawn: the last map's scale and centre
+const DEG = 6371000 * Math.PI / 180;   // metres in a degree of latitude, as demo/navigation.py
+Places.onChange = () => redrawMap();
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
@@ -243,16 +250,20 @@ function drawTiles(ctx, t, w, h, ox, oy, k) {
   const px = (t.origin[1] + 180) / 360 * 256 * n;
   const py = (1 - Math.log(Math.tan(lat) + 1 / cos) / Math.PI) / 2 * 256 * n;
   let drawn = false;
+  const labels = [];
   for (let tx = Math.floor((px - ox / s) / 256); tx <= Math.floor((px + (w - ox) / s) / 256); tx++) {
     for (let ty = Math.floor((py - oy / s) / 256); ty <= Math.floor((py + (h - oy) / s) / 256); ty++) {
       if (ty < 0 || ty >= n) continue;
       const xy = z + "/" + (((tx % n) + n) % n) + "/" + ty;
       const img = tile(view.layer === "satellite" ? "/tiles/satellite/" + xy + ".jpg" : "/tiles/" + xy + ".png");
       if (!img) continue;
-      ctx.drawImage(img, ox + (tx * 256 - px) * s, oy + (ty * 256 - py) * s, 256 * s + 1, 256 * s + 1);
+      const at = [ox + (tx * 256 - px) * s, oy + (ty * 256 - py) * s];
+      ctx.drawImage(img, at[0], at[1], 256 * s + 1, 256 * s + 1);
+      if (view.layer === "satellite" && view.labels) labels.push(["/tiles/labels/" + xy + ".png", at]);
       drawn = true;
     }
   }
+  labels.forEach(([url, at]) => { const im = tile(url); if (im) ctx.drawImage(im, at[0], at[1], 256 * s + 1, 256 * s + 1); });
   return drawn;
 }
 
@@ -262,14 +273,16 @@ function drawMaps(t) {
   if (!t) return;
   const cv = $("map");
   const key = JSON.stringify([t.x, t.y, t.heading, t.path.length, t.source, t.accuracy_m, t.marks, t.origin,
-    view, tilesLoaded, cv.clientWidth, cv.clientHeight]);
+    view, tilesLoaded, Places.state.version, cv.clientWidth, cv.clientHeight]);
   if (key !== mapKey) { mapKey = key; drawTrack(cv, t); }
   set($("stats"), "html",
     "<span>" + icon("footprints") + t.steps + "</span><span>" + icon("person-simple-walk") + t.distance_m.toFixed(1) + " m</span>" +
     (t.heading === null ? "" : "<span>" + icon("compass") + compassWord(t.heading) + "</span>"));
   $("clearDest").hidden = !(t.marks && t.marks.destination);
   const tiled = view.layer !== "grid";
-  set($("credit"), "text", !tiled ? "" : t.origin ? CREDIT[view.layer] : "No GPS fix yet");
+  set($("credit"), "text", !tiled && !view.places ? "" : t.origin ? Places.credit(view.layer, view.labels, view.places) : "No GPS fix yet");
+  Places.legend($("plegend"), view.places && !!t.origin);
+  $("mapBox").style.setProperty("--credit-h", Math.max(16, $("credit").offsetHeight) + "px");   // what floats above it moves up
 }
 function compassWord(h) { return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(h / 45) % 8]; }
 
@@ -285,8 +298,9 @@ function drawTrack(cv, t) {
   const marks = Object.entries(t.marks || {});
   const xs = pts.map((p) => p[0]).concat(marks.map(([, m]) => m[0]));
   const ys = pts.map((p) => p[1]).concat(marks.map(([, m]) => m[1]));
-  // on streets or imagery at least about 60 m across, so the place can be recognised
-  const least = view.layer !== "grid" && t.origin ? 60 : 8;
+  // on streets or imagery at least about 60 m across, so the place can be recognised; with Places
+  // on about 300 m, the places asked for around the map
+  const least = !t.origin ? 8 : view.places ? 300 : view.layer !== "grid" ? 60 : 8;
   const span = Math.max(least, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * 1.3;
   const k = Math.min(w, h) / span * view.zoom;   // pixels per metre
   // zoomed out: the whole path; zoomed in: the person, moved by dragging
@@ -316,6 +330,12 @@ function drawTrack(cv, t) {
     if (ring) { ctx.lineWidth = 2.5; ctx.strokeStyle = ring; ctx.stroke(); }
   };
   dot(X(0), Y(0), 6, css("--go"), "#fff");   // the start
+  pins = [];
+  if (view.places && t.origin) {   // places around the map's centre, asked again once it moved ~100 m
+    const [lat0, lon0] = t.origin, cos = Math.cos(lat0 * Math.PI / 180);
+    Places.want(lat0 + cy / DEG, lon0 + cx / (DEG * cos));
+    pins = Places.draw(ctx, (lat, lon) => [X((lon - lon0) * DEG * cos), Y((lat - lat0) * DEG)], w, h);
+  }
   ctx.font = "600 12px " + css("--body");
   marks.forEach(([name, m]) => {   // marked places
     const mx = X(m[0]), my = Y(m[1]);
@@ -337,7 +357,7 @@ function drawTrack(cv, t) {
   dot(px, py, 8, css("--info"), "#fff");
   ctx.shadowBlur = 0;
   // the scale bar, bottom left
-  const sy = h - 34;
+  const ch = $("credit").offsetHeight, sy = h - 34 - (ch > 20 ? ch : 0);   // above the credits when they take two lines
   ctx.fillStyle = "rgba(255, 255, 255, .88)";
   roundRect(ctx, 10, sy, Math.max(step * k, 30) + 16, 26, 7);
   ctx.fillStyle = css("--text"); ctx.fillRect(18, sy + 8, step * k, 3);
@@ -366,16 +386,30 @@ function build() {
   };
   // the map: its layer, zoom, drag, back to the person, and the map in the camera's place
   $("layers").innerHTML = Object.entries(LAYERS).map(([id, [name, ic]]) =>
-    '<button data-layer="' + id + '" title="' + name + '" aria-label="' + name + '">' + icon(ic) + "</button>").join("");
-  const showLayer = () => document.querySelectorAll("[data-layer]").forEach((b) => {
-    b.classList.toggle("on", b.dataset.layer === view.layer); b.setAttribute("aria-pressed", String(b.dataset.layer === view.layer));
-  });
+    '<button data-layer="' + id + '" title="' + name + '" aria-label="' + name + '">' + icon(ic) + "</button>").join("") +
+    '<span class="sepv"></span>' + Object.entries(TOGGLES).map(([id, [name, ic]]) =>
+    '<button data-toggle="' + id + '" title="' + name + '" aria-label="' + name + '">' + icon(ic) + "</button>").join("");
+  const showLayer = () => {
+    document.querySelectorAll("[data-layer]").forEach((b) => {
+      b.classList.toggle("on", b.dataset.layer === view.layer); b.setAttribute("aria-pressed", String(b.dataset.layer === view.layer));
+    });
+    document.querySelectorAll("[data-toggle]").forEach((b) => {
+      b.classList.toggle("on", view[b.dataset.toggle]); b.setAttribute("aria-pressed", String(view[b.dataset.toggle]));
+    });
+    document.querySelector('[data-toggle="labels"]').hidden = view.layer !== "satellite";
+  };
   showLayer();
   $("layers").onclick = (e) => {
-    const b = e.target.closest("[data-layer]");
+    const b = e.target.closest("[data-layer], [data-toggle]");
     if (!b) return;
-    view.layer = b.dataset.layer;
-    try { localStorage.setItem("mana.layer", view.layer); } catch (err) { /* not kept */ }
+    if (b.dataset.layer) view.layer = b.dataset.layer;
+    else view[b.dataset.toggle] = !view[b.dataset.toggle];
+    if (!view.places) Places.card($("pcard"), null);
+    try {
+      localStorage.setItem("mana.layer", view.layer);
+      localStorage.setItem("mana.labels", view.labels ? "on" : "off");
+      localStorage.setItem("mana.places", view.places ? "on" : "off");
+    } catch (err) { /* not kept */ }
     showLayer(); redrawMap();
   };
   $("zoomIn").innerHTML = icon("plus"); $("zoomOut").innerHTML = icon("minus"); $("recentre").innerHTML = icon("crosshair-simple");
@@ -402,8 +436,11 @@ function build() {
     redrawMap();
   };
   $("map").onpointerup = (e) => {
-    if (drag && drag.moved < 6 && drawn) {
-      const r = $("map").getBoundingClientRect(), d = drawn;
+    const r = $("map").getBoundingClientRect();
+    const place = drag && drag.moved < 6 && Places.hit(pins, e.clientX - r.left, e.clientY - r.top);
+    if (place) Places.card($("pcard"), place);   // a tap on a pin shows the place, and sends no one there
+    else if (drag && drag.moved < 6 && drawn) {
+      const d = drawn;
       const x = d.cx + (e.clientX - r.left - d.w / 2) / d.k, y = d.cy - (e.clientY - r.top - d.h / 2) / d.k;
       send({ type: "place", do: "destination", x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
     }

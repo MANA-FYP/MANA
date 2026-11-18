@@ -170,18 +170,19 @@ button { font: inherit; color: inherit; }
 .map { position: relative; overflow: hidden; background: var(--map-bg); }
 .map canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .map canvas:active { cursor: grabbing; }
-.stats { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100% - 180px); }
+.stats { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100% - 270px); }
 .stats span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 99px; background: rgba(255, 255, 255, .94);
   box-shadow: var(--float); font-variant-numeric: tabular-nums; font-size: .85rem; font-weight: 600; }
 .stats .ico { width: 15px; height: 15px; color: var(--muted); }
 .mapctl { position: absolute; right: 10px; display: flex; gap: 8px; }
 .mapctl.top { top: 10px; }
-.mapctl.zoom { bottom: 24px; flex-direction: column; align-items: flex-end; }
+.mapctl.zoom { bottom: calc(8px + var(--credit-h, 16px)); flex-direction: column; align-items: flex-end; }
 .layers, .stack { display: flex; padding: 3px; border-radius: 11px; background: #fff; box-shadow: var(--float); }
 .stack { flex-direction: column; padding: 0; }
 .layers button { display: grid; place-items: center; width: 32px; height: 30px; border: 0; border-radius: 8px; background: transparent;
   color: var(--muted); cursor: pointer; }
 .layers button.on { background: var(--info-tint); color: var(--info); }
+.layers .sepv { width: 1px; margin: 4px 3px; background: var(--line); }
 .layers .ico, .mapbtn .ico { width: 19px; height: 19px; }
 .mapbtn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 11px; background: #fff;
   color: var(--text); box-shadow: var(--float); cursor: pointer; }
@@ -189,7 +190,7 @@ button { font: inherit; color: inherit; }
 .stack .mapbtn:first-child { border-radius: 11px 11px 0 0; border-bottom: 1px solid var(--line); }
 .stack .mapbtn:last-child { border-radius: 0 0 11px 11px; }
 .mapbtn:hover, .layers button:hover { color: var(--info); }
-.credit { position: absolute; right: 6px; bottom: 4px; padding: 1px 6px; border-radius: 6px; background: rgba(255, 255, 255, .8);
+.credit { position: absolute; right: 6px; bottom: 4px; max-width: calc(100% - 12px); text-align: right; padding: 1px 6px; border-radius: 6px; background: rgba(255, 255, 255, .8);
   color: var(--muted); font-size: .68rem; }
 .credit:empty { display: none; }
 .stage > .map { min-height: 0; }
@@ -220,3 +221,4 @@ button { font: inherit; color: inherit; }
   .heardsound { right: auto; left: 14px; top: 76px; }
   .history li:nth-child(n + 4) { display: none; }
 }
+#mapBox .plegend, #mapBox .pcard { bottom: calc(40px + var(--credit-h, 16px)); }

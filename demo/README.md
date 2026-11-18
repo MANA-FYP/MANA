@@ -275,6 +275,19 @@ place seen once with internet has its street map without it too (#161). A tile n
 the plain grid without internet; the box works the same either way, and a missing tile is tried
 again every 30 s.
 
+**Place names and Places.** The satellite view has Esri's place names over it (World Boundaries
+and Places, same terms as the imagery); the *Aa* button (*Names* on /indoor) hides them. They name
+cities and areas, not buildings. The *Places* button pins what is around the map, from OpenStreetMap
+(Overpass: named places, steps, kerbs, ramps, wheelchair tags) and Wikipedia (articles within 1 km,
+with a photo when the article has one). A pin's colour is its `wheelchair` tag: yes, limited, no,
+or grey for not tagged, which near FAST Islamabad is all of them (15 places, none tagged, on 18 Nov
+2026). Steps are small squares, kerbs and ramps small diamonds. Tap a pin for its card. Places are
+asked for the ~100 m cell the map is on, only while the button is on and again only once the map
+has moved about 100 m; nothing is fetched ahead. The laptop keeps each cell's answer
+(`tile-cache/places/`) and each photo (`tile-cache/photos/`, Wikimedia's hosts only), so the phone
+needs no internet and a place seen once works offline. Overpass is a shared public service and is
+often full: the main instance is given 12 s, then OSM France's; a half answer is shown but not kept.
+
 **Marked places and the way back.** Say "mark this place" into the phone (or press *Mark this
 place* on the dashboard), walk on, then say "where is the mark" (or *Way back*). MANA leads back
 along the path walked, since indoors the straight line goes through walls (#157). It gives the

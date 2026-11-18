@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>MANA Live</title>
   <link rel="stylesheet" href="/static/live.css">
+  <link rel="stylesheet" href="/static/places.css">
 </head>
 <body>
   <header class="bar">
@@ -70,12 +71,15 @@
           <button class="mapbtn" id="recentre" title="Back to the person"></button>
           <div class="stack"><button class="mapbtn" id="zoomIn" title="Zoom in"></button><button class="mapbtn" id="zoomOut" title="Zoom out"></button></div>
         </div>
+        <div class="plegend" id="plegend" hidden></div>
+        <div class="pcard" id="pcard" hidden></div>
         <small class="credit" id="credit"></small>
       </section>
     </aside>
   </main>
 
   <script src="/static/icons.js"></script>
+  <script src="/static/places.js"></script>
   <script src="/static/live.js"></script>
 </body>
 </html>
