@@ -151,7 +151,10 @@ async function startMotion() {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x === null || now - lastMotion < 33) return;  // about 30 readings a second
     lastMotion = now;
-    send({ type: "motion", ax: a.x, ay: a.y, az: a.z, t: now / 1000 });   // t: for counting steps
+    const r = e.rotationRate;  // deg/s; null without a gyroscope
+    const rot = r && r.alpha !== null ? Math.hypot(r.alpha, r.beta, r.gamma) : null;
+    // t: for counting steps; rot: how fast the phone turns, to tell a hand moving it from a step
+    send({ type: "motion", ax: a.x, ay: a.y, az: a.z, rot, t: now / 1000 });
   };
   window.addEventListener("devicemotion", onMotion);
   const stopHeading = startHeading();

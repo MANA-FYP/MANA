@@ -115,6 +115,15 @@ def test_a_word_below_the_threshold_or_not_a_command_is_not_given():
     assert kws.Spotter(lambda w: probs("unknown", 0.99)).feed(pcm(1.0)) == []
 
 
+def test_stop_can_have_a_threshold_of_its_own():
+    lower = dict(threshold=0.9, stop_threshold=0.5)
+    assert [w for w, _ in kws.Spotter(lambda w: probs("stop", 0.6), **lower).feed(pcm(1.0))] == [
+        "stop"
+    ]
+    assert kws.Spotter(lambda w: probs("go", 0.6), **lower).feed(pcm(1.0)) == []  # others keep 0.9
+    assert kws.Spotter(lambda w: probs("stop", 0.6), threshold=0.9).feed(pcm(1.0)) == []  # unset
+
+
 def test_a_checkpoint_that_cannot_be_read_gives_no_spotter(tmp_path):
     assert kws.Spotter.load(str(tmp_path / "missing.pt")) is None
 
