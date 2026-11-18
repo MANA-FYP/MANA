@@ -244,14 +244,16 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   chair instead of stopping it. The lidar sees them: from the plaza start, over 2 minutes of
   simulation on a GitHub machine (`tools/scan_watch.py`, the nearest return within 30 degrees of
   ahead), 185 of 1,124 scans had something within 4 m, the nearest at 1.85 m. The same world
-  without them: 0 of 1,186, the nearest at 4.04 m. Whether the cameras and the detector see them
-  is not checked yet.
+  without them: 0 of 1,186, the nearest at 4.04 m. The camera sees them too: in a second run, with
+  a frame kept every 2 s (`scan_watch.py --frames`), the demo's detector (YOLO26n at 416) found a
+  person in 12 of the 58 frames, 11 of them at 0.5 or more (up to 0.89). The person is only in view
+  while crossing in front, and with the camera pitched down the head is out of the frame at 2.5 m.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
   In Gazebo (WSL, 10 November 2026) the chair settled 0.3345 m above the ground it stood on, the
   same as on the route: on the plaza (0.12 m) by default, and on the terrace (1.535 m) of seed 2.
-- **Not done yet:** the walkers seen by the cameras, the camera's mounting angle, a lidar map
+- **Not done yet:** the camera's mounting angle, a lidar map
   for the autopilot, and the real-time factor (the one measured so far was with the computer busy).
 
 ## The host
