@@ -461,8 +461,58 @@ So stop acts from **0.3**. On the testing list, at 0.9 for the other words:
 - **It stops for noise alone almost never:** 0 words in the 3.1 hours of gaps at 10 dB, against 48 for stop at any. At 0 dB it gave 2, against 148. None came in the 1.7 minutes of noise alone at either level.
 - **The price is other words heard as "stop":** 376 of 6,931 at 10 dB (5.4%), against 563 for stop at any and 22 at 0.9. A stop not asked for stops the device, the safe side, and is said again as "go".
 - Stop was heard as "go" 3 times in 411 at 0 dB whatever stop's threshold, as before, and never clean or at 10 dB.
-- The demo now uses 0.3 for stop by default (`--kws-stop-threshold`), and 0.9 for the other words.
+- For this 5-epoch model, 0.3 for stop. The 100-epoch model below needs 0.7, and the demo's default follows it.
 - The full table, every setting at 0.9 and 0.85 for the clean, 10 dB and 0 dB runs, is printed by the command above. The validation and testing runs were played on GitHub's machines (`heavy-runs.yml`). The testing run gave exactly the same table as the same run on the laptop.
+
+**BC-ResNet-8 trained for 100 epochs on a GPU.** The same training, held-out words and seed, with `--epochs 100 --device cuda`, on a free Kaggle notebook (a T4): 1 minute an epoch, against about 28 on the laptop's CPU. Its best validation accuracy was 98.2% (epoch 98), against 95.9% after 5 epochs. The weights and the log are the release `models-kws8-gpu100`. It was scored by the same commands as above, on GitHub's machines.
+
+On aligned clips, testing list, its top class (threshold 0):
+
+| Sound | Right, 100 epochs | Right, 5 epochs | False activations, 100 epochs (of 6,931) |
+|---|---|---|---|
+| clean | 98.5% (4,013) | 96.3% | 5.2% (359) |
+| noise at 20 dB | 97.6% | | 6.6% |
+| noise at 10 dB | **96.6% (3,936)** | 94.3% | 9.0% (627) |
+| noise at 5 dB | 95.2% | | 11.9% |
+| noise at 0 dB | 92.8% | 88.7% | 17.7% |
+
+- **#46's 95% at 10 dB is met:** 96.6% of the command clips right at its top class, where the 5-epoch model gave 94.3%. It also holds 95.2% at 5 dB.
+- **The threshold**, chosen on the validation list by the same rule (the highest, in steps of 0.05, that keeps 90% of the clean command clips right): **0.95** (93.1%), with stop at any probability (`--choose`). At 0.95 with stop at any, on the testing list:
+
+| Sound | Right | Missed | False activations (of 6,931) | Held-out words (of 818) | Stop missed (of 411) | Stop heard as "go" |
+|---|---|---|---|---|---|---|
+| clean | 93.6% | 6.3% | 0.8% (58) | 2.4% | 0 | 0 |
+| noise at 10 dB | 88.8% | 10.8% | 1.5% (107) | 3.5% | 1.2% (5) | 0 |
+| noise at 0 dB | 76.6% | 22.7% | 2.8% (193) | 4.3% | 4.4% (18) | 0 |
+
+- Against the 5-epoch model at its 0.85 with stop at any (10 dB): more commands right (88.8% against 85.0%), and a third of the false activations (1.5% against 4.2%) and half on the held-out words (3.5% against 7.2%).
+
+**On a running stream**, at the demo's 0.9. Stop's own threshold was chosen on the validation list by the rule above (within 1 point of stop at any's misses at 10 dB, and no word in the gaps there):
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Words in the gaps (2.8 h) |
+|---|---|---|
+| any probability | 1.4% | 35 |
+| 0.3 | 1.4% | 23 |
+| 0.5 | 1.4% | 6 |
+| **0.7** | **2.0%** | **0** |
+
+This model is surer of itself on noise than the 5-epoch one, so stop needs a higher bar: **0.7**, where the 5-epoch model needed 0.3. On the testing list:
+
+| Sound | Stop acts from | Right | Stop missed (of 411) | Other words heard as "stop" | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|---|
+| clean | 0.9 | 95.9% | 0.2% (1) | 16 | 6.3% | 0 | |
+| clean | **0.7** | **95.9%** | **0.2% (1)** | **67** | **7.1%** | **0** | |
+| 10 dB | 0.9 | 92.6% | 2.9% (12) | 23 | 7.4% | 0 | 0 |
+| 10 dB | any | 92.0% | 0.7% (3) | 743 | 17.4% | 43 | 1 |
+| 10 dB | **0.7** | **92.7%** | **1.7% (7)** | **106** | **8.5%** | **0** | **0** |
+| 0 dB | 0.9 | 82.4% | 12.2% (50) | 40 | 6.6% | 0 | 0 |
+| 0 dB | any | 82.8% | 2.2% (9) | 838 | 17.8% | 65 | 1 |
+| 0 dB | **0.7** | **83.0%** | **6.1% (25)** | **125** | **7.8%** | **0** | **0** |
+
+- **On the stream the 100-epoch model with stop from 0.7 does as well as or better than the 5-epoch one with stop from 0.3 on every figure measured** (stops missed clean are the same, 0.2%): 92.7% of commands right at 10 dB (against 82.8%), 1.7% of stops missed (against 2.7%), and 106 other words heard as "stop" (against 376). At 0 dB it misses 6.1% of stops, against 9.5%, and gives no word in the gaps, against 2.
+- Stop was never heard as "go", at any level.
+- The stream at 0.95, the aligned clips' threshold, was not run. The demo acts at 0.9 on the stream, as measured here.
+- The demo's default stop threshold is now 0.7 (`--kws-stop-threshold`), for this model (`--kws` with `models-kws8-gpu100`'s `model.pt`).
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
