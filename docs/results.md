@@ -894,6 +894,55 @@ What follows:
 
 Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
 
+### The same fine-tune on a GPU, at 640 (#49)
+
+Measured on 18 November 2026. YOLO26s and YOLO26n were fine-tuned again on a free Kaggle notebook
+(one T4), to see whether a bigger image and more epochs help. They were fine-tuned from their COCO
+weights, at image size 640, for up to 100 epochs with early stopping (patience 20), batch 16 and
+seed 0. The data was built inside the notebook with `tools/fetch_sanpo.py` and
+`tools/sanpo_to_yolo.py`:
+- the 45 stairs walks, at one frame in 20, as on the CPU;
+- 3 other training walks at one frame in 10;
+- 1,211 training images and 97 validation images in all.
+
+The CPU run had 1,166 and 145. Its 3 other walks could not be recovered, so 3 different ones were
+used. YOLO26s stopped at epoch 43 (best 30) after 38 minutes; YOLO26n stopped at epoch 33 (best
+13) after 28 minutes. Both were scored with `tools/eval_detector.py` at 640 on the same 2,331 test
+frames as above.
+
+| Model (image size) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.81 | 0.85 | 0.78 | 0.91 | 0.73 |
+| | vehicle | 1,438 | 0.74 | 0.78 | 0.70 | 0.85 | 0.64 |
+| | stairs | 37 | 0.18 | 0.18 | 0.22 | 0.42 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.08 | 0.03 | 0.12 | 0.01 |
+| | pole | 1,942 | 0.14 | 0.44 | 0.12 | 0.59 | 0.06 |
+| YOLO26n fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.79 | 0.85 | 0.75 | 0.91 | 0.69 |
+| | vehicle | 1,438 | 0.75 | 0.81 | 0.68 | 0.89 | 0.59 |
+| | stairs | 37 | 0.12 | 0.16 | 0.19 | 0.23 | 0.16 |
+| | opening-door | 175 | 0.02 | 0.15 | 0.02 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.13 | 0.45 | 0.09 | 0.58 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 8 of the 65 test frames with stairs and YOLO26n in
+7, both in 2 of the 6 walks (on the CPU: YOLO26s 9 frames, YOLO26n 7).
+
+What follows:
+
+- **A bigger image and more epochs did not help.** On the CPU at 416, YOLO26s had AP50 0.80 on
+  people, 0.74 on vehicles and 0.22 on stairs. Here it has 0.81, 0.74 and 0.18. YOLO26n moved
+  from 0.77 to 0.79 on people and from 0.72 to 0.75 on vehicles. With one seed each, both changes
+  are within what a second run could give.
+- **Stairs stay far from the target.** 0.18 against 0.22 is no real difference with 37 near
+  staircases. A quarter of them are found at 0.3, against the 0.85 target, so stairs need more
+  stairs examples: our own recordings (#89) or every frame of the stairs walks. A bigger image or
+  more epochs is not enough.
+- This run tested the image size and the epochs only. The stairs walks were still sampled at one
+  frame in 20, so training on every frame is still to be tried. The node keeps YOLO26n zero-shot.
+
+The weights, the epoch logs and the scores are in the release `models-yolo26-sanpo-gpu640`. It is
+not a MANA release. GPU training is not bit-for-bit repeatable, so a new run gives a close model,
+not the same weights.
+
 ## Where the detector fails on SANPO, with pictures (#51)
 
 The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SANPO test frames.
