@@ -104,13 +104,13 @@ class BCResNet(nn.Module):
         return self.tail(self.blocks(self.head(x))).flatten(1)
 
 
-def mel():
-    """The log-mel front end: 30 ms windows every 10 ms, 40 bands."""
+def mel(device: str = "cpu"):
+    """The log-mel front end: 30 ms windows every 10 ms, 40 bands (on device, for training)."""
     import torchaudio
 
     spec = torchaudio.transforms.MelSpectrogram(
         sample_rate=RATE, n_fft=480, win_length=480, hop_length=160, n_mels=N_MELS
-    )
+    ).to(device)
     return lambda wave: torch.log(spec(wave) + 1e-6)
 
 
