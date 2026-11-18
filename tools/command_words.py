@@ -276,6 +276,18 @@ def run(
     return rows
 
 
+# Raise when stream_sound, mix or the noise changes: windows kept by an older version are then
+# scored again rather than read back for a stream they no longer match
+STREAM_VERSION = 1
+
+
+def stream_order(clips, seed: int = 0) -> list:
+    """The clips in the shuffled order stream_sound plays them (its rng's first draw)."""
+    order = list(clips)
+    random.Random(seed).shuffle(order)
+    return order
+
+
 def stream_sound(sc: Path, clips, snr: float | None, gap_s: float = 1.0, seed: int = 0):
     """The clips as one running stream, in a shuffled order: each after gap_s of silence (or of
     noise, snr_db below that clip's speech), padded to 1 s. Yields (label, path, gap + clip)."""
@@ -284,7 +296,7 @@ def stream_sound(sc: Path, clips, snr: float | None, gap_s: float = 1.0, seed: i
         noise_part(read_wav(p), "test") for p in sorted((sc / "_background_noise_").glob("*.wav"))
     ]
     order = list(clips)
-    rng.shuffle(order)
+    rng.shuffle(order)  # the first draw, so stream_order gives the same order
     gap = np.zeros(int(gap_s * TARGET_RATE), dtype=np.int16)
     for label, path in order:
         said = read_wav(path)
@@ -511,9 +523,10 @@ def main(argv=None) -> int:
     return 0
 
 
-def save_windows(path: Path, model: Path, gap_s: float, probs, pieces, spans) -> None:
+def save_windows(path: Path, model: Path, gap_s: float, probs, pieces, spans, seed: int = 0):
     """Keep each window's probabilities, so other thresholds can be scored without the hour of
-    scoring again; with the model's size and time, so another model's are not taken for them."""
+    scoring again; with what made the stream (the model's size and time, the gap, the clips in
+    order, the seed and STREAM_VERSION), so windows of another stream are not taken for them."""
     st = Path(model).stat()
     np.savez_compressed(
         path,
@@ -524,19 +537,25 @@ def save_windows(path: Path, model: Path, gap_s: float, probs, pieces, spans) ->
         bounds=np.array([(s[2], s[3]) for s in spans], dtype=np.int64),
         model=np.array([st.st_size, st.st_mtime_ns], dtype=np.int64),
         gap=np.array(gap_s),
+        seed=np.array(seed),
+        version=np.array(STREAM_VERSION),
     )
 
 
-def load_windows(path: Path, model: Path, gap_s: float, n_clips: int):
-    """The kept windows, or (None, None, None) when there are none for this model, gap and set."""
+def load_windows(path: Path, model: Path, gap_s: float, order, seed: int = 0):
+    """The kept windows, or (None, None, None) when there are none for this model, gap, seed,
+    stream version and these clips in this order (order: stream_order's (label, path) list)."""
     if not path.exists():
         return None, None, None
     st = Path(model).stat()
     with np.load(path) as k:
         same = (
-            k["model"].tolist() == [st.st_size, st.st_mtime_ns]
+            "version" in k
+            and int(k["version"]) == STREAM_VERSION
+            and int(k["seed"]) == seed
+            and k["model"].tolist() == [st.st_size, st.st_mtime_ns]
             and float(k["gap"]) == gap_s
-            and len(k["labels"]) == n_clips
+            and k["paths"].tolist() == [str(p) for _, p in order]
         )
         if not same:
             return None, None, None
@@ -582,7 +601,7 @@ def stream_report(a, out: Path) -> int:
         name = "clean" if snr is None else f"snr{snr:g}"
         sound = "clean" if snr is None else f"noise at {snr:g} dB"
         kept = out / f"{part}stream_windows_{name}.npz"
-        probs, pieces, spans = load_windows(kept, a.kws, a.gap, len(clips))
+        probs, pieces, spans = load_windows(kept, a.kws, a.gap, stream_order(clips))
         if probs is None:
             segments = stream_sound(a.sc, clips, snr, a.gap)
             probs, pieces, spans = stream_scores_batched(segments, score_many)

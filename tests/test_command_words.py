@@ -204,13 +204,35 @@ def test_the_windows_are_kept_and_used_again_only_for_the_same_model_and_gap(tmp
     probs, pieces, spans = cw.stream_scores(segments, fake_score(0.95))
     model, kept = tmp_path / "model.pt", tmp_path / "w.npz"
     model.write_bytes(b"one")
+    order = [("stop", Path("stop/b.wav"))]
     cw.save_windows(kept, model, 1.0, probs, pieces, spans)
-    p2, n2, s2 = cw.load_windows(kept, model, 1.0, 1)
+    p2, n2, s2 = cw.load_windows(kept, model, 1.0, order)
     assert np.array_equal(p2, probs) and n2 == pieces and s2 == spans
-    assert cw.load_windows(kept, model, 0.5, 1) == (None, None, None)  # another gap
-    assert cw.load_windows(kept, model, 1.0, 2) == (None, None, None)  # another set of clips
+    none = (None, None, None)
+    assert cw.load_windows(kept, model, 0.5, order) == none  # another gap
+    assert cw.load_windows(kept, model, 1.0, [("stop", Path("stop/c.wav"))]) == none  # clips
+    assert cw.load_windows(kept, model, 1.0, order * 2) == none  # another number of clips
+    assert cw.load_windows(kept, model, 1.0, order, seed=1) == none  # another seed
+    cw.STREAM_VERSION += 1  # the stream code changed
+    try:
+        assert cw.load_windows(kept, model, 1.0, order) == none
+    finally:
+        cw.STREAM_VERSION -= 1
     model.write_bytes(b"another")  # another model
-    assert cw.load_windows(kept, model, 1.0, 1) == (None, None, None)
+    assert cw.load_windows(kept, model, 1.0, order) == none
+
+
+def test_stream_order_is_the_order_the_stream_plays(tmp_path):
+    sc = tmp_path / "sc"
+    (sc / "_background_noise_").mkdir(parents=True)
+    clips = []
+    for i, label in enumerate(["go", "bed", "stop", "cat", "yes", "no"]):
+        (sc / label).mkdir()
+        path = sc / label / f"{i}.wav"
+        write(path, np.full(SECOND, 1000))
+        clips.append((label, path))
+    played = [(label, path) for label, path, _ in cw.stream_sound(sc, clips, None, 0.5)]
+    assert played == cw.stream_order(clips) != clips
 
 
 @needs_torch
