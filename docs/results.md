@@ -530,7 +530,14 @@ This model is surer of itself on noise than the 5-epoch one, so stop needs a hig
 
 - **"Go" given by mistake went up on the stream at 0.9** (of 6,931 other words, at 10 dB from 20 to 51). This is the unsafe direction: the chair moves without being asked. It is the same 51 with no stop threshold at all, so it comes from this model at 0.9, not from stop's 0.7. The held-out words heard as a command also went up.
 - On the stream, stop was never heard as "go", at any level. On aligned clips at its top class, stop was heard as "go" once at 10 dB and 5 times at 0 dB.
-- The other nine words still act from 0.9, the demo's value, not this model's own 0.95. A stream run at 0.95 (`--stream 0.95 0.9`) is running on GitHub's machines (heavy-runs run 44392294750), so its numbers are not in this section yet.
+- The other nine words still act from 0.9, the demo's value, not this model's own 0.95. The same stream at 0.95 (`--stream 0.95 0.9`, heavy-runs run 44392294750), with stop from 0.7, at 10 dB:
+
+| Other words act from | Right | Other words heard as "go" | Held-out words (of 818) | False activations | Stop missed (of 411) | Words in the gaps |
+|---|---|---|---|---|---|---|
+| 0.9 | 92.7% | 51 | 136 (16.6%) | 8.5% | 7 (1.7%) | 0 |
+| **0.95** | **90.4%** | **17** | **80 (9.8%)** | **5.2%** | **7 (1.7%)** | **0** |
+
+  At 0.95 "go" by mistake falls from 51 to 17 of 6,931, below the 5-epoch model's 20 at 0.9, and stop is missed as often. The price is 2.3 points of commands right (90.4% against 92.7%). Clean: 17 against 41, at 0 dB 18 against 42. So 0.95 for the other words, with stop from 0.7, is the safer pair for this model; the demo keeps 0.9 until it is tried there.
 - The demo's default stop threshold is now 0.7 (`--kws-stop-threshold`), for this model (`--kws` with `models-kws8-gpu100`'s `model.pt`). At 10 dB about 1 in 65 other words (106 of 6,931) is then heard as "stop".
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
