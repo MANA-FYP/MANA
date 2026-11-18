@@ -647,9 +647,9 @@ def main(argv=None) -> None:
                    help="BC-ResNet checkpoint, for offline command words")  # fmt: skip
     p.add_argument("--kws-threshold", type=float, default=0.9,
                    help="the least probability of a command word to act on")  # fmt: skip
-    p.add_argument("--kws-stop-threshold", type=float, default=0.3,
+    p.add_argument("--kws-stop-threshold", type=float, default=0.7,
                    help="the least probability of stop, lower: a missed stop is the unsafe "
-                        "case (0.3, chosen on a stream: docs/results.md)")  # fmt: skip
+                        "case (0.7 for the 100-epoch model: docs/results.md)")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
