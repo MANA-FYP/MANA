@@ -22,6 +22,14 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def lattice_file():
+    """The lattice planner's primitives (0.5 m turning radius, diff drive), from its package."""
+    share = get_package_share_directory("nav2_smac_planner")
+    return os.path.join(
+        share, "sample_primitives", "5cm_resolution", "0.5m_turning_radius", "diff", "output.json"
+    )
+
+
 def generate_launch_description():
     params = LaunchConfiguration("params")
     config = os.path.join(get_package_share_directory("mana_sim"), "config")
@@ -44,7 +52,7 @@ def generate_launch_description():
                 executable="planner_server",
                 name="planner_server",
                 output="screen",
-                parameters=[params],
+                parameters=[params, {"GridBased": {"lattice_filepath": lattice_file()}}],
             ),
             Node(
                 package="nav2_behaviors",
