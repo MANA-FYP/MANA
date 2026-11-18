@@ -122,6 +122,10 @@ def test_stop_can_have_a_threshold_of_its_own():
     ]
     assert kws.Spotter(lambda w: probs("go", 0.6), **lower).feed(pcm(1.0)) == []  # others keep 0.9
     assert kws.Spotter(lambda w: probs("stop", 0.6), threshold=0.9).feed(pcm(1.0)) == []  # unset
+    higher = dict(threshold=0.5, stop_threshold=0.9)  # stop is never harder than the others
+    assert [w for w, _ in kws.Spotter(lambda w: probs("stop", 0.6), **higher).feed(pcm(1.0))] == [
+        "stop"
+    ]
 
 
 def test_a_checkpoint_that_cannot_be_read_gives_no_spotter(tmp_path):

@@ -169,9 +169,9 @@ def fake_score(prob, loud_share=1.0):
     return score
 
 
-def stream(segments, prob, threshold, stop_any=False, loud_share=1.0):
+def stream(segments, prob, threshold, stop_at=None, loud_share=1.0):
     probs, pieces, spans = cw.stream_scores(segments, fake_score(prob, loud_share))
-    return cw.stream_rows(probs, pieces, spans, threshold, stop_any)
+    return cw.stream_rows(probs, pieces, spans, threshold, stop_at)
 
 
 @needs_torch
@@ -192,7 +192,47 @@ def test_a_word_in_the_stream_goes_to_the_clip_it_was_said_in():
 def test_a_threshold_misses_a_doubtful_stop_unless_stop_acts_at_any_probability():
     segments = [("stop", Path("stop/b.wav"), np.concatenate([quiet(1), loud(1)]))]
     assert stream(segments, 0.4, 0.85)[0][0]["outcome"] == "missed"  # the top class, at 0.4
-    assert stream(segments, 0.4, 0.85, stop_any=True)[0][0]["outcome"] == "right"
+    assert stream(segments, 0.4, 0.85, stop_at=0.0)[0][0]["outcome"] == "right"
+    # a threshold of stop's own: taken from 0.3, not from 0.5
+    assert stream(segments, 0.4, 0.85, stop_at=0.3)[0][0]["outcome"] == "right"
+    assert stream(segments, 0.4, 0.85, stop_at=0.5)[0][0]["outcome"] == "missed"
+
+
+@needs_torch
+def test_the_windows_are_kept_and_used_again_only_for_the_same_model_and_gap(tmp_path):
+    segments = [("stop", Path("stop/b.wav"), np.concatenate([quiet(1), loud(1)]))]
+    probs, pieces, spans = cw.stream_scores(segments, fake_score(0.95))
+    model, kept = tmp_path / "model.pt", tmp_path / "w.npz"
+    model.write_bytes(b"one")
+    order = [("stop", Path("stop/b.wav"))]
+    cw.save_windows(kept, model, 1.0, probs, pieces, spans)
+    p2, n2, s2 = cw.load_windows(kept, model, 1.0, order)
+    assert np.array_equal(p2, probs) and n2 == pieces and s2 == spans
+    none = (None, None, None)
+    assert cw.load_windows(kept, model, 0.5, order) == none  # another gap
+    assert cw.load_windows(kept, model, 1.0, [("stop", Path("stop/c.wav"))]) == none  # clips
+    assert cw.load_windows(kept, model, 1.0, order * 2) == none  # another number of clips
+    assert cw.load_windows(kept, model, 1.0, order, seed=1) == none  # another seed
+    cw.STREAM_VERSION += 1  # the stream code changed
+    try:
+        assert cw.load_windows(kept, model, 1.0, order) == none
+    finally:
+        cw.STREAM_VERSION -= 1
+    model.write_bytes(b"another")  # another model
+    assert cw.load_windows(kept, model, 1.0, order) == none
+
+
+def test_stream_order_is_the_order_the_stream_plays(tmp_path):
+    sc = tmp_path / "sc"
+    (sc / "_background_noise_").mkdir(parents=True)
+    clips = []
+    for i, label in enumerate(["go", "bed", "stop", "cat", "yes", "no"]):
+        (sc / label).mkdir()
+        path = sc / label / f"{i}.wav"
+        write(path, np.full(SECOND, 1000))
+        clips.append((label, path))
+    played = [(label, path) for label, path, _ in cw.stream_sound(sc, clips, None, 0.5)]
+    assert played == cw.stream_order(clips) != clips
 
 
 @needs_torch
@@ -253,7 +293,7 @@ def test_other_words_taken_for_go_or_stop_are_counted():
 @needs_torch
 def test_a_stop_lifted_to_act_keeps_the_models_own_probability():
     segments = [("stop", Path("stop/b.wav"), np.concatenate([quiet(1), loud(1)]))]
-    [row], _ = stream(segments, 0.4, 0.85, stop_any=True)
+    [row], _ = stream(segments, 0.4, 0.85, stop_at=0.0)
     assert row["outcome"] == "right" and row["conf"] == 0.4
 
 
@@ -276,5 +316,21 @@ def test_noise_alone_is_streamed_without_clips_below_the_average_speech(tmp_path
     assert level == pytest.approx(-10.0, abs=0.2)
     # streamed with no clips, every word it gives is noise alone
     probs, pieces, _ = cw.stream_scores([(label, None, noise)], fake_score(0.95, 0.5))
-    rows, alone = cw.stream_rows(probs, pieces, [], 0.85, False)
+    rows, alone = cw.stream_rows(probs, pieces, [], 0.85)
     assert rows == [] and alone and set(alone) == {"stop"}
+
+
+@needs_torch
+def test_batched_scoring_gives_the_spotters_windows_in_order():
+    rng = np.random.default_rng(1)
+    segments = [
+        (label, Path(f"{label}/{i}.wav"), (rng.standard_normal(2 * SECOND) * s).astype(np.int16))
+        for i, (label, s) in enumerate([("go", 3000), ("bed", 100), ("stop", 9000), ("cat", 5)])
+    ]
+    score = fake_score(0.95, 0.5)
+    one, pieces, spans = cw.stream_scores(segments, score)
+    for batch in (1, 3, 256):
+        many, p2, s2 = cw.stream_scores_batched(
+            segments, lambda w: np.stack([score(x) for x in w]), batch=batch
+        )
+        assert p2 == pieces and s2 == spans and np.array_equal(many, one)
