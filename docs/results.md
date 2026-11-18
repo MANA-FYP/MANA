@@ -431,6 +431,39 @@ On aligned clips these favour 0.85 with stop at any over the demo's 0.9. But the
 - **"Go" by mistake:** another word started it 34 times clean at 0.9 and 54 at 0.85, of 6,931. Stop was heard as "go" 3 times in 411 at 0 dB, and never clean or at 10 dB.
 - No word was given in the gaps of silence (clean), at any setting.
 
+**A threshold of stop's own** (`--stream 0.9 0.85 --stop-at 0 0.3 0.5 0.7`): "stop" acts from its own probability when it is the top class, the other nine words from the threshold. This is what the demo's `--kws-stop-threshold` does (`Spotter(stop_threshold=)`).
+
+The rule was fixed before the validation run was looked at: on `validation_list.txt` (9,981 clips, 350 of them stop), at the demo's 0.9, take the highest stop threshold whose stop misses at 10 dB are within 1 percentage point of stop at any's, and which gives no word in the gaps at 10 dB. Noise at 0 dB is reported, not used to choose.
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Other words heard as "stop" | Words in the gaps (2.8 h) |
+|---|---|---|---|
+| any probability | 2.0% (7) | 551 | 48 |
+| **0.3** | **2.0% (7)** | **369** | **0** |
+| 0.5 | 3.1% (11) | 197 | 0 |
+| 0.7 | 4.9% (17) | 97 | 0 |
+| 0.9 (no threshold of its own) | 9.1% (32) | 29 | 0 |
+
+So stop acts from **0.3**. On the testing list, at 0.9 for the other words:
+
+| Sound | Stop acts from | Stop missed (of 411) | Other words heard as "stop" (of 6,931) | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|
+| clean | 0.9 | 2.7% (11) | 15 | 6.4% | 0 | |
+| clean | any | 0.2% (1) | 245 | 9.6% | 0 | |
+| clean | **0.3** | **0.2% (1)** | **224** | **9.3%** | **0** | |
+| 10 dB | 0.9 | 9.0% (37) | 22 | 6.1% | 0 | 0 |
+| 10 dB | any | 2.2% (9) | 563 | 13.5% | 48 | 1 |
+| 10 dB | **0.3** | **2.7% (11)** | **376** | **10.9%** | **0** | **0** |
+| 0 dB | 0.9 | 36.0% (148) | 15 | 3.6% | 0 | 0 |
+| 0 dB | any | 7.5% (31) | 675 | 12.9% | 148 | 3 |
+| 0 dB | **0.3** | **9.5% (39)** | **369** | **8.6%** | **2** | **0** |
+
+- **Stop from 0.3 keeps nearly all that stop at any gains**: 2.7% of stops missed at 10 dB and 9.5% at 0 dB, against 9.0% and 36.0% at 0.9.
+- **It stops for noise alone almost never:** 0 words in the 3.1 hours of gaps at 10 dB, against 48 for stop at any. At 0 dB it gave 2, against 148. None came in the 1.7 minutes of noise alone at either level.
+- **The price is other words heard as "stop":** 376 of 6,931 at 10 dB (5.4%), against 563 for stop at any and 22 at 0.9. A stop not asked for stops the device, the safe side, and is said again as "go".
+- Stop was heard as "go" 3 times in 411 at 0 dB whatever stop's threshold, as before, and never clean or at 10 dB.
+- The demo now uses 0.3 for stop by default (`--kws-stop-threshold`), and 0.9 for the other words.
+- The full table, every setting at 0.9 and 0.85 for the clean, 10 dB and 0 dB runs, is printed by the command above. The validation and testing runs were played on GitHub's machines (`heavy-runs.yml`). The testing run gave exactly the same table as the same run on the laptop.
+
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
 `tools/sound_hazards.py` scores both AudioSet taggers as they come, with no training, on all 8,732 clips of UrbanSound8K.
