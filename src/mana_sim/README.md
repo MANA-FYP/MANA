@@ -237,12 +237,21 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   `camera dark, gps dropout`, then `none`. A change `fault_node` refuses is logged as a
   warning. Leaving a zone switches its fault off even when `fault_script`, the `dark` scenario or
   the panel's "Darkness" toggle switched it on, so do not use them with `zone_node`.
+- **People walking** (`--walkers`): three people walk a fixed path there and back, again and
+  again, turning for 1 s at each end: across the plaza 2.5 m in front of the plaza start
+  (1.2 m/s), along the corridor (1.0 m/s) and across the hall (0.8 m/s). They are Gazebo actors
+  (the walking person of Gazebo Fuel, downloaded once): moved, not pushed, so they pass through the
+  chair instead of stopping it. The lidar sees them: from the plaza start, over 2 minutes of
+  simulation on a GitHub machine (`tools/scan_watch.py`, the nearest return within 30 degrees of
+  ahead), 185 of 1,124 scans had something within 4 m, the nearest at 1.85 m. The same world
+  without them: 0 of 1,186, the nearest at 4.04 m. Whether the cameras and the detector see them
+  is not checked yet.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
   In Gazebo (WSL, 10 November 2026) the chair settled 0.3345 m above the ground it stood on, the
   same as on the route: on the plaza (0.12 m) by default, and on the terrace (1.535 m) of seed 2.
-- **Not done yet:** walking people, the camera's mounting angle, a lidar map
+- **Not done yet:** the walkers seen by the cameras, the camera's mounting angle, a lidar map
   for the autopilot, and the real-time factor (the one measured so far was with the computer busy).
 
 ## The host

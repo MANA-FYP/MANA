@@ -120,7 +120,8 @@ TURN_S = 1.0  # a person turning round at the end of their path
 @dataclass(frozen=True)
 class Walker:
     """A person walking a fixed path, there and back, again and again (#79). Gazebo's actors are
-    moved, not pushed: they pass through the chair, but the cameras and the lidar see them."""
+    moved, not pushed: they pass through the chair, but the lidar sees them (README, checked in
+    Gazebo)."""
 
     name: str
     path: tuple[tuple[float, float], ...]
