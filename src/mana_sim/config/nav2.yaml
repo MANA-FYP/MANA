@@ -14,8 +14,8 @@ bt_navigator:
     default_server_timeout: 1000  # ms: the planner answers late on a busy computer (20 timed out)
     wait_for_service_timeout: 5000
     navigators: ["navigate_to_pose"]
-    # the tree is navigate_no_recovery.xml (the launch file gives its path): replanning and the
-    # path follower, no recoveries or retries, so a goal that makes no progress for 60 s (a long
+    # the tree is navigate_no_recovery.xml (the launch file gives its path): planning again when the
+    # path is blocked, and the path follower, no recoveries or retries, so a goal that makes no progress for 60 s (a long
     # MANA stop) is aborted and has to be given again, rather than kept alive by spins and
     # back-ups that would set the chair off by itself when the stop lifts (Waqas, #187)
     navigate_to_pose:
