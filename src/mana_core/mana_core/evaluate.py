@@ -25,6 +25,7 @@ from mana_core.decision import (
     LinkReport,
     ObstacleReport,
     PositionReport,
+    PresenceReport,
     Priority,
 )
 from mana_core.messages import Message as Heard
@@ -44,6 +45,8 @@ def feed(core: DecisionCore, report) -> None:
         core.on_position(report)
     elif isinstance(report, LinkReport):
         core.on_link(report)
+    elif isinstance(report, PresenceReport):
+        core.on_presence(report)
     else:
         core.on_motion(report)
 

@@ -124,6 +124,34 @@ def test_an_edge_at_the_bottom_of_the_picture_does_not_teach_the_scale():
     assert r.held is None
 
 
+def scene_from(height, ground, pitch=PITCH):
+    """What a model in metres sees from a camera really at `height`, whatever the mount says."""
+    cam = dz.Mount(height_m=height, long_fov_deg=66.0).camera(COLS, ROWS, pitch)
+    img = syn.render(ground, cam, ROWS, COLS)
+    return np.where(np.isfinite(img), img, 20.0)
+
+
+def test_a_phone_held_low_teaches_no_scale_and_still_measures_what_is_ahead():
+    # sitting on the floor, phone in hand at 0.49 m, a cupboard 0.46 m away (#180): the floor
+    # learned as if at the mount's 1.2 m put the cupboard at 1.13 m
+    r = dz.Reader(MOUNT)
+    for _ in range(5):
+        seen = r.read(scene_from(0.49, wall(0.46)), PITCH)
+        assert seen.reading is None and seen.why.startswith("phone held 0.5 m above the floor")
+    assert r.held is None
+    assert seen.ahead_m == pytest.approx(0.46, abs=0.05)
+
+
+def test_a_camera_mounted_low_is_not_taken_for_a_phone_held_low():
+    # a rover's camera at 0.5 m, with --camera-height 0.5: its floor is where the mount says
+    low = dz.Mount(height_m=0.5, long_fov_deg=66.0)
+    r = dz.Reader(low)
+    for _ in range(3):
+        r.read(scene_from(0.5, syn.flat), PITCH)
+    assert r.held == pytest.approx(1.0, abs=0.02)
+    assert r.read(scene_from(0.5, syn.flat), PITCH).reading.ground == FLAT
+
+
 def test_a_drop_farther_off_still_teaches_it_the_bottom_rows_are_floor():
     r = dz.Reader(MOUNT)
     for _ in range(3):
