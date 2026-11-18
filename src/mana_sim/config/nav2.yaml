@@ -42,8 +42,8 @@ controller_server:
       xy_goal_tolerance: 0.35
       yaw_goal_tolerance: 0.5
       stateful: true
-    # trial (#78): MPPI scores sampled trajectories with the full footprint, so it can follow the
-    # lattice planner's path round the east corner, where Regulated Pure Pursuit cut it
+    # MPPI scores sampled trajectories with the full footprint, so it follows the lattice planner's
+    # path round the east corner, where Regulated Pure Pursuit cut it and stopped (#78)
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 40
