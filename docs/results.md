@@ -212,6 +212,53 @@ The Gazebo rows are from `tools/indoor_localisation.sh` (plain) and `--ekf` (the
 - **No worse where nothing jumped.** On both maps the EKF's mean and 95th were at or under slam_toolbox's alone (0.17 and 0.18 m mean, 0.37 and 0.39 m 95th). Wheel odometry ended 1.54 and 1.55 m off; the EKF's pose ended 0.13 and 0.03 m off.
 - The gate's settings (0.5 m, 60 s) were tuned on the four offline runs, recorded before the start-pose fix; they were not tuned again. A jump back now clears the offset (Waqas, #181): before, a 1.2 m jump undone 15 s later left 0.26 m the other way.
 
+## The autopilot through MANA (#78)
+
+`tools/autopilot.sh` runs Nav2 in the indoor world, localised by the lidar map (#43). Its commands go through `driver_select` and the host, capped by MANA's decision, the core running. `tools/autopilot_goal.py` sends four goals around the corridor loop: along the south corridor, round the east corner, along the north corridor, and back to the start. Times are simulation seconds; the error is from Gazebo's ground truth.
+
+### With a footprint of the chassis only (10 November 2026)
+
+These runs gave Nav2 a footprint of the chassis and wheels, 0.92 m long, and Nav2's default behaviour tree. The chair with its tracks is 2.2 m long (#187 review), so they are not what the configuration in this repository does now; that is the next table.
+
+| Run | Goal (map frame) | Result | Time | End error | MANA on the way |
+|---|---|---|---|---|---|
+| 1 | 13, 0 | reached | 35.5 s | 0.34 m | 30% of top speed |
+| 1 | 13.9, 6.6 | reached | 20.5 s | 0.23 m | 30%; a stop of 1.6 s, "Obstacle ahead, stopping" |
+| 1 | 7, 7.2 | reached | 23.7 s | 0.17 m | 30%; tracks once, "Wheel slip, changing to tracks" |
+| 1 | 0.5, 0 | reached | 36.6 s | 0.27 m | 30% of top speed |
+| 2 | 13, 0 | reached | 35.4 s | 0.35 m | 30% of top speed |
+| 2 | 13.9, 6.6 | reached | 20.9 s | 0.15 m | 30%; a stop of 1.6 s for an obstacle ahead |
+| 2 | 7, 7.2 | reached | 20.8 s | 0.24 m | 30% of top speed |
+| 2 | 0.5, 0 | reached by the controller, but **not reported**: the script gave up after 300 s of wall time (91.9 s) | | 0.25 m | 30%; 819 slow-downs for an obstacle ahead in this run, against 268 in run 1 |
+| 3 | 13, 0 | reached | 35.5 s | 0.33 m, 15° | 30% of top speed |
+| 3 | 13.9, 6.6 | reached | 21.0 s | 0.15 m, 2° | 30%; a stop of 1.6 s for an obstacle ahead |
+| 3 | 7, 7.2 | reached | 20.8 s | 0.20 m, 4° | 30% of top speed |
+| 3 | 0.5, 0 | reached | 36.8 s | 0.28 m, 28° | 30% of top speed |
+
+- **Nav2's controller reached all 12 goals, and 11 came back as reached,** ending 0.15 to 0.35 m from them. The goal tolerance is 0.35 m and 0.5 rad (29°). The first goal ended 0.33 to 0.35 m off in every run, at the edge of that tolerance: those numbers show where the goal checker stops more than how accurate the drive is.
+- **The goal not reported:** in run 2 the controller logged "Reached the goal!" for the last goal 152 s of wall time after it was sent, and its goal checker covers the heading too. The navigator never logged the goal as succeeded, so the script waited out its 300 s and wrote it down as timed out, the chair 0.25 m from the goal. Why that result never reached the navigator is not known yet. It did for the other 11 goals.
+- **MANA capped Nav2 throughout.** Of the 1,195 drive requests of run 1:
+  - 908 held 30% "waiting for the ground sensors (1 of 2 up: the 3D camera)", since this world runs no camera ground classifier;
+  - 268 slowed for an obstacle ahead;
+  - 16 were stops for an obstacle ahead;
+  - the other 3: two "Ground sensors not available" at the start, before the 3D camera was up, and one "Wheel slip, changing to tracks".
+- **A stop by MANA did not end the goal.** After the 1.6 s stop on the way to the second goal, Nav2 went on and reached it. Its progress checker allows 60 s; a longer stop has not been tried.
+
+### With the tracks in the footprint (17 November 2026)
+
+The footprint is now the chair with its tracks, 2.2 by 0.8 m, with an inflation of 1.2 m (at least its circumscribed radius, 1.17 m), and the behaviour tree has no recoveries (`config/navigate_no_recovery.xml`), so a goal the controller cannot follow is aborted rather than retried with spins and back-ups (#187 review). Three runs on the same map:
+
+| Run | Goal (map frame) | Result | Time | End error |
+|---|---|---|---|---|
+| 1, 2, 3 | 13, 0 | reached | 35.6 to 35.7 s | 0.31 to 0.35 m |
+| 1, 2, 3 | 13.9, 6.6 | **aborted** after 3.2 to 3.3 s | | 6.18 to 6.22 m (it had moved about 0.4 m from the first goal) |
+| 1, 2, 3 | 7, 7.2 | **aborted** after 0.4 s | | |
+| 1, 2, 3 | 0.5, 0 | **aborted** after 5.1 to 5.8 s | | |
+
+- **The full chair does not get round the east corner.** For the second goal the path turns north at the end of the south corridor. Nav2's controller (Regulated Pure Pursuit) checks the footprint along the path ahead and logged "detected collision ahead" each time, until "controller patience exceeded" aborted the goal. The later goals start from the same place and end the same way. With the chassis-only footprint the same turn was made in every run above, so those 12 goals were reached with half the chair's length in Nav2's checks.
+- **An abort ends the goal, as intended:** the behaviour server ran no spin, back-up or wait in any of the three runs (its log has only their set-up).
+- So with the tracks the autopilot drives the straight south corridor and stops at the first corner. Getting round it needs either more room to turn (the east corridor it turns into is 2 m wide, less than the 2.34 m a 2.2 m chair sweeps turning on the spot; the south one is 2.75 m) or a planner that plans the turn with the footprint (Nav2's Smac planners take a non-round footprint); neither is done yet.
+
 ## Camera depth and stairs on real phone frames (#131)
 
 Measured on 9 November 2026 on real iPhone frames from the Hugging Face dataset
