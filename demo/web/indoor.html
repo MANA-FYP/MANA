@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
   <link rel="stylesheet" href="/static/indoor.css">
+  <link rel="stylesheet" href="/static/places.css">
 </head>
 <body>
   <header class="top">
@@ -37,12 +38,15 @@
     <!-- the map and the height -->
     <section class="panel map">
       <div class="ptitle"><span class="ic" data-icon="map"></span>Where<span class="spacer"></span>
-        <div class="seg" id="layers"><button data-layer="satellite" class="on">Satellite</button><button data-layer="streets">Streets</button></div>
+        <div class="seg" id="layers"><button data-layer="satellite" class="on">Satellite</button><button data-layer="streets">Streets</button><span class="sepv"></span><button data-toggle="labels" id="tLabels" class="on" title="Place names on the satellite view">Names</button><button data-toggle="places" id="tPlaces" title="Places around: wheelchair access and photos">Places</button></div>
       </div>
       <div class="mapbox">
         <canvas id="mapCv"></canvas>
         <div class="imagery" id="imagery" hidden></div>
         <div class="maphint" id="mapHint">No GPS fix yet</div>
+        <div class="plegend" id="plegend" hidden></div>
+        <div class="pcard" id="pcard" hidden></div>
+        <small class="credit" id="credit"></small>
       </div>
     </section>
 
@@ -71,6 +75,7 @@
     </section>
   </main>
 
+  <script src="/static/places.js"></script>
   <script src="/static/indoor.js"></script>
 </body>
 </html>
