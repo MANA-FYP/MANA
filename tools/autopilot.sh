@@ -77,4 +77,8 @@ start "$OUT/ekf.log" ros2 run robot_localization ekf_node --ros-args -r __node:=
   -r odometry/filtered:=/odometry/global -r lidar/pose:=/lidar/pose
 start "$OUT/nav2.log" ros2 launch mana_sim autopilot.launch.py
 start "$OUT/drive_request.csv" ros2 topic echo /drive_request mana_msgs/msg/DriveRequest --csv
+# The chair starts 1.0 m from the west wall and its tracks reach 1.08 m back, so the footprint the
+# lattice planner checks touches the wall there and it will not plan ("Start occupied"). Roll it
+# forward first, through driver_select and MANA like any drive, then send the goals.
+timeout 20 ros2 topic pub --rate 10 --times 30 /cmd_vel/autopilot geometry_msgs/msg/Twist   "{linear: {x: 0.3}}" >/dev/null
 python3 "$HERE/autopilot_goal.py" --out "$OUT/goals.csv" --keep-going  # every goal, in simulation
