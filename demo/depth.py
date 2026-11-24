@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -35,6 +36,16 @@ if str(ROOT / "src" / "mana_perception") not in sys.path:
 from mana_perception import depth as dp  # noqa: E402
 
 MODEL = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
+
+
+def device() -> str:
+    """Where the models run: the GPU when torch has one (a lab PC serving the phone), else the
+    CPU (MANA_DEVICE overrides it, for example cpu to leave a shared GPU alone)."""
+    import torch
+
+    return os.environ.get("MANA_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
+
+
 MAX_FLOOR_M = 4.0  # the bottom of the picture must show the floor closer than this
 FLOOR_SPREAD = 0.15  # the floor rows must agree on the scale to within this share
 
@@ -349,7 +360,7 @@ class DepthModel:
             from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
             processor = AutoImageProcessor.from_pretrained(name)
-            model = AutoModelForDepthEstimation.from_pretrained(name).eval()
+            model = AutoModelForDepthEstimation.from_pretrained(name).eval().to(device())
         except Exception as e:  # not installed, not downloaded, no network
             print(f"depth model not loaded ({name}): {e}", file=sys.stderr)
             return None
@@ -365,6 +376,9 @@ class DepthModel:
             image = im.convert("RGB")
         size = {"height": self.size, "width": self.size}
         inputs = self.processor(images=image, return_tensors="pt", size=size)
+        on = getattr(self.model, "device", None)  # the GPU when there is one
+        if on is not None:
+            inputs = inputs.to(on)
         with torch.inference_mode():
             out = self.model(**inputs).predicted_depth
-        return out[0].float().numpy()
+        return out[0].float().cpu().numpy()

@@ -93,12 +93,16 @@ def load(folder: str | Path):
         model = get_model(width_mult=1.0, pretrained_name="mn10_as").eval()
     finally:
         os.chdir(cwd)
-    mel = AugmentMelSTFT(n_mels=128, sr=RATE, win_length=800, hopsize=320).eval()
+    from demo.depth import device
+
+    on = device()  # the GPU when there is one
+    model = model.to(on)
+    mel = AugmentMelSTFT(n_mels=128, sr=RATE, win_length=800, hopsize=320).eval().to(on)
 
     def score(wave: np.ndarray) -> np.ndarray:
         with torch.no_grad():
-            spec = mel(torch.from_numpy(wave[None, :].astype(np.float32)))
+            spec = mel(torch.from_numpy(wave[None, :].astype(np.float32)).to(on))
             logits, _ = model(spec.unsqueeze(0))
-            return torch.sigmoid(logits.float()).numpy()[0]
+            return torch.sigmoid(logits.float()).cpu().numpy()[0]
 
     return score
