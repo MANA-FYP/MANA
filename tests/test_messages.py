@@ -507,6 +507,21 @@ def test_an_obstacle_is_told_by_name_and_distance():
     assert direction(core_with(obstacles=[obstacle(2.6)]), 1.0) is None
 
 
+@pytest.mark.parametrize(
+    ("label", "said"),
+    [
+        ("wall", "Stop. Wall ahead, less than a metre."),
+        ("overhang", "Stop. Overhang ahead, less than a metre."),
+        ("narrow opening", "Stop. Gap too narrow ahead, less than a metre."),
+    ],
+)
+def test_what_the_3d_camera_finds_in_the_path_is_told_by_name(label, said):
+    """mana_perception.structure names what blocks the path; a gap narrower than the device is
+    not said as "narrow opening", which sounds like a way through."""
+    report = ObstacleReport(1.0, 0.9, Source.DEPTH_CAMERA, 0.7, label)
+    assert direction(core_with(obstacles=[report]), 1.0).text == said
+
+
 def test_an_obstacle_at_stopping_distance_is_urgent():
     m = direction(core_with(obstacles=[obstacle(0.7)]), 1.0)
     assert (m.text, m.priority) == ("Stop. Person ahead, less than a metre.", URGENT)

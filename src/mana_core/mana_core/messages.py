@@ -172,6 +172,11 @@ def metres(distance_m: float) -> str:
     return "1 metre" if d == 1 else f"{d} metres"
 
 
+# Labels said otherwise than they are written. The 3D camera's "narrow opening" is a gap narrower
+# than the device (mana_perception.structure): said as written it sounds like a way through.
+SAID_AS = {"narrow opening": "gap too narrow"}
+
+
 def direction(core: DecisionCore, now: float) -> Message | None:
     """The one thing most worth telling the user about what is ahead, or None.
 
@@ -234,7 +239,7 @@ def direction(core: DecisionCore, now: float) -> Message | None:
     for r in (r for r in core.obstacles.values() if good(r)):
         if r.distance_m > lim.obstacle_slow_m:
             continue
-        label = (r.label or "obstacle").capitalize()
+        label = SAID_AS.get(r.label, r.label or "obstacle").capitalize()
         if r.distance_m <= lim.obstacle_stop_m:
             found.append(
                 (Priority.URGENT, r.distance_m, f"Stop. {label} ahead, {metres(r.distance_m)}.")
