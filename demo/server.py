@@ -128,7 +128,9 @@ def build_app(
     # the ground read from the depth's shape goes to the core only when asked: on real phone
     # frames it took level floors for ramps and drops (docs/results.md, #131)
     app["depth_ground"] = depth_ground
-    app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
+    app["depth"] = {
+        "seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None, "raw": None,
+    }  # fmt: skip
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
     # what changes while the server runs lives in these dicts: aiohttp deprecates setting the
     # app's own keys once it has started
@@ -550,7 +552,13 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
             for i, d in enumerate(detections)
         ]  # fmt: skip
     if app["classifier"] is not None:
-        label, conf = app["classifier"].classify(jpeg)
+        extra = {}
+        if getattr(app["classifier"], "wants_depth", False):
+            # the model's own depth for this frame, raw as it was trained on, if it is that recent
+            d = app["depth"]
+            fresh = d["t"] is not None and now - d["t"] <= DEPTH_FOR_STAIRS_S
+            extra["depth"] = d["raw"] if fresh else None
+        label, conf = app["classifier"].classify(jpeg, **extra)
         ground = Ground.STAIRS_UP if vision.stair_ground(label) == "stairs" else Ground.FLAT
         region = getattr(app["classifier"], "region", None)  # the segmenter's stairs, as a box
         box = None
@@ -629,6 +637,9 @@ async def walk_geojson(request: web.Request) -> web.Response:
 STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
 SEGMENTED = "stairs (pixels)"  # the segmenter's stairs on the dashboard
 MIN_OBSTACLE_CONFIDENCE = 0.4  # as vision.to_obstacles
+DEPTH_FOR_STAIRS_S = (
+    0.5  # depth older than this is from another view: the stairs model goes without
+)
 # the depth sees stairs up as something in the path from the second or third riser: on real frames
 # 0.2 to 1.3 m past where they start (#159)
 STAIRS_RISE_M = 1.5
@@ -753,7 +764,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     d = app["depth"]
-    d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now)
+    d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now, raw=image)
     d["view"] = {
         "seq": d["seq"],
         "ms": mw.latency["depth_ms"],

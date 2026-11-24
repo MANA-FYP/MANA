@@ -1356,11 +1356,15 @@ seed for every row; `--only-with depth_npy`).
 |---|---:|---:|---:|
 | RGB | 0.913 | 0.777 | 0.723 |
 | RGB + SANPO's stereo depth | 0.946 | 0.918 | 0.873 |
+| RGB + depth estimated from the image (Depth Anything V2) | 0.926 | 0.909 | 0.847 |
 
 Depth adds 15 points of IoU and 14 of recall, more than the 6.5 IoU points on the RealSense set.
-This is the depth a device's 3D camera gives. A phone has no depth camera; how much of this
-survives with depth estimated from the image alone is the next row to fill
-(Depth Anything V2, as the demo runs it, `--depth depth_dav2`).
+The stereo row is the depth a device's 3D camera gives. A phone has no depth camera, but the demo
+already runs Depth Anything V2 (Metric-Indoor-Small) on every frame: with that depth, estimated
+from the image alone, as the fourth channel (`--depth depth_dav2`), 12 of the 15 points survive
+(IoU 0.847, recall 0.909). Depth Anything was not trained on SANPO, so this is not the stereo
+depth leaking in. The demo gives such a model its own depth for the frame (`--stairs-seg`, with a
+model trained this way among the weights).
 
 **Dim light** (`--low-light`): every model is also scored on a dark copy of the validation frames
 (`DARK`: a third of the light, gamma 2, sensor noise; the depth is left alone, as a depth camera
@@ -1383,5 +1387,7 @@ camera is the stronger answer to darkness.
 python3 tools/fetch_sanpo_depth.py datasets/sanpo
 python3 tools/train_stair_seg.py --root datasets/sanpo --only-with depth_npy --out runs/rgb.pt
 python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_npy --out runs/rgbd.pt
+python3 tools/estimate_sanpo_depth.py datasets/sanpo
+python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_dav2 --only-with depth_npy --out runs/rgb_dav2.pt
 python3 tools/train_stair_seg.py --root datasets/sanpo --low-light --out runs/dim.pt
 ```

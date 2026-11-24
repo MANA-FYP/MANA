@@ -100,10 +100,17 @@ class StairSegmenter:
     Several models may be given (load("a.pt,b.pt")): a pixel is stairs when any of them says so.
     A model trained only on plain frames found no stairs at all in a dark copy of SANPO's
     validation frames; one also trained on dim frames found half; together they keep the first's
-    IoU in good light (0.822 against 0.824) with more recall (0.904 against 0.873)."""
+    IoU in good light (0.822 against 0.824) with more recall (0.904 against 0.873).
+
+    A model trained with depth as a fourth channel (tools/train_stair_seg.py --depth) is given the
+    demo's own depth for the frame (Depth Anything V2, raw metres) when there is one; without it,
+    that model sits the frame out. With depth estimated that way, SANPO's stair pixels went from
+    0.723 to 0.847 IoU on the same frames (docs/results.md)."""
 
     def __init__(self, model, device: str, min_share: float = 0.02, size: int = 256):
         self.models = list(model) if isinstance(model, (list, tuple)) else [model]
+        self.channels = [m.e1[0].in_channels if hasattr(m, "e1") else 3 for m in self.models]
+        self.wants_depth = 4 in self.channels  # the server then passes the frame's depth
         self.device, self.min_share, self.size = device, min_share, size
         self.mask = None  # the last frame's stair probabilities, size x size
 
@@ -122,30 +129,54 @@ class StairSegmenter:
             on = device()
             models = []
             for one in path.split(","):
-                model = UNet(3)
-                model.load_state_dict(torch.load(one.strip(), map_location="cpu"))
+                state = torch.load(one.strip(), map_location="cpu")
+                model = UNet(int(state["e1.0.weight"].shape[1]))  # 3 colours, or 4 with depth
+                model.load_state_dict(state)
                 models.append(model.eval().to(on))
             return cls(models, on)
         except Exception as e:  # torch or the weights missing
             print(f"stairs segmentation not loaded ({path}): {e}", file=sys.stderr)
             return None
 
-    def segment(self, jpeg: bytes):
-        """Stair probability per pixel, at size x size: the highest any model gives."""
+    def depth_channel(self, depth):
+        """Depth in metres as the fourth channel, as training made it (train_stair_seg.CLIP_M)."""
+        import numpy as np
+        from PIL import Image
+
+        d = np.nan_to_num(np.asarray(depth, dtype="float32"), nan=0.0, posinf=20.0, neginf=0.0)
+        d = np.clip(d, 0.0, 20.0) / 20.0
+        img = Image.fromarray((d * 255).astype("uint8")).resize((self.size, self.size))
+        return np.asarray(img, dtype="float32")[None] / 255.0
+
+    def segment(self, jpeg: bytes, depth=None):
+        """Stair probability per pixel, at size x size: the highest any model gives. depth: the
+        frame's depth in metres, for the models that take it."""
         import numpy as np
         import torch
         from PIL import Image
 
         with Image.open(io.BytesIO(jpeg)) as im:
             rgb = np.asarray(im.convert("RGB").resize((self.size, self.size)), dtype="float32")
-        x = torch.from_numpy((rgb / 255.0).transpose(2, 0, 1)[None]).to(self.device)
+        colour = (rgb / 255.0).transpose(2, 0, 1)
+        x = torch.from_numpy(colour[None]).to(self.device)
+        x4 = None
+        if depth is not None and self.wants_depth:
+            both = np.concatenate([colour, self.depth_channel(depth)])
+            x4 = torch.from_numpy(both[None].astype("float32")).to(self.device)
         with torch.inference_mode():
-            probs = [torch.sigmoid(m(x))[0, 0] for m in self.models]
-            self.mask = torch.stack(probs).max(0).values.float().cpu().numpy()
+            probs = [
+                torch.sigmoid(m(x4 if ch == 4 else x))[0, 0]
+                for m, ch in zip(self.models, self.channels, strict=True)
+                if ch == 3 or x4 is not None
+            ]
+            if probs:
+                self.mask = torch.stack(probs).max(0).values.float().cpu().numpy()
+            else:  # only depth models, and no depth for this frame
+                self.mask = np.zeros((self.size, self.size), dtype="float32")
         return self.mask
 
-    def classify(self, jpeg: bytes) -> tuple[str, float]:
-        mask = self.segment(jpeg)
+    def classify(self, jpeg: bytes, depth=None) -> tuple[str, float]:
+        mask = self.segment(jpeg, depth)
         stairs = mask > 0.5
         if stairs.mean() < self.min_share:
             return "level", float(1.0 - mask.mean())
