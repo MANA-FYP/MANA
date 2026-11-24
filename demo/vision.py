@@ -95,14 +95,21 @@ class StairSegmenter:
     did. A box around a whole staircase fits it badly, and the detector's boxes reach only about
     0.23 AP50 on SANPO; per pixel the same frames give 0.77 IoU and 0.85 recall
     (docs/results.md), and a staircase half in view is still its visible pixels. region() then
-    gives where the stairs are, as a box the floor and depth code can measure."""
+    gives where the stairs are, as a box the floor and depth code can measure.
+
+    Several models may be given (load("a.pt,b.pt")): a pixel is stairs when any of them says so.
+    A model trained only on plain frames found no stairs at all in a dark copy of SANPO's
+    validation frames; one also trained on dim frames found half; together they keep the first's
+    IoU in good light (0.822 against 0.824) with more recall (0.904 against 0.873)."""
 
     def __init__(self, model, device: str, min_share: float = 0.02, size: int = 256):
-        self.model, self.device, self.min_share, self.size = model, device, min_share, size
+        self.models = list(model) if isinstance(model, (list, tuple)) else [model]
+        self.device, self.min_share, self.size = device, min_share, size
         self.mask = None  # the last frame's stair probabilities, size x size
 
     @classmethod
     def load(cls, path: str) -> StairSegmenter | None:
+        """path: one weights file, or several separated by commas."""
         try:
             import torch
 
@@ -113,15 +120,18 @@ class StairSegmenter:
             from tools.train_stair_seg import UNet
 
             on = device()
-            model = UNet(3)
-            model.load_state_dict(torch.load(path, map_location="cpu"))
-            return cls(model.eval().to(on), on)
+            models = []
+            for one in path.split(","):
+                model = UNet(3)
+                model.load_state_dict(torch.load(one.strip(), map_location="cpu"))
+                models.append(model.eval().to(on))
+            return cls(models, on)
         except Exception as e:  # torch or the weights missing
             print(f"stairs segmentation not loaded ({path}): {e}", file=sys.stderr)
             return None
 
     def segment(self, jpeg: bytes):
-        """Stair probability per pixel, at size x size."""
+        """Stair probability per pixel, at size x size: the highest any model gives."""
         import numpy as np
         import torch
         from PIL import Image
@@ -130,7 +140,8 @@ class StairSegmenter:
             rgb = np.asarray(im.convert("RGB").resize((self.size, self.size)), dtype="float32")
         x = torch.from_numpy((rgb / 255.0).transpose(2, 0, 1)[None]).to(self.device)
         with torch.inference_mode():
-            self.mask = torch.sigmoid(self.model(x))[0, 0].float().cpu().numpy()
+            probs = [torch.sigmoid(m(x))[0, 0] for m in self.models]
+            self.mask = torch.stack(probs).max(0).values.float().cpu().numpy()
         return self.mask
 
     def classify(self, jpeg: bytes) -> tuple[str, float]:

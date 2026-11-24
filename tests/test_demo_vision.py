@@ -212,3 +212,33 @@ def test_the_trained_unet_loads_and_segments(tmp_path):
     seg = vision.StairSegmenter.load(str(path))
     assert seg is not None
     assert seg.segment(stairs_jpeg()).shape == (256, 256)
+
+
+def test_stairs_either_model_sees_are_stairs():
+    """One model for good light, one also trained on dim frames: a pixel is stairs when either
+    says so, so stairs only the dim-light model finds still count."""
+    torch = pytest.importorskip("torch")
+
+    class Rows(torch.nn.Module):
+        def __init__(self, a, b):
+            super().__init__()
+            self.a, self.b = a, b
+
+        def forward(self, x):
+            out = torch.full((1, 1, 256, 256), -10.0)
+            out[:, :, self.a : self.b, :] = 10.0
+            return out
+
+    seg = vision.StairSegmenter([Rows(0, 0), Rows(128, 256)], "cpu")  # the first sees nothing
+    assert seg.classify(stairs_jpeg())[0] == "stairs"
+    assert seg.region(480, 360).y1 == pytest.approx(180, abs=5)
+
+
+def test_several_weights_files_load_as_one_segmenter(tmp_path):
+    torch = pytest.importorskip("torch")
+    from tools.train_stair_seg import UNet
+
+    for name in ("a.pt", "b.pt"):
+        torch.save(UNet(3).state_dict(), tmp_path / name)
+    seg = vision.StairSegmenter.load(f"{tmp_path / 'a.pt'},{tmp_path / 'b.pt'}")
+    assert len(seg.models) == 2
