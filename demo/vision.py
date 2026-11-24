@@ -93,7 +93,8 @@ class StairSegmenter:
     """Stairs found pixel by pixel (tools/train_stair_seg.py, a U-Net trained on SANPO's own stair
     masks), in the classifier's place: classify() says "stairs" or "level" as the ONNX classifier
     did. A box around a whole staircase fits it badly, and the detector's boxes reach only about
-    0.23 AP50 on SANPO; per pixel the same frames give 0.77 IoU and 0.85 recall
+    0.23 AP50 on SANPO; per pixel, on SANPO's held-out test walks, it marks about a third of the
+    stair pixels (IoU 0.34, recall 0.36, precision 0.90)
     (docs/results.md), and a staircase half in view is still its visible pixels. region() then
     gives where the stairs are, as a box the floor and depth code can measure.
 
@@ -104,8 +105,9 @@ class StairSegmenter:
 
     A model trained with depth as a fourth channel (tools/train_stair_seg.py --depth) is given the
     demo's own depth for the frame (Depth Anything V2, raw metres) when there is one; without it,
-    that model sits the frame out. With depth estimated that way, SANPO's stair pixels went from
-    0.723 to 0.847 IoU on the same frames (docs/results.md)."""
+    that model sits the frame out. On SANPO's held-out test walks, depth estimated that way gave
+    about 3 IoU points over colour alone, less than the spread between training runs
+    (docs/results.md), so none is run live."""
 
     def __init__(self, model, device: str, min_share: float = 0.02, size: int = 256):
         self.models = list(model) if isinstance(model, (list, tuple)) else [model]

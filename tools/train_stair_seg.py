@@ -8,15 +8,17 @@ and finds a staircase in only two of six test walks. That is near the published 
 *box* detection of stairs, which fit a box badly: a staircase is a repeating surface that fills
 the lower frame, not a compact object. SANPO already labels stairs as a segmentation mask (class
 id 15 in the mask's red channel, the same encoding sanpo_to_yolo.py reads), so this scores the
-stairs the way they are labelled -- per pixel -- instead of forcing them into boxes. On the same
-SANPO frames this reaches about 0.77 IoU and 0.85 recall on the stair pixels, roughly three times
-the box IoU. See docs/results.md, "Stairs: segmentation beats boxes". Depth fusion is expected to
-add more (an RGB-vs-RGB-D study on a RealSense set gave +6.5 IoU), but the SANPO export here has
-no depth, so this model is RGB only.
+stairs the way they are labelled -- per pixel -- instead of forcing them into boxes. On
+validation frames from the training walks this reached about 0.77 IoU, but those frames are near
+copies of training ones; on SANPO's held-out test walks (--split test) it marks about a third of
+the stair pixels (IoU 0.34, recall 0.36, precision 0.90). See docs/results.md, "Stairs:
+segmentation beats boxes". --depth adds a depth channel (tools/fetch_sanpo_depth.py), which on the
+test walks gave about 3 IoU points, less than the spread between runs.
 
 The model is a small U-Net (about 8 MB). It trains on an equal mix of stair and non-stair frames
 (so precision is measured honestly, not inflated by empty frames) drawn from SANPO's training
-sessions, holding out a seeded fraction by frame for validation, and reports stair-pixel
+sessions, holding out a seeded fraction by frame (or, with --val-walks, whole walks) for
+validation, and reports stair-pixel
 precision, recall and IoU. It needs the SANPO frames and masks on disk (tools/fetch_sanpo.py),
 laid out as <root>/<split>/<session>/<camera>/{video_frames,segmentation_masks}/*.png.
 """
@@ -78,6 +80,30 @@ class UNet(nn.Module):
         return self.out(d)
 
 
+class Pretrained(nn.Module):
+    """torchvision's LR-ASPP on a MobileNetV3-Large backbone pretrained on ImageNet (BSD-3), with
+    one stair logit per pixel: a backbone that has seen a million photos, against the U-Net's
+    from-scratch features, for frames from walks it never saw. RGB only."""
+
+    def __init__(self, pretrained: bool = True):
+        super().__init__()
+        from torchvision.models import MobileNet_V3_Large_Weights
+        from torchvision.models.segmentation import lraspp_mobilenet_v3_large
+
+        weights = MobileNet_V3_Large_Weights.IMAGENET1K_V1 if pretrained else None
+        self.net = lraspp_mobilenet_v3_large(weights_backbone=weights, num_classes=1)
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net((x - self.mean) / self.std)["out"]
+
+
+def walk_of(frame: Path) -> str:
+    """The walk (SANPO session) a frame is from: <split>/<session>/<camera>/video_frames/f.png."""
+    return frame.parent.parent.parent.name
+
+
 def list_pairs(root: Path, split: str) -> list[tuple[Path, Path]]:
     """Every (frame, mask) pair under a split of the SANPO tree."""
     pairs: list[tuple[Path, Path]] = []
@@ -127,14 +153,39 @@ def depth_channel(path: Path) -> np.ndarray:
     return np.asarray(img, dtype=np.float32)[None] / 255.0
 
 
+def augment(x: torch.Tensor, seg: torch.Tensor, rng: np.random.Generator):
+    """A training frame changed the way another walk would show it: mirrored half the time, a
+    random crop of 60 to 100 percent of it scaled back up, and its colour's brightness, contrast
+    and saturation changed by up to 40, 30 and 40 percent. A depth channel is cropped and mirrored
+    with it but not recoloured. x: C x H x W, seg: H x W."""
+    if rng.random() < 0.5:
+        x, seg = x.flip(-1), seg.flip(-1)
+    size = x.shape[-1]
+    crop = int(size * rng.uniform(0.6, 1.0))
+    top, left = rng.integers(0, size - crop + 1, 2)
+    x = x[:, top : top + crop, left : left + crop]
+    seg = seg[top : top + crop, left : left + crop]
+    x = F.interpolate(x[None], size=(size, size), mode="bilinear", align_corners=False)[0]
+    seg = F.interpolate(seg[None, None], size=(size, size), mode="nearest")[0, 0]
+    rgb = x[:3] * rng.uniform(0.6, 1.4)
+    mean = rgb.mean()
+    rgb = (rgb - mean) * rng.uniform(0.7, 1.3) + mean
+    grey = rgb.mean(0, keepdim=True)
+    rgb = grey + (rgb - grey) * rng.uniform(0.6, 1.4)
+    return torch.cat([rgb.clamp(0, 1), x[3:]]), seg
+
+
 class StairSeg(Dataset):
     """Frames and stair masks. low_light: a random dim version of each training frame half the
     time. dark: every frame darkened the same way (DARK, seeded by its index), to score with.
     depth: the folder beside video_frames that holds each frame's depth, as a fourth channel
     (the darkening touches only the colour: a depth camera does not need light)."""
 
-    def __init__(self, pairs: list[tuple[Path, Path]], low_light=False, dark=False, depth=None):
+    def __init__(
+        self, pairs: list[tuple[Path, Path]], low_light=False, dark=False, depth=None, aug=False
+    ):
         self.pairs, self.low_light, self.dark, self.depth = pairs, low_light, dark, depth
+        self.aug = aug  # augment() each frame (training)
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -151,7 +202,10 @@ class StairSeg(Dataset):
         x = rgb.transpose(2, 0, 1).astype(np.float32)
         if self.depth:
             x = np.concatenate([x, depth_channel(depth_of(fp, self.depth))])
-        return torch.from_numpy(x), torch.from_numpy(seg)[None]
+        xt, st = torch.from_numpy(x), torch.from_numpy(seg)
+        if self.aug:
+            xt, st = augment(xt, st, np.random.default_rng())
+        return xt, st[None]
 
 
 def score(model: nn.Module, dl: DataLoader, dev: str) -> tuple[float, float, float]:
@@ -175,6 +229,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--root", type=Path, default=Path("datasets/sanpo"))
     ap.add_argument("--epochs", type=int, default=30)
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="the training run's seed (weights, batches); the frames and their split stay fixed",
+    )
     ap.add_argument("--cap", type=int, default=4000, help="max stair frames (+ equal non-stair)")
     ap.add_argument("--out", type=Path, default=Path("runs/stair_seg.pt"))
     ap.add_argument(
@@ -201,15 +261,48 @@ def main(argv: list[str] | None = None) -> int:
         help="use only frames that have depth in FOLDER (so an RGB run and a depth run are on "
         "the same frames); --depth implies its own folder",
     )
+    ap.add_argument(
+        "--split",
+        default="train",
+        help="with --eval, score on every stairs frame of this split and as many without, "
+        "instead of the validation frames: test scores on SANPO's held-out walks. The "
+        "validation frames come from the training walks (near-copies of training frames) and "
+        "choose the saved epoch, so they flatter a model",
+    )
+    ap.add_argument(
+        "--val-walks",
+        action="store_true",
+        help="hold out whole walks (a sixth of them, seeded) for validation, not a sixth of the "
+        "frames: neighbouring frames of one walk are near-copies, so frame-held-out validation "
+        "flatters the epoch it picks",
+    )
+    ap.add_argument(
+        "--augment",
+        action="store_true",
+        help="mirror, crop and recolour the training frames, so the model learns stairs rather "
+        "than its training walks: scored on SANPO's held-out test walks, models without it found "
+        "only about a third of the stair pixels",
+    )
+    ap.add_argument(
+        "--arch",
+        choices=("unet", "pretrained"),
+        default="unet",
+        help="unet: the small U-Net from scratch; pretrained: LR-ASPP on an ImageNet MobileNetV3 "
+        "(colour only)",
+    )
     a = ap.parse_args(argv)
     only = a.only_with or a.depth
-    torch.manual_seed(0)
-    np.random.seed(0)
+    if a.arch == "pretrained" and a.depth:
+        ap.error("--arch pretrained takes colour only, not --depth")
+    torch.manual_seed(a.seed)
+    np.random.seed(a.seed)
+    torch.set_num_threads(4)  # the model runs on the GPU: a shared PC's other cores stay free
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-    allp = list_pairs(a.root, "train")
+    split = a.split if a.eval else "train"
+    allp = list_pairs(a.root, split)
     if not allp:
-        print(f"no frames under {a.root}/train (run tools/fetch_sanpo.py first)", file=sys.stderr)
+        print(f"no frames under {a.root}/{split} (run tools/fetch_sanpo.py first)", file=sys.stderr)
         return 1
     rng = np.random.default_rng(0)
     rng.shuffle(allp)
@@ -223,20 +316,29 @@ def main(argv: list[str] | None = None) -> int:
             break
     data = stair + nonstair[: len(stair)]
     rng.shuffle(data)
-    nval = max(1, len(data) // 6)
+    nval = len(data) if split != "train" else max(1, len(data) // 6)  # a held-out split: all
     va, tr = data[:nval], data[nval:]
+    if a.val_walks and split == "train":
+        walks = sorted({walk_of(fp) for fp, _ in data})
+        np.random.default_rng(0).shuffle(walks)
+        held = set(walks[: max(1, len(walks) // 6)])
+        va = [p for p in data if walk_of(p[0]) in held]
+        tr = [p for p in data if walk_of(p[0]) not in held]
     print(f"stair {len(stair)}  balanced {len(data)}  train {len(tr)} val {len(va)}", flush=True)
 
     vl = DataLoader(StairSeg(va, depth=a.depth), batch_size=16, num_workers=4)
     dark = DataLoader(StairSeg(va, dark=True, depth=a.depth), batch_size=16, num_workers=4)
-    model = UNet(4 if a.depth else 3).to(dev)
+    if a.arch == "pretrained":
+        model = Pretrained(pretrained=not a.eval).to(dev)
+    else:
+        model = UNet(4 if a.depth else 3).to(dev)
     if a.eval:
         model.load_state_dict(torch.load(a.eval, map_location=dev))
         for name, dl in (("plain", vl), ("dark", dark)):
             p, r, i = score(model, dl, dev)
             print(f"{a.eval.name} {name}: precision {p:.3f} recall {r:.3f} IoU {i:.3f}")
         return 0
-    train = StairSeg(tr, low_light=a.low_light, depth=a.depth)
+    train = StairSeg(tr, low_light=a.low_light, depth=a.depth, aug=a.augment)
     tl = DataLoader(train, batch_size=16, shuffle=True, num_workers=8, drop_last=True)
     opt = torch.optim.Adam(model.parameters(), 1e-3)
     a.out.parent.mkdir(parents=True, exist_ok=True)

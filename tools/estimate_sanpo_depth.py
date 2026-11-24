@@ -3,7 +3,7 @@ stereo depth: Depth Anything V2 (Metric-Indoor-Small) on each frame, saved as
 <camera>/depth_dav2/<frame>.npy (metres, float16). Train the stairs segmentation on it with
 tools/train_stair_seg.py --depth depth_dav2 --only-with depth_npy, for the depth a phone has.
 
-    python3 tools/estimate_sanpo_depth.py datasets/sanpo
+    python3 tools/estimate_sanpo_depth.py datasets/sanpo [test]
 
 Needs torch, transformers and a GPU for a reasonable time (about 25 minutes for 23,645 frames on
 an RTX 4000 Ada). Frames already done are skipped.
@@ -20,10 +20,11 @@ import numpy as np
 MODEL = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"  # as demo/depth.py
 
 
-def todo(root: Path) -> list[tuple[Path, Path]]:
-    """(frame, where its estimated depth goes) for frames with stereo depth and none estimated."""
+def todo(root: Path, split: str = "train") -> list[tuple[Path, Path]]:
+    """(frame, where its estimated depth goes) for frames of the split with stereo depth and
+    none estimated."""
     found = []
-    for stereo in sorted(root.glob("train/*/*/depth_npy/*.npy")):
+    for stereo in sorted(root.glob(f"{split}/*/*/depth_npy/*.npy")):
         cam = stereo.parent.parent
         out = cam / "depth_dav2" / stereo.name
         if not out.exists():
@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = sys.argv[1:] if argv is None else argv
     root = Path(args[0]) if args else Path("datasets/sanpo")
-    jobs = todo(root)
+    jobs = todo(root, args[1] if len(args) > 1 else "train")
     print(f"frames: {len(jobs)}", flush=True)
     on = "cuda" if torch.cuda.is_available() else "cpu"
     processor = AutoImageProcessor.from_pretrained(MODEL)

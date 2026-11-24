@@ -119,3 +119,38 @@ def test_frames_with_stereo_depth_and_none_estimated_are_the_ones_to_estimate(tm
     assert len(jobs) == 5
     frame, out = jobs[0]
     assert frame.name == "000002.png" and out == cam / "depth_dav2" / "000002.npy"
+
+
+def test_validation_can_hold_out_whole_walks(tmp_path, capsys):
+    root = tmp_path / "sanpo"
+    for walk in ("w1", "w2", "w3", "w4", "w5", "w6"):  # six walks of four frames each
+        sanpo_tree(root / "x", frames=4)
+        (root / "train").mkdir(parents=True, exist_ok=True)
+        (root / "x" / "train" / "s1").rename(root / "train" / walk)
+        (root / "x" / "train").rmdir()
+    weights = tmp_path / "seg.pt"
+    torch.save(tss.UNet(3).state_dict(), weights)
+    tss.main(["--root", str(root), "--val-walks", "--eval", str(weights)])
+    assert "train 20 val 4" in capsys.readouterr().out  # one walk of six, all its frames
+
+
+def test_the_pretrained_model_gives_one_logit_per_pixel():
+    model = tss.Pretrained(pretrained=False).eval()
+    with torch.no_grad():
+        assert model(torch.rand(2, 3, 64, 64)).shape == (2, 1, 64, 64)
+
+
+def test_an_augmented_frame_keeps_its_mask_on_its_stairs_and_its_depth_uncoloured():
+    x = torch.zeros(4, 32, 32)
+    x[:3, 16:, :] = 0.8  # bright stairs in the lower half
+    x[3] = 0.25  # flat depth
+    seg = torch.zeros(32, 32)
+    seg[16:, :] = 1.0
+    rng = np.random.default_rng(3)
+    for _ in range(10):
+        xa, sa = tss.augment(x, seg, rng)
+        assert xa.shape == x.shape and sa.shape == seg.shape
+        assert set(sa.unique().tolist()) <= {0.0, 1.0}
+        if sa.any() and (sa == 0).any():
+            assert xa[:3, sa == 1].mean() > xa[:3, sa == 0].mean()  # mask still on the bright part
+        assert torch.allclose(xa[3], torch.full_like(xa[3], 0.25))  # depth is not recoloured
