@@ -24,6 +24,9 @@ Phone to laptop, text messages (JSON):
   mic     {"type": "mic", "state": "listening" | "<recogniser error>"}
   radio   {"type": "radio", "wifi": true, "bluetooth": false}   null when the browser cannot tell
 Phone to laptop, binary messages: a first byte of 1 then a JPEG frame, or 2 then float32 audio.
+Laptop to phone, first: {"type": "config", "frame_ms": 200}, how often to send a camera frame
+(--frame-ms). A frame that comes while the models are busy is skipped, so a faster phone builds
+no backlog; 200 ms suits a laptop CPU, and a GPU keeps up with 80.
 """
 
 from __future__ import annotations
@@ -110,6 +113,7 @@ def build_app(
     listener=None,
     laptop_wifi=None,
     wifi_sensing=None,
+    frame_ms=200,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
@@ -117,6 +121,7 @@ def build_app(
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
+    app["frame_ms"] = frame_ms  # told to the phone: how often to send a camera frame
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -344,6 +349,7 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
     app = request.app
     ws = web.WebSocketResponse(max_msg_size=16 * 1024 * 1024)
     await ws.prepare(request)
+    await ws.send_json({"type": "config", "frame_ms": app["frame_ms"]})
     app["phones"].add(ws)
     try:
         async for msg in ws:
@@ -967,6 +973,12 @@ def main(argv=None) -> None:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--weights", default="yolo26n.pt", help="object detector weights (Ultralytics)")
     p.add_argument("--imgsz", type=int, default=416, help="detector input size; 640 finds more")
+    p.add_argument(
+        "--frame-ms",
+        type=int,
+        default=200,
+        help="how often the phone sends a camera frame; 80 when the models run on a GPU",
+    )
     p.add_argument("--no-detector", action="store_true")
     p.add_argument("--vosk-model", help="folder of a Vosk model, for offline voice commands")
     p.add_argument("--kws", metavar="MODEL",
@@ -1048,6 +1060,7 @@ def main(argv=None) -> None:
         tile_cache=tiles.TileCache(a.tile_cache),
         key=key,
         listener=listener,
+        frame_ms=max(30, a.frame_ms),
         laptop_wifi=wifi.LaptopWifi(),
         wifi_sensing=wifi_sensing_from(a),
     )
