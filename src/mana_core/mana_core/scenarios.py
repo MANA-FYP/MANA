@@ -248,6 +248,7 @@ def check(scenario: Scenario, trace: Trace) -> list[tuple[Mark, bool, str]]:
 # ---- the scenarios
 
 STAIRS = Stretch(6.0, 8.0, Ground.STAIRS_UP, pitch_rad=0.55, height_m=0.17)
+DEPTH_ONLY = frozenset({Source.DEPTH_CAMERA})  # what only the 3D camera sees by its shape
 DROP = Stretch(8.0, 9.0, Ground.DROP)
 
 SCENARIOS = {
@@ -357,6 +358,34 @@ SCENARIOS = {
             Route(12.0, obstacles=(Obstacle(8.0, "person"),), faults=(Fault("camera", trust=0.2),)),
             15.0,
             marks=(stops_before(8.0, "person"), tells("Obstacle ahead, stopping")),
+        ),
+        Scenario(
+            "narrow_door",
+            "Doorway too narrow (edge case)",
+            "A doorway 0.6 m wide, narrower than the device. The lidar sees the gap open straight "
+            "ahead and the detector sees a door, not an obstacle; only the 3D camera measures the "
+            "width against the device, so MANA stops before the door frame.",
+            Route(12.0, obstacles=(Obstacle(8.0, "narrow opening", seen_by=DEPTH_ONLY),)),
+            15.0,
+            marks=(stops_before(8.0, "narrow opening"), tells("Obstacle ahead, stopping")),
+        ),
+        Scenario(
+            "low_box",
+            "Box under the lidar (edge case)",
+            "A 10 cm box on the floor, under the lidar's plane, of no class the detector knows. "
+            "Only the 3D camera sees it stand above the floor.",
+            Route(12.0, obstacles=(Obstacle(8.0, "obstacle", seen_by=DEPTH_ONLY),)),
+            15.0,
+            marks=(stops_before(8.0, "box"), tells("Obstacle ahead, stopping")),
+        ),
+        Scenario(
+            "table_edge",
+            "Table edge above the lidar (edge case)",
+            "A table top at 0.72 m, above the lidar's plane, with the floor clear under it. Only "
+            "the 3D camera sees that it blocks the device.",
+            Route(12.0, obstacles=(Obstacle(8.0, "overhang", seen_by=DEPTH_ONLY),)),
+            15.0,
+            marks=(stops_before(8.0, "table"), tells("Obstacle ahead, stopping")),
         ),
         Scenario(
             "dark_stairs",
