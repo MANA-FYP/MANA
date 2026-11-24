@@ -1333,8 +1333,8 @@ not a like-for-like AP. The point is that the question MANA actually needs answe
 stair surface in the path — is answered far better by a mask than by a box. Second, this is still
 SANPO, mostly outdoor daylight walks, and the model is RGB only. On a separate RealSense set with
 depth, adding the depth map to the same U-Net raised stair IoU by about 6.5 points over RGB alone,
-so MANA's 3D camera is expected to help here too; the SANPO export has no depth, so that is not
-measured on these walks. Stairs from our own recordings with depth (#89), scored as a per-approach
+so MANA's 3D camera is expected to help here too; on SANPO's own walks it does, by 15 points
+(below). Stairs from our own recordings with depth (#89), scored as a per-approach
 hazard (was the staircase marked before the chair reached it) rather than a per-frame overlap, are
 the next step, and the two-source rule already requires the 3D camera alongside the detector.
 
@@ -1342,4 +1342,46 @@ Run it:
 
 ```
 python3 tools/train_stair_seg.py --root datasets/sanpo --epochs 30 --out runs/stair_seg.pt
+```
+
+### Stairs with depth, and in dim light
+
+A user test on the phone found stairs missed in poor light. Two things were measured with the same
+U-Net, on 8,000 balanced SANPO frames that have SANPO's stereo depth (the same frames, split and
+seed for every row; `--only-with depth_npy`).
+
+**Depth as a fourth channel** (`tools/fetch_sanpo_depth.py`, then `--depth depth_npy`):
+
+| Stairs on SANPO, stair pixels | Precision | Recall | IoU |
+|---|---:|---:|---:|
+| RGB | 0.913 | 0.777 | 0.723 |
+| RGB + SANPO's stereo depth | 0.946 | 0.918 | 0.873 |
+
+Depth adds 15 points of IoU and 14 of recall, more than the 6.5 IoU points on the RealSense set.
+This is the depth a device's 3D camera gives. A phone has no depth camera; how much of this
+survives with depth estimated from the image alone is the next row to fill
+(Depth Anything V2, as the demo runs it, `--depth depth_dav2`).
+
+**Dim light** (`--low-light`): every model is also scored on a dark copy of the validation frames
+(`DARK`: a third of the light, gamma 2, sensor noise; the depth is left alone, as a depth camera
+needs no light). Trained on all SANPO frames with stairs (4,000 + 4,000, a sixth held out):
+
+| Stairs on SANPO, stair pixels | Plain: P / R / IoU | Dark: P / R / IoU |
+|---|---|---|
+| Trained on plain frames | 0.936 / 0.873 / 0.824 | 0 / 0 / 0 |
+| Also trained on dim frames | 0.931 / 0.800 / 0.756 | 0.834 / 0.543 / 0.490 |
+| Both, a pixel is stairs when either says so | 0.901 / 0.904 / 0.822 | 0.834 / 0.543 / 0.490 |
+
+The model trained on plain frames found no stair pixel at all in the dark copy: that is the user's
+report, measured. Training on dim frames too finds half of them, at a cost in good light; running
+both and taking either keeps the good-light IoU (0.822 against 0.824) with more recall (0.904
+against 0.873), so the demo runs both (`--stairs-seg plain.pt,dim.pt`). The dark copy is made, not
+filmed: real night frames, and the phone camera's own exposure, remain to be checked, and a depth
+camera is the stronger answer to darkness.
+
+```
+python3 tools/fetch_sanpo_depth.py datasets/sanpo
+python3 tools/train_stair_seg.py --root datasets/sanpo --only-with depth_npy --out runs/rgb.pt
+python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_npy --out runs/rgbd.pt
+python3 tools/train_stair_seg.py --root datasets/sanpo --low-light --out runs/dim.pt
 ```
