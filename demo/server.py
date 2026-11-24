@@ -537,6 +537,20 @@ async def depth_jpg(request: web.Request) -> web.Response:
 # ---- the dashboard and the test evidence
 
 
+def metres(x, y, within_m: float = 20_000.0) -> tuple[float, float] | None:
+    """A point picked on the map, metres east and north of the start; None unless both are
+    finite numbers within reach."""
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (x, y)):
+        return None
+    try:  # a JSON integer can be too large for a float (10**400): refused, not raised (#188)
+        x, y = float(x), float(y)
+    except OverflowError:
+        return None
+    if not (math.isfinite(x) and math.isfinite(y)) or math.hypot(x, y) > within_m:
+        return None
+    return x, y
+
+
 async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
     app = request.app
     ws = web.WebSocketResponse()
@@ -559,6 +573,11 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 app["mw"].mark_place()
             elif d.get("type") == "place" and d.get("do") == "way":
                 app["mw"].way_back()
+            elif d.get("type") == "place" and d.get("do") == "destination":
+                if (where := metres(d.get("x"), d.get("y"))) is not None:
+                    app["mw"].set_destination(*where)
+            elif d.get("type") == "place" and d.get("do") == "clear":
+                app["mw"].clear_destination()
     finally:
         app["dashboards"].discard(ws)
     return ws
