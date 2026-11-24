@@ -20,8 +20,14 @@ example with the datasets package:
             r["image"].convert("RGB").save(f"{root}/{split}/images/{r['image_id']}.jpg")
             r["mask"].convert("L").save(f"{root}/{split}/masks/{r['image_id']}.png")
 
-The saved model is the epoch best on a seeded sixth of the training photos; the numbers reported
-are on the test photos, which play no part in choosing it.
+GSD-S is nearly all glass (575 of its 608 test photos show some), so a model trained on it alone
+learns to see glass everywhere: on ADE20K photos with nothing glassy labelled it called glass
+ahead in about 80%. --clear gives a folder of photos without glass (for example ADE20K training
+photos with no window, door, mirror, screen, display case, vehicle, shower or drinking glass),
+trained on with an empty mask.
+
+The saved model is the epoch best on a seeded sixth of the training photos (and of the clear
+ones); the numbers reported are on the test photos, which play no part in choosing it.
 """
 
 from __future__ import annotations
@@ -44,6 +50,11 @@ GLASS_SHARE = 0.02  # a photo with at least this much glass counts as showing gl
 FOUND = 0.3  # and the glass in it counts as found when the model marks this much of it
 
 
+def clear_pairs(folder: Path | None) -> list[tuple[Path, None]]:
+    """Photos without glass, each with no mask: all of it is not glass."""
+    return [] if folder is None else [(p, None) for p in sorted(folder.glob("*.jpg"))]
+
+
 def list_pairs(root: Path, split: str) -> list[tuple[Path, Path]]:
     """Every (photo, mask) pair of a split."""
     masks = root / split / "masks"
@@ -55,9 +66,9 @@ def list_pairs(root: Path, split: str) -> list[tuple[Path, Path]]:
 
 
 class GlassSeg(Dataset):
-    """Photos and glass masks; flip: mirror half the photos left to right (training)."""
+    """Photos and glass masks (None: no glass); flip: mirror half the photos left to right."""
 
-    def __init__(self, pairs: list[tuple[Path, Path]], flip: bool = False):
+    def __init__(self, pairs: list[tuple[Path, Path | None]], flip: bool = False):
         self.pairs, self.flip = pairs, flip
 
     def __len__(self) -> int:
@@ -66,7 +77,10 @@ class GlassSeg(Dataset):
     def __getitem__(self, i: int):
         fp, mp = self.pairs[i]
         rgb = np.asarray(Image.open(fp).convert("RGB").resize((IMG, IMG)), np.float32) / 255.0
-        m = np.asarray(Image.open(mp).convert("L").resize((IMG, IMG), Image.NEAREST)) > 127
+        if mp is None:
+            m = np.zeros((IMG, IMG), bool)
+        else:
+            m = np.asarray(Image.open(mp).convert("L").resize((IMG, IMG), Image.NEAREST)) > 127
         if self.flip and np.random.random() < 0.5:
             rgb, m = rgb[:, ::-1], m[:, ::-1]
         x = torch.from_numpy(np.ascontiguousarray(rgb.transpose(2, 0, 1)))
@@ -105,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         default="unet",
         help="the small U-Net from scratch, or LR-ASPP on an ImageNet backbone",
     )
+    ap.add_argument("--clear", type=Path, help="a folder of photos without glass (.jpg)")
     ap.add_argument("--out", type=Path, default=Path("runs/glass_seg.pt"))
     ap.add_argument("--eval", type=Path, metavar="WEIGHTS", help="only score these on the test")
     a = ap.parse_args(argv)
@@ -120,7 +135,10 @@ def main(argv: list[str] | None = None) -> int:
     np.random.default_rng(0).shuffle(train)  # the split stays the same whatever the seed
     nval = max(1, len(train) // 6)
     va, tr = train[:nval], train[nval:]
-    print(f"train {len(tr)} val {len(va)} test {len(test)}", flush=True)
+    clear = clear_pairs(a.clear)
+    np.random.default_rng(0).shuffle(clear)
+    va, tr = va + clear[: len(clear) // 6], tr + clear[len(clear) // 6 :]
+    print(f"train {len(tr)} val {len(va)} test {len(test)}; without glass {len(clear)}", flush=True)
     vl = DataLoader(GlassSeg(va), batch_size=16, num_workers=4)
     tel = DataLoader(GlassSeg(test), batch_size=16, num_workers=4)
     model = (Pretrained(not a.eval) if a.arch == "pretrained" else UNet(3)).to(dev)
