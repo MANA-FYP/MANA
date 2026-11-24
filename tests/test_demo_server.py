@@ -585,3 +585,26 @@ def test_without_the_tilt_a_mop_has_no_distance_and_is_not_guessed():
         assert snap["frame"]["boxes"][0]["distance_m"] is None
 
     run(with_clients(go, detector=FloorThingsDetector()))
+
+
+def test_a_stairs_model_that_takes_depth_is_asked_with_the_frames_depth():
+    """No depth model has run, so the segmenter is asked with depth=None; a classifier that does
+    not take depth is asked as before (the other tests)."""
+    asked = []
+
+    class DepthSegmenter:
+        wants_depth = True
+
+        def classify(self, jpeg, depth=None):
+            asked.append(depth)
+            return "level", 0.9
+
+    async def go(client, phone, dash):
+        await phone.send_bytes(b"\x01" + jpeg())
+        for _ in range(40):
+            if asked:
+                break
+            await asyncio.sleep(0.05)
+        assert asked == [None]
+
+    run(with_clients(go, classifier=DepthSegmenter()))

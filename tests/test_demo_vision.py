@@ -242,3 +242,38 @@ def test_several_weights_files_load_as_one_segmenter(tmp_path):
         torch.save(UNet(3).state_dict(), tmp_path / name)
     seg = vision.StairSegmenter.load(f"{tmp_path / 'a.pt'},{tmp_path / 'b.pt'}")
     assert len(seg.models) == 2
+
+
+def test_a_depth_model_adds_its_stairs_only_when_the_frame_has_depth():
+    torch = pytest.importorskip("torch")
+    np = pytest.importorskip("numpy")
+    from tools.train_stair_seg import UNet
+
+    class Sees(UNet):
+        """A U-Net of the given channels that calls the lower half stairs."""
+
+        def forward(self, x):
+            assert x.shape[1] == self.e1[0].in_channels
+            out = torch.full((1, 1, 256, 256), -10.0)
+            out[:, :, 128:, :] = 10.0
+            return out
+
+    class Blind(UNet):
+        def forward(self, x):
+            return torch.full((1, 1, 256, 256), -10.0)
+
+    seg = vision.StairSegmenter([Blind(3), Sees(4)], "cpu")
+    assert seg.wants_depth
+    assert seg.classify(stairs_jpeg())[0] == "level"  # no depth: the depth model sits it out
+    depth = np.full((90, 160), 3.0, dtype=np.float32)
+    assert seg.classify(stairs_jpeg(), depth)[0] == "stairs"
+
+
+def test_weights_trained_with_depth_load_as_a_four_channel_model(tmp_path):
+    torch = pytest.importorskip("torch")
+    from tools.train_stair_seg import UNet
+
+    torch.save(UNet(3).state_dict(), tmp_path / "rgb.pt")
+    torch.save(UNet(4).state_dict(), tmp_path / "rgbd.pt")
+    seg = vision.StairSegmenter.load(f"{tmp_path / 'rgb.pt'},{tmp_path / 'rgbd.pt'}")
+    assert seg.channels == [3, 4] and seg.wants_depth
