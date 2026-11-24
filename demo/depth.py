@@ -40,10 +40,19 @@ MODEL = "depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf"
 
 def device() -> str:
     """Where the models run: the GPU when torch has one (a lab PC serving the phone), else the
-    CPU (MANA_DEVICE overrides it, for example cpu to leave a shared GPU alone)."""
+    CPU (MANA_DEVICE overrides it, for example cpu to leave a shared GPU alone). A MANA_DEVICE that
+    asks for a GPU this torch cannot use falls back to the CPU with a warning, rather than leaving
+    a model out or stopping the server at start-up."""
     import torch
 
-    return os.environ.get("MANA_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
+    asked = os.environ.get("MANA_DEVICE")
+    if not asked:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if asked.startswith("cuda") and not torch.cuda.is_available():
+        print(f"MANA_DEVICE={asked}, but torch has no GPU here: the models run on the CPU",
+              flush=True)  # fmt: skip
+        return "cpu"
+    return asked
 
 
 MAX_FLOOR_M = 4.0  # the bottom of the picture must show the floor closer than this
