@@ -1,19 +1,25 @@
 """tools/train_stair_seg.py: the dim-light version of a frame, the fixed dark validation copy,
 and scoring saved weights on both, on a tiny SANPO-shaped folder. Needs torch."""
 
+import importlib.util
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-torch = pytest.importorskip("torch")
-from PIL import Image  # noqa: E402
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools import train_stair_seg as tss  # noqa: E402
+# A mark, not pytest.importorskip at module level: in CI, ROS's launch_testing plugin imports each
+# test module itself, and a skip raised there skipped the whole session (0 tests collected).
+HAVE = importlib.util.find_spec("torch") is not None
+pytestmark = pytest.mark.skipif(not HAVE, reason="needs torch")
+if HAVE:
+    import torch
+
+    from tools import train_stair_seg as tss
 
 
 def test_a_dim_frame_is_darker_and_stays_an_image():
