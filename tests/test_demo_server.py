@@ -519,3 +519,69 @@ def test_the_phone_is_told_first_how_often_to_send_a_camera_frame():
         assert first["frame_ms"] == 80
 
     run(with_clients(faster, frame_ms=80))
+
+
+def test_stairs_the_segmenter_finds_reach_the_core_and_the_dashboard():
+    """The segmenter in the classifier's place: its stairs go to the core from the classifier,
+    and the dashboard draws where they are."""
+    from demo.vision import Detection
+
+    class Segmenter:
+        def classify(self, jpeg):
+            return "stairs", 0.9
+
+        def region(self, w, h):
+            return Detection("stairs", 0.9, 0.0, h / 2, float(w), float(h))
+
+    async def go(client, phone, dash):
+        await phone.send_bytes(b"\x01" + jpeg())
+        snap = await snapshot_where(
+            dash, lambda s: any(b["label"] == "stairs (pixels)" for b in s["frame"]["boxes"])
+        )
+        assert snap["frame"]["boxes"][-1]["confidence"] == 0.9
+
+    run(with_clients(go, classifier=Segmenter()))
+
+
+class FloorThingsDetector:
+    def detect(self, jpeg):
+        from demo.vision import Detection
+
+        return (
+            [
+                Detection("mop", 0.8, 20.0, 30.0, 40.0, 46.0),  # lying on the floor ahead
+                Detection("cup", 0.9, 44.0, 30.0, 50.0, 46.0),  # not a floor thing
+            ],
+            64,
+            48,
+        )
+
+
+def test_a_mop_on_the_floor_is_an_obstacle_where_its_box_meets_the_floor():
+    """No typical height for a mop, so no box-height distance: with the phone's tilt, where its
+    box's bottom edge meets the floor says how far it is. A cup, which may be on a table, is not
+    measured that way."""
+
+    async def go(client, phone, dash):
+        for _ in range(3):  # the phone tilted 30 degrees down
+            await phone.send_json({"type": "motion", "ax": 0.0, "ay": 8.5, "az": 4.9})
+        await phone.send_bytes(b"\x01" + jpeg())
+        snap = await snapshot_where(
+            dash, lambda s: any(b["label"] == "mop" for b in s["frame"]["boxes"])
+        )
+        mop, cup = snap["frame"]["boxes"]
+        assert mop["distance_m"] is not None and 0.5 < mop["distance_m"] < 5.0
+        assert cup["distance_m"] is None
+
+    run(with_clients(go, detector=FloorThingsDetector()))
+
+
+def test_without_the_tilt_a_mop_has_no_distance_and_is_not_guessed():
+    async def go(client, phone, dash):
+        await phone.send_bytes(b"\x01" + jpeg())
+        snap = await snapshot_where(
+            dash, lambda s: any(b["label"] == "mop" for b in s["frame"]["boxes"])
+        )
+        assert snap["frame"]["boxes"][0]["distance_m"] is None
+
+    run(with_clients(go, detector=FloorThingsDetector()))
