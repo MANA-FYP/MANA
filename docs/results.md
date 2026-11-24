@@ -1031,3 +1031,46 @@ python3 tools/failure_examples.py --data datasets/sanpo-stairs-yolo --imgsz 416 
 python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 --iou 0.3 \
     --weights runs/detect/train/weights/best.pt
 ```
+
+## Stairs: segmentation beats boxes (#49, #51)
+
+The section above shows the box detector stuck at about 0.22 AP50 on SANPO stairs, missing most
+near staircases at either IoU, and confusing stairs with railings, curbs and crosswalk stripes.
+Part of that is the box itself: a staircase is a repeating surface that fills the lower frame, and
+SANPO's box is drawn round the whole flight, so a box fits it badly. Published work on stair
+detection reports the same, and reaches far higher numbers by marking stairs as pixels or step
+lines, not boxes.
+
+SANPO already labels stairs as a segmentation mask (class id 15), so the same frames were scored
+that way: a small U-Net (`tools/train_stair_seg.py`, about 8 MB) was trained to mark each pixel
+stair or not, on an equal mix of stair and non-stair frames from SANPO's training walks (4,000
+each), with a seeded sixth held out by frame for validation. Same frames, same classes, only the
+output changes from a box to a per-pixel mask.
+
+| Stairs on SANPO | Precision | Recall | IoU / AP50 |
+|---|---:|---:|---:|
+| Box detector (YOLO26s, #49), near | 0.15 | 0.24 | 0.22 (AP50) |
+| Segmentation (this U-Net), stair pixels | 0.88 | 0.85 | 0.77 (IoU) |
+
+Marking the stairs as pixels raises the overlap with the label from about 0.22 to 0.77 and the
+recall from 0.24 to 0.85 on the same walks: a staircase in the path is now marked in most frames,
+where the box detector found one in only two of the six test walks. The weights are saved to
+`runs/stair_seg.pt`.
+
+Two caveats keep this honest. First, the two numbers are not the same measure: the box row is AP50
+for a detection, the segmentation row is the overlap of the predicted stair pixels with the label,
+so the 0.22-to-0.77 jump is the gain from changing the question (is there a stair region here),
+not a like-for-like AP. The point is that the question MANA actually needs answered — is there a
+stair surface in the path — is answered far better by a mask than by a box. Second, this is still
+SANPO, mostly outdoor daylight walks, and the model is RGB only. On a separate RealSense set with
+depth, adding the depth map to the same U-Net raised stair IoU by about 6.5 points over RGB alone,
+so MANA's 3D camera is expected to help here too; the SANPO export has no depth, so that is not
+measured on these walks. Stairs from our own recordings with depth (#89), scored as a per-approach
+hazard (was the staircase marked before the chair reached it) rather than a per-frame overlap, are
+the next step, and the two-source rule already requires the 3D camera alongside the detector.
+
+Run it:
+
+```
+python3 tools/train_stair_seg.py --root datasets/sanpo --epochs 30 --out runs/stair_seg.pt
+```
