@@ -695,10 +695,10 @@ def main(argv=None) -> None:
                    help="BC-ResNet checkpoint, for offline command words")  # fmt: skip
     p.add_argument("--kws-threshold", type=float, default=0.9,
                    help="the least probability of a command word to act on")  # fmt: skip
-    p.add_argument("--kws-stop-threshold", type=float, default=0.3,
+    p.add_argument("--kws-stop-threshold", type=float, default=0.7,
                    help="the least probability of stop, lower: a missed stop is the unsafe "
-                        "case (0.3, chosen on a stream: docs/results.md); the cost: at 10 dB "
-                        "about 1 in 20 other words is heard as stop")  # fmt: skip
+                        "case (0.7 for the 100-epoch model: docs/results.md); the cost: at "
+                        "10 dB about 1 in 65 other words is heard as stop")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
     p.add_argument("--sounds", metavar="EFFICIENTAT",
                    help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
