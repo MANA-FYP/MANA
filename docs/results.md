@@ -1321,20 +1321,32 @@ output changes from a box to a per-pixel mask.
 | Box detector (YOLO26s, #49), near | 0.15 | 0.24 | 0.22 (AP50) |
 | Segmentation (this U-Net), stair pixels | 0.88 | 0.85 | 0.77 (IoU) |
 
-Marking the stairs as pixels raises the overlap with the label from about 0.22 to 0.77 and the
-recall from 0.24 to 0.85 on the same walks: a staircase in the path is now marked in most frames,
-where the box detector found one in only two of the six test walks. The weights are saved to
-`runs/stair_seg.pt`.
+**Correction (25 November): those 0.77 and 0.85 are flattered.** They were scored on validation
+frames drawn one by one from the same walks as the training frames, so neighbouring frames, near
+copies of ones it trained on, were in the score, and the saved epoch was chosen on that same
+score. On SANPO's six test walks, which no model saw (662 stair frames and as many without,
+`--split test`), the same kind of model marks about a third of the stair pixels:
+
+| Stairs on SANPO's test walks, stair pixels | Precision | Recall | IoU |
+|---|---:|---:|---:|
+| Colour only, 4 training runs (mean, lowest to highest) | 0.90 | 0.36 (0.30 to 0.43) | 0.34 (0.30 to 0.39) |
+
+So on walks it has not seen, segmentation finds stairs somewhat more often than the box detector
+(recall 0.36 against 0.24 near) and is far more precise, but it is not the threefold gain the
+validation frames showed: the model mostly learned its training walks. Scoring on held-out walks
+(`--split test`) and choosing the saved epoch on held-out walks (`--val-walks`) are now in the
+tool; a pretrained encoder (`--arch pretrained`) and augmentation (`--augment`) are being tried
+on the same test walks.
 
 Two caveats keep this honest. First, the two numbers are not the same measure: the box row is AP50
 for a detection, the segmentation row is the overlap of the predicted stair pixels with the label,
-so the 0.22-to-0.77 jump is the gain from changing the question (is there a stair region here),
+so the 0.22-to-0.77 jump (on the flattering validation frames) is the gain from changing the question (is there a stair region here),
 not a like-for-like AP. The point is that the question MANA actually needs answered — is there a
 stair surface in the path — is answered far better by a mask than by a box. Second, this is still
 SANPO, mostly outdoor daylight walks, and the model is RGB only. On a separate RealSense set with
 depth, adding the depth map to the same U-Net raised stair IoU by about 6.5 points over RGB alone,
-so MANA's 3D camera is expected to help here too; on SANPO's own walks it does, by 15 points
-(below). Stairs from our own recordings with depth (#89), scored as a per-approach
+so MANA's 3D camera is expected to help here too; on SANPO's own walks the gain is smaller than
+first reported and not established on unseen walks (below). Stairs from our own recordings with depth (#89), scored as a per-approach
 hazard (was the staircase marked before the chair reached it) rather than a per-frame overlap, are
 the next step, and the two-source rule already requires the 3D camera alongside the detector.
 
@@ -1358,13 +1370,24 @@ seed for every row; `--only-with depth_npy`).
 | RGB + SANPO's stereo depth | 0.946 | 0.918 | 0.873 |
 | RGB + depth estimated from the image (Depth Anything V2) | 0.926 | 0.909 | 0.847 |
 
-Depth adds 15 points of IoU and 14 of recall, more than the 6.5 IoU points on the RealSense set.
-The stereo row is the depth a device's 3D camera gives. A phone has no depth camera, but the demo
-already runs Depth Anything V2 (Metric-Indoor-Small) on every frame: with that depth, estimated
-from the image alone, as the fourth channel (`--depth depth_dav2`), 12 of the 15 points survive
-(IoU 0.847, recall 0.909). Depth Anything was not trained on SANPO, so this is not the stereo
-depth leaking in. The demo gives such a model its own depth for the frame (`--stairs-seg`, with a
-model trained this way among the weights).
+**Correction (25 November).** Each row above is one training run, and training the colour-only
+model again on the same frames, split and seed gave 0.827, not 0.723: runs differ by about 10
+points. Each setup was then trained 3 or 4 times (`--seed`; the frames and split stay the same)
+and scored both on the validation frames and on SANPO's six held-out test walks:
+
+| Stairs, stair-pixel IoU | Validation frames: mean (runs) | Test walks: mean (runs) |
+|---|---|---|
+| Colour only | 0.780 (0.723, 0.827, 0.785, 0.785) | 0.340 (0.392, 0.310, 0.295, 0.364) |
+| + SANPO's stereo depth | 0.876 (0.873, 0.878, 0.878) | 0.372 (0.418, 0.413, 0.286) |
+| + depth estimated from the image | 0.843 (0.847, 0.849, 0.833) | 0.373 (0.396, 0.369, 0.355) |
+
+On the validation frames depth adds about 10 points (stereo) and 6 (estimated), not 15 and 12:
+those came from the one colour-only run that happened to be the lowest. On walks no model saw,
+depth adds about 3 points, less than the spread between runs of one setup, so a gain from depth
+on SANPO is **not established**. The stereo row is the depth a device's 3D camera gives; the
+estimated row is the depth the phone demo already makes (Depth Anything V2, Metric-Indoor-Small,
+not trained on SANPO). The demo can give such a model its own depth for the frame
+(`--stairs-seg`), but the live demo runs none: one took a plain wall for stairs on a user's frame.
 
 **Dim light** (`--low-light`): every model is also scored on a dark copy of the validation frames
 (`DARK`: a third of the light, gamma 2, sensor noise; the depth is left alone, as a depth camera
@@ -1375,6 +1398,10 @@ needs no light). Trained on all SANPO frames with stairs (4,000 + 4,000, a sixth
 | Trained on plain frames | 0.936 / 0.873 / 0.824 | 0 / 0 / 0 |
 | Also trained on dim frames | 0.931 / 0.800 / 0.756 | 0.834 / 0.543 / 0.490 |
 | Both, a pixel is stairs when either says so | 0.901 / 0.904 / 0.822 | 0.834 / 0.543 / 0.490 |
+
+On the test walks (the same two models, `--split test`): trained on plain frames, IoU 0.334
+plain and 0 dark; also trained on dim frames, 0.278 plain and 0.348 dark (recall 0.381). So the
+dark result holds on unseen walks, while every number is lower than on the validation frames.
 
 The model trained on plain frames found no stair pixel at all in the dark copy: that is the user's
 report, measured. Training on dim frames too finds half of them, at a cost in good light; running
@@ -1390,6 +1417,10 @@ python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_npy --out r
 python3 tools/estimate_sanpo_depth.py datasets/sanpo
 python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_dav2 --only-with depth_npy --out runs/rgb_dav2.pt
 python3 tools/train_stair_seg.py --root datasets/sanpo --low-light --out runs/dim.pt
+python3 tools/fetch_sanpo_depth.py datasets/sanpo test
+python3 tools/estimate_sanpo_depth.py datasets/sanpo test
+python3 tools/train_stair_seg.py --root datasets/sanpo --split test --only-with depth_npy --eval runs/rgb.pt
+python3 tools/train_stair_seg.py --root datasets/sanpo --split test --depth depth_npy --eval runs/rgbd.pt
 ```
 
 ## Which way a door opens: its PUSH or PULL sign
