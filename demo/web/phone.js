@@ -35,6 +35,7 @@ function connect() {
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.type === "pong") onPong(m.t);
+    if (m.type === "config" && m.frame_ms > 0) frameMs = m.frame_ms;
     if (m.type === "state") onState(m);
   };
 }
@@ -193,7 +194,8 @@ function startGps() {
   return () => navigator.geolocation.clearWatch(id);
 }
 
-// a small JPEG about five times a second
+// a small JPEG every frameMs: the server says how often it keeps up (5 a second on a laptop CPU)
+let frameMs = 200;
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia(
     { video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } });
@@ -203,14 +205,17 @@ async function startCamera() {
   video.srcObject = stream;
   await video.play();
   const canvas = document.createElement("canvas");
-  const timer = setInterval(() => {
+  let timer;
+  const grab = () => {
+    timer = setTimeout(grab, frameMs);
     if (!video.videoWidth) return;
     canvas.width = 480;
     canvas.height = Math.round(480 * video.videoHeight / video.videoWidth);
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((b) => b && b.arrayBuffer().then((buf) => sendBinary(1, buf)), "image/jpeg", 0.6);
-  }, 200);
-  return () => { clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); };
+  };
+  grab();
+  return () => { clearTimeout(timer); stream.getTracks().forEach((t) => t.stop()); };
 }
 
 // raw audio for the laptop's recogniser, and the browser's own recogniser

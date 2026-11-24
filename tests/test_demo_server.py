@@ -503,3 +503,19 @@ def test_the_live_page_starts_the_walk_again():
         assert not any(e["text"].startswith("Destination set") for e in s["decisions"])
 
     run(with_clients(go))
+
+
+def test_the_phone_is_told_first_how_often_to_send_a_camera_frame():
+    """200 ms by default (a laptop CPU); the lab PC's GPU server says 80 (--frame-ms)."""
+
+    async def go(client, phone, dash):
+        first = await asyncio.wait_for(phone.receive_json(), 3)
+        assert first == {"type": "config", "frame_ms": 200}
+
+    run(with_clients(go))
+
+    async def faster(client, phone, dash):
+        first = await asyncio.wait_for(phone.receive_json(), 3)
+        assert first["frame_ms"] == 80
+
+    run(with_clients(faster, frame_ms=80))
