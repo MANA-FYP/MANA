@@ -552,7 +552,32 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
     if app["classifier"] is not None:
         label, conf = app["classifier"].classify(jpeg)
         ground = Ground.STAIRS_UP if vision.stair_ground(label) == "stairs" else Ground.FLAT
-        mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
+        region = getattr(app["classifier"], "region", None)  # the segmenter's stairs, as a box
+        box = None
+        if region is not None and ground == Ground.STAIRS_UP:
+            w, h = frame.get("w") or 0, frame.get("h") or 0
+            if not (w and h):
+                from PIL import Image
+
+                with Image.open(io.BytesIO(jpeg)) as im:
+                    w, h = im.size
+                frame.update(w=w, h=h)
+            box = region(w, h)
+        if box is None:
+            mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
+        else:
+            # where and which way, as for the detector's stairs box: the floor under its bottom
+            # edge, and the depth's height of its middle
+            pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
+            d = app["depth"]
+            seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
+            code, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
+            mw.on_ground(Source.CLASSIFIER, Ground(code), conf, distance, mw.clock())
+            frame["boxes"] = [b for b in frame.get("boxes", []) if b["label"] != SEGMENTED] + [
+                {"label": SEGMENTED, "confidence": round(conf, 2), "x1": box.x1, "y1": box.y1,
+                 "x2": box.x2, "y2": box.y2,
+                 "distance_m": None if distance != distance else round(distance, 1)}
+            ]  # fmt: skip
 
 
 # ---- the walk, to keep
@@ -602,6 +627,8 @@ async def walk_geojson(request: web.Request) -> web.Response:
 
 
 STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
+SEGMENTED = "stairs (pixels)"  # the segmenter's stairs on the dashboard
+MIN_OBSTACLE_CONFIDENCE = 0.4  # as vision.to_obstacles
 # the depth sees stairs up as something in the path from the second or third riser: on real frames
 # 0.2 to 1.3 m past where they start (#159)
 STAIRS_RISE_M = 1.5
@@ -643,6 +670,34 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
+# Things that stand on the floor in the path but have no typical height for the box-height
+# distance (vision.OBSTACLE_HEIGHT_M). Without one they were never obstacles: a box, a pole or a mop
+# the detector named still did not slow the device. Things on a desk or in a hand, and doors, are
+# left out: their box's bottom edge is not where they meet the floor ahead.
+ON_THE_FLOOR = {
+    "box", "pole", "pillar", "shelf", "cabinet", "backpack", "handbag", "mop", "broom", "bucket",
+    "squeegee", "wiper", "plastic bag", "cable", "wet floor sign", "ladder", "cart",
+}  # fmt: skip
+
+
+def on_the_floor(app: web.Application, det, w: int, h: int, seen):
+    """An obstacle for a detection in ON_THE_FLOOR: how far from the depth scaled to the floor,
+    else from where the box's bottom edge meets the floor (the camera's height and tilt). None
+    without either, or below the detector's confidence for obstacles."""
+    if det.label not in ON_THE_FLOOR or det.confidence < MIN_OBSTACLE_CONFIDENCE:
+        return None
+    distance = None if seen is None else dz.box_distance(seen, det, w, h)
+    if distance is None:
+        mw: Middleware = app["mw"]
+        if mw.gravity is not None:
+            cam = app["mount"].camera(w, h, dz.camera_pitch(*mw.gravity))
+            distance = dz.floor_at(cam, det.y2)
+    if distance is None:
+        return None
+    bearing = vision.bearing_rad((det.x1 + det.x2) / 2.0, w)
+    return vision.Obstacle(det.label, det.confidence, distance, bearing)
+
+
 def obstacles(
     app: web.Application, detections, w: int, h: int, now: float, per_box: dict | None = None
 ) -> list:
@@ -658,11 +713,14 @@ def obstacles(
     for i, det in enumerate(detections):
         estimate = vision.to_obstacles([det], w, h)
         if not estimate:
-            continue
-        ob = estimate[0]
-        measured = None if seen is None else dz.box_distance(seen, det, w, h)
-        if measured is not None and measured < ob.distance_m:
-            ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
+            ob = on_the_floor(app, det, w, h, seen)
+            if ob is None:
+                continue
+        else:
+            ob = estimate[0]
+            measured = None if seen is None else dz.box_distance(seen, det, w, h)
+            if measured is not None and measured < ob.distance_m:
+                ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
         if per_box is not None:
             per_box[i] = ob.distance_m
         found.append(ob)
@@ -990,6 +1048,11 @@ def main(argv=None) -> None:
                         "case (0.7 for the 100-epoch model: docs/results.md); the cost: at "
                         "10 dB about 1 in 65 other words is heard as stop")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument(
+        "--stairs-seg",
+        help="weights of the stairs segmentation (tools/train_stair_seg.py); used instead of "
+        "--stairs-model, on the GPU when there is one",
+    )
     p.add_argument("--sounds", metavar="EFFICIENTAT",
                    help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
@@ -1033,6 +1096,8 @@ def main(argv=None) -> None:
         p.error(f"{a.record} already has a recording: give a new folder")
     detector = None if a.no_detector else vision.Detector.load(a.weights, a.imgsz)
     classifier = vision.GroundClassifier.load(a.stairs_model) if a.stairs_model else None
+    if a.stairs_seg:
+        classifier = vision.StairSegmenter.load(a.stairs_seg)
     recognizer = speech.CommandRecognizer.load(a.vosk_model) if a.vosk_model else None
     if a.kws:  # needs torch and torchaudio
         from demo import kws
