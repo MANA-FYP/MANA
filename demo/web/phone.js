@@ -10,6 +10,7 @@ let bluetoothOn = null;    // true / false, or null when the browser cannot tell
 const declaredOff = {};    // radio tiles the user switched off on the phone (a page cannot switch a radio)
 let audioRate = 48000;
 let laptopHasVoiceModel = false;   // when the laptop recognises speech itself, the phone streams audio
+let laptopHearsSounds = false;     // when the laptop listens for sirens and horns, it needs the audio too
 
 // The data path is the USB cable (adb reverse), so the page is opened as localhost.
 document.getElementById("path").textContent =
@@ -77,6 +78,7 @@ function onState(m) {
   updateTiles(grid, m.sensors);
   showSaid(m.heard);
   laptopHasVoiceModel = !!(m.models && m.models.speech);
+  laptopHearsSounds = !!(m.models && m.models.sounds);
   // the mode buttons show which one is on
   document.querySelectorAll("[data-mode]").forEach((b) => {
     const on = (b.dataset.mode === "manual") === !!m.manual;
@@ -213,13 +215,17 @@ async function startCamera() {
 // raw audio for the laptop's recogniser, and the browser's own recogniser
 async function startMicrophone() {
   // Android Chrome cannot run its own recogniser and a second audio capture at the same time, so
-  // one of them is used: the laptop's model when it has one, otherwise the browser's recogniser.
-  if (!laptopHasVoiceModel) return startBrowserRecognition();
+  // one of them is used: the audio stream when the laptop listens (its speech model, or sirens and
+  // horns), otherwise the browser's recogniser. With sounds but no speech model, voice commands
+  // are off: the server says so when it starts (#184).
+  if (!laptopHasVoiceModel && !laptopHearsSounds) return startBrowserRecognition();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const AC = window.AudioContext || window.webkitAudioContext;
   let ctx;
   try {
-    ctx = new AC({ sampleRate: 16000 });  // what the recogniser uses: a third of 48 kHz to send
+    // 16 kHz is what the speech recogniser uses; sirens and horns need more (the sound model
+    // was tuned on full-band clips, and 16 kHz loses everything over 8 kHz)
+    ctx = new AC({ sampleRate: laptopHearsSounds ? 32000 : 16000 });
   } catch (e) {
     ctx = new AC();  // a browser that cannot: the laptop resamples
   }

@@ -107,6 +107,11 @@ function render(s) {
   else set($("heard"), "html", icon("microphone") + (mic && mic.state === "active" ? "Say “stop”, “go” or “yes”" : "Microphone off"));
   set($("heard"), "class", "heard" + (s.speaking || fresh ? " live" : ""));
 
+  // a siren or a horn heard on the microphone
+  const snd = (s.sounds || []).map((x) => (x.hazard === "siren" ? "Siren" : "Horn"));
+  $("sound").hidden = !snd.length;
+  set($("sound"), "html", icon("speaker-high") + snd.join(" · "));
+
   // the nearest thing in the path, from depth
   const dp = s.depth;
   const ahead = dp && dp.ahead_m !== null && dp.ahead_m !== undefined ? dp.ahead_m : null;
