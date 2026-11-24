@@ -9,7 +9,7 @@ pass mark. tests/test_scenarios.py runs it in CI; from a shell:
 It prints one line per pass mark and exits with 1 if any of them fails. --compare prints the pass
 marks each controller met and exits with 1 only if MANA misses one.
 
---world gazebo plays the original ten scenarios in Gazebo (mana_sim, a built and sourced workspace),
+--world gazebo plays eleven of the scenarios in Gazebo (mana_sim, a built and sourced workspace),
 one simulation each, and scores what the chair did with the same pass marks. The traces are kept in
 --traces DIR (default gazebo_traces); a scenario with a trace there is not played again unless
 --rerun is given.
@@ -25,6 +25,7 @@ from mana_core.decision import (
     LinkReport,
     ObstacleReport,
     PositionReport,
+    PresenceReport,
     Priority,
 )
 from mana_core.messages import Message as Heard
@@ -44,6 +45,8 @@ def feed(core: DecisionCore, report) -> None:
         core.on_position(report)
     elif isinstance(report, LinkReport):
         core.on_link(report)
+    elif isinstance(report, PresenceReport):
+        core.on_presence(report)
     else:
         core.on_motion(report)
 
@@ -121,8 +124,12 @@ def compare(names: list[str]) -> int:
     return totals[2] - totals[0]
 
 
-def gazebo(names: list[str], traces: str, rerun: bool) -> int:
-    """The scenarios in Gazebo, scored with the same marks; returns how many marks failed."""
+def gazebo(
+    names: list[str], traces: str, rerun: bool, baseline: bool = False, both: bool = False
+) -> int:
+    """The scenarios in Gazebo, scored with the same marks; returns how many marks failed.
+    With baseline the if-else baseline decides in place of the core; with both (--compare) each
+    scenario is played with both and a table is printed (the failed marks counted are MANA's)."""
     from pathlib import Path
 
     try:
@@ -135,15 +142,34 @@ def gazebo(names: list[str], traces: str, rerun: bool) -> int:
     if bad := [n for n in names if n not in gs.RUNS]:
         print(f"not in Gazebo: {', '.join(bad)}; choose from: {', '.join(gs.RUNS)}")
         return 2
+    if both:
+        return gazebo_compare(names, Path(traces), rerun, gr, gs)
     failed = 0
+    controller = "baseline" if baseline else "mana"
     for n in names:
-        scored = gr.results(n, Path(traces), rerun)  # a run that could not be played fails
+        scored = gr.results(n, Path(traces), rerun, controller)  # a run not played fails
         print(f"\n{gs.RUNS[n].scenario().title} [{n}]: {gs.RUNS[n].scenario().shows}")
         for text, ok, measured in scored:
             failed += not ok
             print(f"  {'PASS' if ok else 'FAIL'}  {text:<70} {measured}")
     print("\nAll pass marks met." if not failed else f"\n{failed} pass mark(s) failed.")
     return 1 if failed else 0
+
+
+def gazebo_compare(names, traces, rerun, gr, gs) -> int:
+    """MANA and the baseline on the same scenarios in Gazebo, one simulation for each."""
+    print(f"{'Scenario':<38} {'MANA':>6} {'Baseline':>9}  Baseline mishap")
+    totals = [0, 0, 0]
+    for n in names:
+        mana, base = (gr.results(n, traces, rerun, c) for c in ("mana", "baseline"))
+        met = [sum(ok for _, ok, _ in r) for r in (mana, base)]
+        last = base[-1]  # the last mark is "no mishap"; a run not played says so instead
+        mishap = "" if last[1] else ("not played" if last[2].startswith("not played") else last[2])
+        totals = [totals[0] + met[0], totals[1] + met[1], totals[2] + len(mana)]
+        title = gs.RUNS[n].scenario().title
+        print(f"{title:<38} {met[0]:>3}/{len(mana):<2} {met[1]:>6}/{len(base):<2}  {mishap}")
+    print(f"{'All':<38} {totals[0]:>3}/{totals[2]:<2} {totals[1]:>6}/{totals[2]:<2}")
+    return totals[2] - totals[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -166,13 +192,22 @@ def main(argv: list[str] | None = None) -> int:
     if bad := [o for o in options if o not in ("--baseline", "--compare", "--rerun")]:
         print(f"unknown option {', '.join(bad)}; use --baseline, --compare, --world or --traces")
         return 2
-    only = {"gazebo": ("--baseline", "--compare"), "scripted": ("--rerun", "--traces")}
+    only = {"gazebo": (), "scripted": ("--rerun", "--traces")}
     if wrong := [o for o in only[world] if o in options or (o == "--traces" and traces)]:
         print(f"{', '.join(wrong)} cannot be used with --world {world}")
         return 2
     names = [a for a in args if not a.startswith("--")]
     if world == "gazebo":
-        return gazebo(names, traces or "gazebo_traces", "--rerun" in args)
+        if "--baseline" in args and "--compare" in args:
+            print("--baseline and --compare cannot be used together")
+            return 2
+        return gazebo(
+            names,
+            traces or "gazebo_traces",
+            "--rerun" in args,
+            baseline="--baseline" in args,
+            both="--compare" in args,
+        )
     names = names or list(SCENARIOS)
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:

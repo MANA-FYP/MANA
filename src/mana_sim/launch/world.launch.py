@@ -204,6 +204,9 @@ def generate_launch_description():
                         "use_sim_time": True,
                         "camera_height_m": depth_height_m,
                         "camera_pitch_rad": depth_pitch_rad,
+                        # the tracks reach this far ahead of the camera (config/core.yaml:
+                        # front_tracks_m less depth_camera_m): nearer, it sees the chair itself
+                        "body_m": 0.75,
                     }
                 ],
             ),

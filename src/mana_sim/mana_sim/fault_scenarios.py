@@ -3,7 +3,7 @@
     ros2 run mana_sim fault_script gps_loss        # while the simulation and the core run
 
 The times are simulation seconds from the start of the script. The pass marks come with the
-scenario runner (the ten scenarios in Gazebo); here each scenario says in words what to expect.
+scenario runner (the scenarios in Gazebo); here each scenario says in words what to expect.
 """
 
 from dataclasses import dataclass
@@ -50,6 +50,14 @@ FAULT_SCENARIOS = {
             "The GPS is lost.",
             "No position reports; the position source switches (the position work).",
             on_off("gps", "dropout"),
+        ),
+        FaultScenario(
+            "gps_two_outages",
+            "The GPS is lost twice for 30 s, 30 s apart (#42).",
+            "Each time the position source switches to the lidar map within 2 s, once, and back to "
+            "GPS once it has been good for back_s.",
+            on_off("gps", "dropout", on_s=25.0, off_s=55.0)
+            + on_off("gps", "dropout", on_s=85.0, off_s=115.0),
         ),
         FaultScenario(
             "wifi_fade",

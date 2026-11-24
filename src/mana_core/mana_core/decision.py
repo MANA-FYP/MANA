@@ -45,6 +45,10 @@ class Link(IntEnum):
     BLUETOOTH = 1
 
 
+class PresenceSource(IntEnum):
+    WIFI_CSI = 0  # a person sensed from a Wi-Fi link's channel state (#194)
+
+
 class Ground(IntEnum):
     FLAT = 0
     RAMP = 1
@@ -92,6 +96,7 @@ SENSOR_NAMES = {
 SPEED_STEP = 0.25  # how much one "up" or "down" changes the speed in manual mode
 ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
+SOMEONE_NEAR = "Someone may be near"  # sensed by Wi-Fi, not seen; then where, if known
 STOPS = ("drop", "obstacle", "lone step", "stairs down")  # the stop branches that hold (#97)
 
 
@@ -141,6 +146,15 @@ class LinkReport:
 
 
 @dataclass(frozen=True)
+class PresenceReport:
+    stamp: float
+    trust: float
+    source: PresenceSource
+    present: bool
+    zone: str = ""
+
+
+@dataclass(frozen=True)
 class Limits:
     min_trust: float = 0.5  # reports below this trust are ignored
     max_age_s: float = 0.5  # reports older than this are ignored
@@ -151,6 +165,7 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
+    down_drop_m: float = 0.6  # after that yes, a drop no deeper than this is those stairs (#52)
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
@@ -158,6 +173,7 @@ class Limits:
     missed_heartbeats: int = 2  # a link that missed this many heartbeats in a row cannot alert
     link_max_age_s: float = 2.5  # link and position reports come about once a second
     position_max_age_s: float = 2.5
+    presence_max_age_s: float = 2.5  # Wi-Fi sensing gives a verdict for each second
     clock_back_s: float = 5.0  # a report this much older than the one held: the clock went back
 
 
@@ -255,6 +271,7 @@ class DecisionCore:
         self.motion: MotionReport | None = None
         self.positions: dict[PositionSource, PositionReport] = {}
         self.links: dict[Link, LinkReport] = {}
+        self.presence: dict[PresenceSource, PresenceReport] = {}
         self.automatic = True
         self.stopped_by_user = False
         self.user_mode = Mode.WHEELS
@@ -313,6 +330,9 @@ class DecisionCore:
 
     def on_link(self, report: LinkReport) -> None:
         self._keep(self.links, report.link, report)
+
+    def on_presence(self, report: PresenceReport) -> None:
+        self._keep(self.presence, report.source, report)
 
     def on_command(self, command: Command, trust: float) -> None:
         """A stop is obeyed at any trust; other commands need min_trust. A driving command hands
@@ -373,8 +393,8 @@ class DecisionCore:
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
-        if seen["stairs down"]:
-            self.down_seen_at = now
+        if seen["stairs down"] and self._really_down():
+            self.down_seen_at = now  # only a sensor's own stairs down keeps a yes alive
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         self.tree.tick_once()
@@ -401,7 +421,33 @@ class DecisionCore:
         )
 
     def _grounds(self) -> list[GroundReport]:
-        return [r for r in self.ground.values() if self._ok(r)]
+        """The usable ground reports. After a yes to stairs down, a drop no deeper than
+        down_drop_m counts as those stairs: once the 3D camera is past the top edge, the steps
+        are in its blind zone and it sees one step down, to the floor at their foot, which it
+        reads as a drop (in Gazebo, 0.52 m for three steps of 17 cm). Without that the chair
+        stopped at the edge for good (#52). Only while another sensor still sees those stairs
+        down, and only a drop at the edge, close enough to stop the chair: a ledge seen with a
+        curb, or a drop further on, stays a drop (#173 review). A deeper drop, or one of unknown
+        depth, still stops."""
+        found = [r for r in self.ground.values() if self._ok(r)]
+        if not self.down_ok:
+            return found
+        down = {SENSOR_OF.get(r.source, r.source) for r in found if r.ground == Ground.STAIRS_DOWN}
+        lim = self.limits
+        edge = lim.edge_m + self.mount.travel_m(self.moving_speed) + lim.release_m
+        return [
+            replace(r, ground=Ground.STAIRS_DOWN)
+            if r.ground == Ground.DROP
+            and r.step_height_m <= lim.down_drop_m
+            and r.distance_m <= edge
+            and down - {SENSOR_OF.get(r.source, r.source)}
+            else r
+            for r in found
+        ]
+
+    def _really_down(self) -> bool:
+        """A sensor reports stairs down itself: not a drop taken for them after a yes."""
+        return any(r.ground == Ground.STAIRS_DOWN for r in self.ground.values() if self._ok(r))
 
     def _nearest_obstacle(self) -> float:
         return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
@@ -505,6 +551,20 @@ class DecisionCore:
             f"{WAITING} ({len(up)} of {self.mount.ground_sensors} up: {', '.join(up)}),"
             " slowing down"
         )
+
+    def _someone_near(self) -> PresenceReport | None:
+        """A person sensed without a camera (Wi-Fi), recently and trusted. It has no distance, so it
+        only slows the device, and only when nothing else does (#194, D15)."""
+        lim = self.limits
+        near = [
+            r for r in self.presence.values() if self._ok(r, lim.presence_max_age_s) and r.present
+        ]
+        return max(near, key=lambda r: r.trust, default=None)
+
+    def _someone_near_reason(self) -> str:
+        r = self._someone_near()
+        where = f" ({r.zone})" if r is not None and r.zone else ""
+        return f"{SOMEONE_NEAR}{where}, slowing down"
 
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
@@ -638,6 +698,13 @@ class DecisionCore:
                     lambda: self._slow_reason() is not None,
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                    ),
+                ),
+                branch(  # below every hazard: it has no distance, and it never stops
+                    "someone near",
+                    lambda: self._someone_near() is not None,
+                    lambda: self._set(
+                        Mode.WHEELS, False, lim.slow, self._someone_near_reason(), Priority.WARNING
                     ),
                 ),
                 branch(

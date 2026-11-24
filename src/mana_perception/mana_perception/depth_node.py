@@ -2,7 +2,9 @@
 
 Reads the depth image and its camera info, and publishes one GroundReport per frame from the 3D
 camera: flat, ramp, curb, stairs up, stairs down or a drop, with the distance to where the ground
-changes and the step height. The work is in mana_perception.depth; this node only moves messages.
+changes and the step height. From the same frame it also publishes what blocks the device's path,
+if anything: a wall, an object, an overhang or an opening too narrow for the device. The work is
+in mana_perception.depth and mana_perception.structure; this node only moves messages.
 
 Topics (remap them to the camera's):
   depth/image        sensor_msgs/Image, 32FC1 in metres or 16UC1 in millimetres (REP 118); a
@@ -11,6 +13,9 @@ Topics (remap them to the camera's):
   motion             mana_msgs/MotionReport, the chair's pitch, added to the camera's tilt: on a
                      ramp or on the stairs the mounting tilt alone reads level ground as a step
   ground             mana_msgs/GroundReport, source DEPTH_CAMERA
+  obstacle           mana_msgs/ObstacleReport, source DEPTH_CAMERA, the nearest thing in the path
+                     with its label ("wall", "obstacle", "overhang", "narrow opening"); nothing is
+                     sent when the path is clear, and the core lets the last report age out
 
 Parameters:
   camera_height_m   optical centre above the ground (default 1.0)
@@ -18,6 +23,9 @@ Parameters:
   max_range_m       farthest ground read, in metres (default 3.0)
   rate_hz           most reports per second; extra frames are skipped (default 10.0)
   trust             trust given to a reading (default 0.9); UNKNOWN is always sent with trust 0
+  device_width_m    the device's width, for the corridor checked for obstacles (default 0.7)
+  body_m            the device's own front, ahead of the camera along the device: nearer, the
+                    camera sees the device itself (default 0.0; the simulated chair's tracks: 0.75)
   motion_max_age_s  a motion report older than this (by its header stamp, as the core ages it) is
                     not used (default 0.5, as max_age_s); an untrusted or NaN report clears the
                     pitch. Without a pitch from motion (the IMU lost), the chair's pitch comes
@@ -31,8 +39,9 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport, MotionReport
+from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport
 from mana_perception import depth as dp
+from mana_perception import structure
 
 
 class DepthNode(Node):
@@ -44,6 +53,11 @@ class DepthNode(Node):
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 10.0).value
         self.trust = self.declare_parameter("trust", 0.9).value
         self.motion_max_age_s = self.declare_parameter("motion_max_age_s", 0.5).value
+        self.structure = structure.Settings(
+            device_width_m=self.declare_parameter("device_width_m", 0.7).value,
+            body_m=self.declare_parameter("body_m", 0.0).value,
+            max_range_m=self.settings.max_range_m,
+        )
         self.chair_pitch: tuple[float, Time] | None = None  # (pitch, when it arrived)
         self.cam: dp.Camera | None = None
         self.last: Time | None = None
@@ -52,6 +66,7 @@ class DepthNode(Node):
         self.create_subscription(Image, "depth/image", self.on_image, 10)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
+        self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
 
     def on_info(self, m: CameraInfo) -> None:
         fx, fy, cx, cy = m.k[0], m.k[4], m.k[2], m.k[5]
@@ -95,7 +110,8 @@ class DepthNode(Node):
             self.warn_once(f"depth encoding {m.encoding!r} is not supported; use 32FC1 or 16UC1")
             return
         self.last = now
-        r = dp.read_ground(image, self.cam, self.settings, self.pitch_now(now, image))
+        pitch = self.pitch_now(now, image)
+        r = dp.read_ground(image, self.cam, self.settings, pitch)
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,
@@ -108,6 +124,17 @@ class DepthNode(Node):
         # a frame stamped 0 (1970) would make the core drop every report as stale
         msg.header.stamp = m.header.stamp if stamped else now.to_msg()
         self.ground.publish(msg)
+        found = structure.find(image, self.cam, self.structure, pitch)
+        if found is not None:
+            block = ObstacleReport(
+                trust=self.trust,
+                source=ObstacleReport.DEPTH_CAMERA,
+                label=found.label,
+                distance_m=float(found.distance_m),
+                bearing_rad=float(found.bearing_rad),
+            )
+            block.header = msg.header
+            self.obstacle.publish(block)
 
 
 def main(args=None):

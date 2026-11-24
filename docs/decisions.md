@@ -284,3 +284,89 @@ floor at the bottom of the picture lies at the phone's height, which SANPO does 
 the scaled depth's error is not measured here. The frames are SANPO's chest and head cameras on
 people walking, not a phone in a holder on a chair. This is the camera alone; on the chair, the 3D
 camera and the lidar measure the distance, and ROS's detector keeps box height.
+
+## D13. Going down stairs: the floor at their foot is not a drop, and a tilted lidar is not used (#52)
+
+**Chosen:** two changes, found by playing `stairs_down` in Gazebo.
+
+1. **In the core**, after the user's yes to stairs down, a drop report no deeper than `down_drop_m` (0.6 m) counts as those stairs, but only while another sensor itself still reports stairs down, and only at the edge (within the distance at which the drop would stop the chair). Only a sensor's own stairs down keeps the yes alive. A deeper drop, a drop of unknown depth, a drop seen with a curb or flat ground, a drop further on, or any drop without a yes still stops the chair (Waqas, #173 review).
+2. **In the simulation's sensors node**, the lidar's echoes are not sent as obstacles while the chair is pitched or rolled more than `scan_max_tilt_rad` (0.17 rad, about 10°). That is steeper than the ramps it drives on wheels (7° on the route). A tilt older than 0.5 s is not used, so an IMU that goes quiet does not turn the lidar off for good. This is a workaround for the simulated 2D lidar's single scan plane, not a rule for the real chair: on stairs it means the core hears of an obstacle (a person at their foot) only from the cameras, and the Gazebo runs do not test that.
+
+**Why.** In the first runs the chair asked at the top, waited for the yes, and started down on tracks. Then it stopped for good twice.
+
+- **At the top edge.** Once the 3D camera is past the edge (it is 0.35 m ahead of the chair's centre), the steps are in its blind zone. The nearest ground it sees is the floor at their foot, 0.52 m lower, one step down. It reads that as a drop (`read_ground` cannot tell a flight seen this way from a ledge), and the drop branch comes before the "going down" one.
+- **On the stairs.** Pitched nose down, the 2D lidar's scan plane runs into the steps and the floor ahead. Every echo is then an obstacle, so the chair stopped with "Obstacle ahead, stopping".
+
+| Option | Problem |
+|---|---|
+| Let the "going down" branch come before the drop branch | A real drop while going down would never stop the chair |
+| Make the 3D camera read a single deep step as stairs down | It cannot tell a flight from a ledge when the steps are in its blind zone; on a platform edge that would hide a real drop |
+| **After the yes, a shallow drop at the edge is the stairs while another sensor still sees them; a deeper one still stops** | A ledge up to 0.6 m deep at the foot of stairs the user agreed to go down, while the camera still sees those stairs, would not stop the chair |
+| Judge each lidar echo against the ground ahead | A 2D lidar has one plane: on a tilted chair every echo is at the same height in the chair's frame, so floor and obstacle look alike |
+| **No lidar obstacles while the chair is tilted more than 10°** | On stairs, obstacles come only from the cameras; the lidar is back once the chair is level |
+
+Measured in Gazebo with the first version of change 1, before the #173 review narrowed it (any shallow drop after the yes counted as the stairs), not the code in this repository now: 44 of 44 marks. `stairs_down` asks at the top at 2.2 s and waits 1.56 m before the stairs until the yes (said at 20 s). It goes down on tracks, is back on wheels at 5.13 m, and reaches the end (6.01 of 6 m) with no mishap. The other ten meet all their marks, as before.
+
+With the narrower relabelling of the #173 review, all eleven again: 43 of 44 marks in one run. `stairs_down` asked at 1.0 s, waited 1.53 m before the stairs until the yes, was back on wheels at 5.15 m and reached 6.04 of 6 m with no mishap. `imu_lost` missed "Shows 'On tracks until the ground is level'" once: at the top of the stairs, with the IMU gone, it asked about stairs down and stopped there. Played again, it met every mark in 2 of 2 runs with this change and in 2 of 2 without it; the ask without a yes is not touched by this change, and it fits the 3D camera's reading with no IMU at the top of a climb (#171). A second run of all eleven on 17 November, whose traces make the table in `results.md`: again 43 of 44, the same `imu_lost` miss (it asked at 12.4 s and stopped at the edge at 19.2 s); `stairs_down` asked at 0.9 s, waited 1.58 m before the stairs, was back on wheels at 5.14 m and reached 6.01 of 6 m. So with this change `imu_lost` has missed that message in 2 of 4 runs.
+
+## D14. The detector's trust stays its confidence (#87)
+
+**Chosen:** the object detector keeps sending its confidence, times the light factor, as the trust of
+its reports. It is not mapped through a calibration.
+
+**Why.** On SANPO-Real (`results.md`, #87) the confidence was under-confident from 0.3 to 0.8,
+with a low overall error (0.074 on the train split, 0.071 on test) because most detections sit in
+the well-calibrated bins under 0.2. Two maps fitted on the train split lowered the test error to
+0.027 and 0.028. What they change where the core decides is the gate: both put a trust of 0.5 at a
+confidence of 0.30. Near the gate neither is exact (their trusts of 0.5 to 0.6 were right 39 percent
+of the time, against 80 percent for the raw confidence there), so a map is a lower min_trust in
+disguise: more objects passed, a lower share of them right. Keeping the confidence keeps the
+operating point at 0.5 until min_trust is decided on its own (more people caught against more false
+stops, `results.md`), with that trade in view rather than as a side effect of calibration
+(#175).
+
+| Option | Problem |
+|---|---|
+| **The confidence as the trust** | Under-confident from 0.3 to 0.8: a confidence of 0.4 to 0.5 is right 77 to 80 percent of the time, and the core ignores it (min_trust 0.5) |
+| Platt scaling of the confidence | ECE 0.028 on test; moves the gate to a confidence of 0.30, so it decides min_trust by the back door (its trusts of 0.5 to 0.6 right 39 percent of the time) |
+| Isotonic regression | The same: ECE 0.027, the gate at 0.30, trusts of 0.5 to 0.6 right 39 percent of the time |
+
+**Limits.** The test split has 1803 detections, so the bins near 0.5 hold only 66 to 101 each.
+SANPO's frames come from cameras worn by people walking, not the chair's camera. A larger set
+(more sessions with masks) could carry a map over better. The ground classifier's calibration and
+the light factor on dark frames are still open (#38, #89).
+
+## D15. A person sensed by Wi-Fi slows the device and never stops it (#194)
+
+**Chosen:** a new report, `PresenceReport` (source `WIFI_CSI`, `present`, an optional `zone`, and
+the trust every report has), on the topic `presence`. While a recent (2.5 s), trusted one says a
+person is present, the core slows to 30 % with "Someone may be near (zone 1), slowing down". It comes
+after every other slow-down for a hazard. Every stop, every change to tracks, manual mode and every
+hazard the cameras or the lidar place come before it, and it never stops the device. The checks
+for the ground sensors at start-up, the alert link and the position come after it. All three slow
+to the same 30 %, so the device's speed is the same either way, but while someone may be near,
+their message ("Waiting for the ground sensors (1 of 2 up: ...), slowing down" and the others) is
+not shown (#198).
+
+**Why.** Wi-Fi sensing (#194, measured in #195's section of `docs/results.md`) tells whether a person is in the room, and in
+which zone, from how they change the channel state of a Wi-Fi link. It needs no light, and it
+found people standing still (in two of the three zones the movement stayed at the empty room's
+level). Radio also passes walls, so it could sense a person the cameras cannot see, round a corner
+or behind a door, but the recordings it was measured on are line of sight. And it gives a
+zone, not a distance or a bearing, so it cannot say whether the person is in the path. A stop on
+it would stop the device in any room with someone in it. Slowing down is what a careful driver
+does on hearing someone near and not seeing them; the cameras and the lidar still stop it once the
+person is in front.
+
+| Option | Problem |
+|---|---|
+| Send it as an `ObstacleReport` with an unknown distance | The obstacle rules stop or slow by distance; with none, it either does nothing or is taken as near and stops the device for a person anywhere in the room |
+| Stop while a person is sensed and not seen | The device would not move in any occupied room; one zone of a room is metres wide |
+| **A report of its own that only slows, below every hazard** | Slows the device in an occupied room even when the person is far from its path; at 30 % that costs time, not safety |
+| Ignore it until it gives a distance | Wastes the one sensor that works through walls and in the dark |
+
+**Limits.** Measured on one office's recordings (two ESP32-C6 boards), not yet on our own boards
+or on a moving device: the boards are fixed in a room, so this is for a device in a known place,
+such as a home or a ward, with its own few minutes of recordings. Sensing from the device itself,
+moving, is not covered. The demo's `/wifi` screen shows the verdict; feeding it to the core is the
+next step there.

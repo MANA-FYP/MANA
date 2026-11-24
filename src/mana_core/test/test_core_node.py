@@ -1,5 +1,5 @@
-"""End to end: a spoken stop reaches the host as a stop request and the user as a message, and a
-lost alert link reaches the user as a warning."""
+"""End to end: a spoken stop reaches the host as a stop request and the user as a message, a
+lost alert link reaches the user as a warning, and a person sensed by Wi-Fi slows it down."""
 
 import time
 
@@ -8,7 +8,14 @@ import rclpy
 from mana_core.core_node import CoreNode
 from rclpy.executors import SingleThreadedExecutor
 
-from mana_msgs.msg import DriveRequest, GroundReport, LinkReport, UserCommand, UserMessage
+from mana_msgs.msg import (
+    DriveRequest,
+    GroundReport,
+    LinkReport,
+    PresenceReport,
+    UserCommand,
+    UserMessage,
+)
 
 
 @pytest.fixture
@@ -79,6 +86,39 @@ def test_a_lost_alert_link_slows_down_and_warns_the_user(ros):
     assert slowed and all(d.speed_limit == pytest.approx(0.3) and not d.stop for d in slowed)
 
 
+def test_a_person_sensed_by_wifi_slows_down_and_never_stops(ros):
+    core, probe = CoreNode(), rclpy.create_node("probe")
+    drives, messages = [], []
+    probe.create_subscription(DriveRequest, "drive_request", drives.append, 10)
+    probe.create_subscription(UserMessage, "user_message", messages.append, 10)
+    presence = probe.create_publisher(PresenceReport, "presence", 10)
+    ground = probe.create_publisher(GroundReport, "ground", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    said = "Someone may be near (zone 2), slowing down"
+    end = time.monotonic() + 5.0
+    while time.monotonic() < end and not any(m.text == said for m in messages):
+        stamp = core.get_clock().now().to_msg()
+        for source in (GroundReport.CAMERA, GroundReport.DEPTH_CAMERA):  # level ground ahead
+            flat = GroundReport(source=source, ground=GroundReport.FLAT, trust=0.9)
+            flat.header.stamp = stamp
+            ground.publish(flat)
+        report = PresenceReport(
+            source=PresenceReport.WIFI_CSI, present=True, zone="zone 2", trust=0.9
+        )
+        report.header.stamp = stamp
+        presence.publish(report)
+        executor.spin_once(timeout_sec=0.05)
+    for node in (core, probe):
+        node.destroy_node()
+
+    warned = [m for m in messages if m.text == said]
+    assert warned and warned[0].priority == UserMessage.WARNING
+    slowed = [d for d in drives if d.reason == said]
+    assert slowed and all(d.speed_limit == pytest.approx(0.3) and not d.stop for d in slowed)
+
+
 def steps_ahead_messages(args):
     """Run the node for a while with steps 1.5 m ahead, and return what the user was told."""
     rclpy.init(args=args)
@@ -119,3 +159,47 @@ def test_a_cane_host_is_told_what_is_ahead():
 def test_a_chair_host_gets_no_step_directions_by_default():
     told = steps_ahead_messages([])
     assert told and not any(text.startswith("Steps up ahead") for text in told)
+
+
+def mode_after_one_source_sees_stairs(args):
+    """Run the node a while with only the camera reporting stairs 1.5 m ahead; its last mode."""
+    rclpy.init()
+    core, probe = CoreNode(parameter_overrides=args), rclpy.create_node("probe")
+    drives = []
+    probe.create_subscription(DriveRequest, "drive_request", drives.append, 10)
+    ground = probe.create_publisher(GroundReport, "ground", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    end = time.monotonic() + 3.0
+    while time.monotonic() < end:
+        step = GroundReport(
+            source=GroundReport.CAMERA, ground=GroundReport.STAIRS_UP, trust=0.9, distance_m=1.5
+        )
+        step.header.stamp = core.get_clock().now().to_msg()
+        ground.publish(step)
+        executor.spin_once(timeout_sec=0.05)
+    for node in (core, probe):
+        node.destroy_node()
+    rclpy.shutdown()
+    return drives[-1].mode
+
+
+def test_the_baseline_takes_one_source_for_tracks_and_the_core_wants_two():
+    from mana_core.decision import Mode
+    from rclpy.parameter import Parameter
+
+    baseline = [Parameter("controller", value="baseline")]
+    assert mode_after_one_source_sees_stairs(baseline) == int(Mode.TRACKS)
+    assert mode_after_one_source_sees_stairs([]) == int(Mode.WHEELS)
+
+
+def test_an_unknown_controller_is_refused():
+    from rclpy.parameter import Parameter
+
+    rclpy.init()
+    try:
+        with pytest.raises(ValueError, match="mana or baseline"):
+            CoreNode(parameter_overrides=[Parameter("controller", value="magic")])
+    finally:
+        rclpy.shutdown()

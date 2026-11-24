@@ -27,7 +27,10 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.py")),
         ("share/" + package_name + "/worlds", glob("worlds/*.sdf")),
-        ("share/" + package_name + "/config", glob("config/*.yaml")),
+        (
+            "share/" + package_name + "/config",
+            glob("config/*.yaml") + glob("config/*.rviz") + glob("config/*.xml"),
+        ),
         ("share/" + package_name + "/web", glob("web/*.html")),
         *tree("models", "models"),
     ],
@@ -49,6 +52,7 @@ setup(
             "keyboard = mana_sim.keyboard_node:main",
             "panel_node = mana_sim.panel_node:main",
             "loop_driver = mana_sim.loop_driver_node:main",
+            "zone_node = mana_sim.zone_node:main",
         ]
     },
 )

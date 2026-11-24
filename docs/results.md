@@ -153,7 +153,39 @@ Two slow-downs came early, after 1.43 s and 1.35 s. The cause is WSL's system cl
 | Alerts during the fade | The probe is the helper's phone. It sends an urgent message every 0.5 s of the fade (20 in all), answers the alerts that come on Bluetooth, and takes Wi-Fi as delivering nothing once the fade began, the worst case. Every alert still arrives, and the alert link changes at most once | in 4 runs, all 20 alerts arrived and the link changed once. In the last 2 runs, 17 and 20 of them had gone out on Wi-Fi first and were sent again on Bluetooth |
 | The bridge is killed | The launch file starts it again (#85), and the clock comes back | after 2.9 to 3.9 s of wall time |
 
-Not tested here: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
+Not tested in this world: the switch from GPS to the lidar map, which needs the lidar localisation (#43), and so a lidar, which this world has no GPU for.
+
+### GPS to the lidar map (#42)
+
+`tools/gps_lidar_switch.sh` tests that switch in the indoor world, with a GPS added (the NavSat system and a place on the earth, as in `mana_route.sdf`). It uses wheel odometry, slam_toolbox localising on a saved map, and the lidar gate of #43. The chair drives one lap of the corridor loop while `fault_script` drops the GPS twice for 30 s (`gps_two_outages`). `mana_sim.switching` scores the position node's reports. The source must go to the **lidar map** within 2 s of each loss, change at most twice per outage (away and back), and spend no time on odometry: leaving GPS alone is not enough, since odometry is the fallback when the lidar gives no fresh pose (Waqas, #182). Measured in WSL on 10 November 2026, with the map from #43, and scored again with the stricter rule from the same logs; 7 of 8 runs pass, as before:
+
+| Run | Outage 1: to the lidar map after / changes / GPS back after its end | Outage 2 | Result |
+|---|---|---|---|
+| 1 | 1.5 s / **4** / 5.2 s | 1.5 s / 2 / 5.2 s | fail |
+| 2 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
+| 3 | 1.6 s / 2 / 5.3 s | 1.5 s / 2 / 5.2 s | pass |
+| 4 | 1.4 s / 2 / 5.3 s | 1.4 s / 2 / 5.3 s | pass |
+| 5 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.1 s | pass |
+| 6 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
+| 7 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.3 s | pass |
+| 8 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.2 s | pass |
+
+- **Leaving GPS:** 1.4 to 1.6 s after each loss, in all 16 outages, and each time to the lidar map. That is the position node's 1.5 s, timed from the last good fix.
+- **Time on each source, in each outage:** 1.4 to 1.6 s on GPS (the wait above), the rest on the lidar map, and 0 s on odometry, in all 16.
+- **Coming back:** 5.1 to 5.3 s after each outage ended, its `back_s` of 5 s.
+- **The failure in run 1:** the extra two changes were not in the outage. All times here are the simulation clock, which both `fault_script`'s log ("clock") and `/position` use: the outages ran from 46.5 to 76.5 s and from 106.5 to 136.5 s. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, between the two outages, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
+- **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Runs 1, 3 and 4 all ran alongside other CPU-heavy jobs on the laptop, so load alone does not explain it.
+- **Five more runs, no flap (#201):** played on 18 November 2026 on GitHub's machines (`heavy-runs.yml`, one run on each 4-core machine, the map from #43 as the release `maps-indoor-sim`), with the fixes logged. All five pass:
+
+  | Run | Outage 1: to the lidar map after / changes / GPS back after its end | Outage 2 | Result |
+  |---|---|---|---|
+  | 9 | 1.6 s / 2 / 5.2 s | 1.6 s / 2 / 5.1 s | pass |
+  | 10 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.1 s | pass |
+  | 11 | 1.6 s / 2 / 5.1 s | 1.6 s / 2 / 5.3 s | pass |
+  | 12 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+  | 13 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+
+  Outside the outages the fixes never came more than 0.2 s apart in any of them. So the flap of run 1 has not come back in 5 runs on other machines (12 of 13 runs pass in all), and its cause is still not known: it is the one fail in 26 outages.
 
 ## Lidar localisation indoors (#43)
 
@@ -173,7 +205,70 @@ What the runs show:
 - **The map pose jumps along the bare south corridor.** In all three runs it jumped back along the corridor at x = 11.0 to 11.4 m, next to a cabinet, about 10 m into the first lap (0.95, 1.26 and 1.27 m), and stayed off by that much until the corner at (14.6, 3.4), where the end wall set it right. On the second lap there was no jump at the same place. In the earlier set, two more runs with a narrower and stricter loop-closure search (`loop_search_maximum_distance` 1.0 m, `loop_match_minimum_response_fine` 0.6) did not stop it: one had no jump, the other jumped 1.2 m along the west corridor. So these settings stay at slam_toolbox's defaults.
 - **One corner is off by about 0.5 m,** the north-west one, near (2.1, 7.8) in run 1. The cause is not found yet; an error in the map made in the one mapping lap is the first thing to check.
 
-A jump of a metre that the wheels did not make is what the EKF of D2 can refuse (a rejection threshold on the map pose), so that is the next step of #43.
+### The jumps taken out before the EKF
+
+`ekf_global`'s own rejection threshold on the map pose either let a 1 m jump through (5 sigma) or, set tight, refused good poses too. So a small node sits between slam_toolbox and `ekf_global` (`mana_position.lidar_gate`). It compares each map pose with the one before it and with the wheels' move over that time. A difference over 0.5 m is a jump: it is taken off every pose after it, and that correction fades over 60 s, so a lasting change is taken in the end. `ekf_global` then fuses the gated pose with the wheels and the IMU.
+
+| Run | Driven | Map pose: mean / 95th / max | Jumps refused |
+|---|---|---|---|
+| Offline, 2 earlier recorded runs with a jump | | max 1.26 m to 0.59 m, and 1.13 m to 0.33 m | |
+| Offline, 2 earlier recorded runs with no jump | | max unchanged (0.35, 0.40 m) | |
+| Gazebo, map C: slam_toolbox alone, two laps | 88.9 m | 0.18 / 0.42 / 0.62 m | |
+| Gazebo, map C: the EKF with the gated lidar, two laps | 88.8 m | 0.17 / 0.37 / 0.60 m | 1 (1.47 m) |
+| Gazebo, map D: slam_toolbox alone, two laps | 88.9 m | 0.22 / 0.81 / 0.90 m | |
+| Gazebo, map D: the EKF with the gated lidar, two laps | 88.9 m | 0.18 / 0.39 / 0.58 m | 0 |
+
+The Gazebo rows are from `tools/indoor_localisation.sh` (plain) and `--ekf` (the gate and `ekf_global`, slam_toolbox's map > odom off, the wheels the only odom > base_link), measured on 16 November 2026 on two new maps, each driven both ways, after the loop driver's start-pose fix. The plain runs (means 0.18 and 0.22 m) sit with the remeasured ones above (0.19 to 0.23 m).
+- **A jump taken out in Gazebo.** In the EKF run on map C, slam_toolbox jumped 1.47 m and the gate took it out: the EKF's pose was never more than 0.60 m off. In the plain run on map D, slam_toolbox jumped on the south corridor (its worst, 0.90 m, at (14.4, 1.6)); the EKF run on that map had no jump, so these runs do not show the same jump both ways.
+- **No worse where nothing jumped.** On both maps the EKF's mean and 95th were at or under slam_toolbox's alone (0.17 and 0.18 m mean, 0.37 and 0.39 m 95th). Wheel odometry ended 1.54 and 1.55 m off; the EKF's pose ended 0.13 and 0.03 m off.
+- The gate's settings (0.5 m, 60 s) were tuned on the four offline runs, recorded before the start-pose fix; they were not tuned again. A jump back now clears the offset (Waqas, #181): before, a 1.2 m jump undone 15 s later left 0.26 m the other way.
+
+## The autopilot through MANA (#78)
+
+`tools/autopilot.sh` runs Nav2 in the indoor world, localised by the lidar map (#43). Its commands go through `driver_select` and the host, capped by MANA's decision, the core running. `tools/autopilot_goal.py` sends four goals around the corridor loop: along the south corridor, round the east corner, along the north corridor, and back to the start. Times are simulation seconds; the error is from Gazebo's ground truth.
+
+### With a footprint of the chassis only (10 November 2026)
+
+These runs gave Nav2 a footprint of the chassis and wheels, 0.92 m long, and Nav2's default behaviour tree. The chair with its tracks is 2.2 m long (#187 review), so they are not what the configuration in this repository does now; that is the next table.
+
+| Run | Goal (map frame) | Result | Time | End error | MANA on the way |
+|---|---|---|---|---|---|
+| 1 | 13, 0 | reached | 35.5 s | 0.34 m | 30% of top speed |
+| 1 | 13.9, 6.6 | reached | 20.5 s | 0.23 m | 30%; a stop of 1.6 s, "Obstacle ahead, stopping" |
+| 1 | 7, 7.2 | reached | 23.7 s | 0.17 m | 30%; tracks once, "Wheel slip, changing to tracks" |
+| 1 | 0.5, 0 | reached | 36.6 s | 0.27 m | 30% of top speed |
+| 2 | 13, 0 | reached | 35.4 s | 0.35 m | 30% of top speed |
+| 2 | 13.9, 6.6 | reached | 20.9 s | 0.15 m | 30%; a stop of 1.6 s for an obstacle ahead |
+| 2 | 7, 7.2 | reached | 20.8 s | 0.24 m | 30% of top speed |
+| 2 | 0.5, 0 | reached by the controller, but **not reported**: the script gave up after 300 s of wall time (91.9 s) | | 0.25 m | 30%; 819 slow-downs for an obstacle ahead in this run, against 268 in run 1 |
+| 3 | 13, 0 | reached | 35.5 s | 0.33 m, 15° | 30% of top speed |
+| 3 | 13.9, 6.6 | reached | 21.0 s | 0.15 m, 2° | 30%; a stop of 1.6 s for an obstacle ahead |
+| 3 | 7, 7.2 | reached | 20.8 s | 0.20 m, 4° | 30% of top speed |
+| 3 | 0.5, 0 | reached | 36.8 s | 0.28 m, 28° | 30% of top speed |
+
+- **Nav2's controller reached all 12 goals, and 11 came back as reached,** ending 0.15 to 0.35 m from them. The goal tolerance is 0.35 m and 0.5 rad (29°). The first goal ended 0.33 to 0.35 m off in every run, at the edge of that tolerance: those numbers show where the goal checker stops more than how accurate the drive is.
+- **The goal not reported:** in run 2 the controller logged "Reached the goal!" for the last goal 152 s of wall time after it was sent, and its goal checker covers the heading too. The navigator never logged the goal as succeeded, so the script waited out its 300 s and wrote it down as timed out, the chair 0.25 m from the goal. Why that result never reached the navigator is not known yet. It did for the other 11 goals.
+- **MANA capped Nav2 throughout.** Of the 1,195 drive requests of run 1:
+  - 908 held 30% "waiting for the ground sensors (1 of 2 up: the 3D camera)", since this world runs no camera ground classifier;
+  - 268 slowed for an obstacle ahead;
+  - 16 were stops for an obstacle ahead;
+  - the other 3: two "Ground sensors not available" at the start, before the 3D camera was up, and one "Wheel slip, changing to tracks".
+- **A stop by MANA did not end the goal.** After the 1.6 s stop on the way to the second goal, Nav2 went on and reached it. Its progress checker allows 60 s; a longer stop has not been tried.
+
+### With the tracks in the footprint (17 November 2026)
+
+The footprint is now the chair with its tracks, 2.2 by 0.8 m, with an inflation of 1.2 m (at least its circumscribed radius, 1.17 m), and the behaviour tree has no recoveries (`config/navigate_no_recovery.xml`), so a goal the controller cannot follow is aborted rather than retried with spins and back-ups (#187 review). Three runs on the same map:
+
+| Run | Goal (map frame) | Result | Time | End error |
+|---|---|---|---|---|
+| 1, 2, 3 | 13, 0 | reached | 35.6 to 35.7 s | 0.31 to 0.35 m |
+| 1, 2, 3 | 13.9, 6.6 | **aborted** after 3.2 to 3.3 s | | 6.18 to 6.22 m (it had moved about 0.4 m from the first goal) |
+| 1, 2, 3 | 7, 7.2 | **aborted** after 0.4 s | | |
+| 1, 2, 3 | 0.5, 0 | **aborted** after 5.1 to 5.8 s | | |
+
+- **The full chair does not get round the east corner.** For the second goal the path turns north at the end of the south corridor. Nav2's controller (Regulated Pure Pursuit) checks the footprint along the path ahead and logged "detected collision ahead" each time, until "controller patience exceeded" aborted the goal. The later goals start from the same place and end the same way. With the chassis-only footprint the same turn was made in every run above, so those 12 goals were reached with half the chair's length in Nav2's checks.
+- **An abort ends the goal, as intended:** the behaviour server ran no spin, back-up or wait in any of the three runs (its log has only their set-up).
+- So with the tracks the autopilot drives the straight south corridor and stops at the first corner. Getting round it needs either more room to turn (the east corridor it turns into is 2 m wide, less than the 2.34 m a 2.2 m chair sweeps turning on the spot; the south one is 2.75 m) or a planner that plans the turn with the footprint (Nav2's Smac planners take a non-round footprint); neither is done yet.
 
 ## Camera depth and stairs on real phone frames (#131)
 
@@ -273,6 +368,303 @@ with `detector:=true`, and the detector's `ObstacleReport`s on `/obstacle` are c
 - Before #170 the detector found **nothing** here. It was given the camera's RGB array, which
   Ultralytics reads as BGR, and on the 5 m frame it found no person even at confidence 0.3.
 
+## Offline command words on Speech Commands (#46)
+
+`tools/command_words.py` tests a recogniser on the 11,005 test clips of Speech Commands v2 (`testing_list.txt`). Each clip is 1 s of one spoken word.
+- 4,074 clips are one of the ten command words. Each is right, wrong (another command word) or missed (no command word).
+- The other 6,931 are the dataset's 25 other words (bed, bird, two, nine, ...). If one of these gives a command word, that is a false activation: the device would act on a word not said to it.
+- Every clip is tested clean, and with the dataset's own background noise mixed in at 20, 10, 5 and 0 dB below the speech (white and pink noise, a tap, an exercise bike, dishes, a cat), with a fixed seed. The noise comes from the last quarter of each noise file, which `tools/train_commands.py` never mixes into training, so a trained model is not tested on noise it learnt (Waqas, #185).
+- The same is run on the authors' separate test set (`speech_commands_test_set_v0.02`, `--official`): 4,074 clips of the ten words, 408 of other words and 408 of background noise alone (`_silence_`), which measure false activations when nobody speaks, as when the device listens all day.
+- The clips are aligned 1 s recordings with the word in them. The demo's `Spotter` listens every 0.25 s to a running stream, which these numbers do not cover.
+
+**Vosk** (`vosk-model-small-en-us-0.15`) is the demo's offline recogniser (`--vosk-model`), limited to the ten words plus "[unk]". Each clip is given as the demo gives sound (16 kHz, 16-bit), with 0.3 s of silence after it. Measured on 17 November 2026 (the noisy rows are new: their noise is now from the held-out quarter):
+
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which "go" | Official set: other words (of 408) | Official set: noise alone (of 408) |
+|---|---|---|---|---|---|---|---|
+| clean | 97.2% (3,960) | 0.9% | 1.9% | 10.8% (750) | 195 | 10.8% (44) | 0 |
+| noise at 20 dB | 95.0% | 2.2% | 2.7% | 13.0% (903) | 198 | 13.0% (53) | 0 |
+| noise at 10 dB | 91.1% | 3.6% | 5.3% | 16.9% (1,172) | 255 | 17.2% (70) | 0 |
+| noise at 5 dB | 85.5% | 5.0% | 9.5% | 19.0% (1,316) | 268 | 15.2% (62) | 0 |
+| noise at 0 dB | 70.2% | 6.1% | 23.7% | 14.9% (1,035) | 151 | 14.0% (57) | 0 |
+
+The first three columns are the testing list's 4,074 command clips; on the official set's 4,074 they differ by at most 0.4 points (97.3% right clean, 70.6% at 0 dB).
+
+**Stop**, the word that has to work (411 clips; the official set gives the same within 0.9 points):
+
+| Sound | Stop missed | Stop heard as "go" | Stop heard as another word | "Go" heard as "stop" |
+|---|---|---|---|---|
+| clean | 1.0% (4) | 0 | 0.2% (1) | 0 |
+| noise at 20 dB | 1.7% (7) | 0.2% (1) | 1.7% (7) | 0 |
+| noise at 10 dB | 2.4% (10) | 1.0% (4) | 3.2% (13) | 1 |
+| noise at 5 dB | 6.6% (27) | 0.7% (3) | 6.6% (27) | 2 |
+| noise at 0 dB | 19.0% (78) | 0.7% (3) | 9.7% (40) | 3 |
+
+- **The ten words are recognised well when clean** (97.2%), but not to the 95% of #46 at 10 dB of noise or worse.
+- **Noise alone never woke it:** none of the 408 noise clips of the official set gave a command word, at any level. The false activations come from speech, other words.
+- **A missed stop grows with noise** (1% clean, 19% at 0 dB), and a stop heard as "go" stayed at 1.5% or under on both sets (none clean). The core's own stops (obstacles, drops) and the stop button do not depend on the voice.
+- **Other words are often heard as commands.** A grammar of only ten words has to fit everything into them. On the clean clips, the most common were "nine" heard as "no" (122), "one" as "on" (82), "two" as "go" (79) and "dog" as "down" (66). "Go" starts the device, so this matters most.
+- **A confidence threshold does not fix it.** Vosk gave a confidence of 1.0 to 4,168 of the 4,746 clean clips on which it heard a word. Acting only on 0.9 or more keeps 94.8% right and still leaves 4.5% false activations.
+- **Time:** a median of 46 to 100 ms per clip on this laptop's CPU.
+
+So the trained model of #46 needs a class for "some other word". BC-ResNet (`demo/kws.py`) has one, as well as one for silence.
+
+**BC-ResNet-8** (`--kws`) was trained by `tools/train_commands.py --tau 8 --epochs 5 --hold-out backward forward follow learn visual` on this laptop's CPU, at about 28 minutes an epoch. The paper trains for 200 epochs on a GPU. Its best accuracy on `validation_list.txt` was 95.9%, after the fifth epoch.
+- The five held-out words are never in training, so the false activations on them show how it does on words it has never heard. The testing list has 818 clips of them (backward 165, forward 155, follow 172, learn 161, visual 165). The other 20 words are in its "other word" class.
+- It gives a probability for each class, and acts on a command word whose probability reaches a threshold. The threshold was chosen on the validation list, before the test clips were run: the highest, in steps of 0.05, that keeps 90% of the clean command clips right. That is 0.85 (3,366 of 3,703, 90.9%; 0.9 keeps 88.9%). `--choose` makes this choice from the validation run's CSVs (`choose_threshold()`).
+- "Stop at any": stop acts at any probability when it is the top class, and the other nine words at 0.85 (`--stop-any`). This was also decided on the validation list, by what it does to stop. At 0.85, stop was missed 14 times in 350 clean and 33 at 10 dB. At any probability it was missed 7 and 11 times, while other words were heard as "stop" 46 and 80 times of 6,278, against 3 and 14. A missed stop is the unsafe case and a stop not asked for the safe one, and the core already obeys a spoken stop at any trust (`on_command`), so stop acts at any probability. `--choose` prints these figures too.
+- The demo's `Spotter` acts at 0.9 by default.
+- CI does not check these numbers: they need the trained model and the dataset. To run them again (training about 2.5 hours on a laptop CPU, then about 1.5 hours for the testing list and the official set; at the default threshold of 0 each clip's top probability is kept in the CSVs, so any threshold can be scored from them):
+
+```
+python tools/train_commands.py --sc datasets/speech_commands --tau 8 --epochs 5 --out kws8 --hold-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --list validation_list.txt --snr 10 --held-out backward forward follow learn visual
+python tools/command_words.py --choose datasets/speech_commands/val_kws_0_clean.csv datasets/speech_commands/val_kws_0_snr10.csv
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --held-out backward forward follow learn visual
+python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --official datasets/speech_commands_test_v2
+```
+
+The tables below were scored from the threshold-0 CSVs at each setting (`rethreshold()`, as `--choose` does). `--threshold 0.85 --stop-any` runs the model at that setting directly. It can differ by a clip whose probability rounds to 0.85 in the CSV.
+
+The settings, on the testing list (stop: 411 clips):
+
+| Setting | Right, clean | Right, 10 dB | False activations, clean | False activations, 10 dB | Stop missed, clean | Stop missed, 10 dB |
+|---|---|---|---|---|---|---|
+| top class (threshold 0) | 96.3% | 94.3% | 14.6% | 21.0% | 0 | 0.5% |
+| 0.9, the demo's default | 88.3% | 81.3% | 1.9% | 2.1% | 3.6% | 10.0% |
+| 0.85 | 90.5% | 84.3% | 3.0% | 3.3% | 2.2% | 8.0% |
+| 0.85, stop at any | 90.6% | 85.0% | 3.6% | 4.2% | 0.5% | 1.7% |
+| Vosk, above | 97.2% | 91.1% | 10.8% | 16.9% | 1.0% | 2.4% |
+
+0.85 with stop at any, at every noise level (measured on 17 November 2026):
+
+| Sound | Right | Wrong | Missed | False activations, testing list (of 6,931) | of which held-out words (of 818) | Official set: other words (of 408) | Official set: noise alone (of 408) |
+|---|---|---|---|---|---|---|---|
+| clean | 90.6% (3,693) | 0.5% | 8.8% | 3.6% (249) | 7.2% (59) | 3.2% (13) | 0 |
+| noise at 20 dB | 89.4% | 0.8% | 9.8% | 3.7% (258) | 6.8% (56) | 2.9% (12) | 0 |
+| noise at 10 dB | 85.0% | 1.1% | 13.9% | 4.2% (294) | 7.2% (59) | 4.4% (18) | 0 |
+| noise at 5 dB | 79.5% | 1.2% | 19.3% | 4.8% (330) | 6.4% (52) | 3.4% (14) | 1 |
+| noise at 0 dB | 66.7% | 1.4% | 31.8% | 5.0% (347) | 5.1% (42) | 3.2% (13) | 3 |
+
+| Sound | Stop missed | Stop heard as "go" | Stop heard as another word | "Go" heard as "stop" |
+|---|---|---|---|---|
+| clean | 0.5% (2) | 0 | 0 | 2 |
+| noise at 20 dB | 1.0% (4) | 0 | 0 | 1 |
+| noise at 10 dB | 1.7% (7) | 1 | 1 | 2 |
+| noise at 5 dB | 2.7% (11) | 2 | 1 | 4 |
+| noise at 0 dB | 9.0% (37) | 1 | 1 | 4 |
+
+The official set's 4,074 command clips give the same within 0.6 points, and its stop clips within 0.9.
+
+- **The threshold trades commands for false activations.** At its top class BC-ResNet is close to Vosk clean (96.3%, Vosk 97.2%) and holds up better in noise (88.7% right at 0 dB, Vosk 70.2%), but it hears other words as commands more often (14.6%, Vosk 10.8%). At 0.85 it acts on 3.6% of them, and misses 8.8% of the commands clean and 31.8% at 0 dB: a missed command is said again.
+- **Stop, with stop at any:** 0.5% missed clean and 9.0% at 0 dB (Vosk 1.0% and 19.0%), and heard as "go" at most twice in 411 at any level.
+- **"Go" by mistake is rare:** another word started it 29 times in 6,931 clean clips (Vosk 195). The most common false activations were "dog" heard as "down" (27), "learn" as "no" (22), "dog" as "stop" (20) and "two" as "go" (17). A stop not asked for stops the device, the safe side.
+- **Words it never heard in training are taken for commands about twice as often** as the words it was trained to reject: 7.2% (59 of 818) against 3.1% (190 of 6,113) clean. Words outside the dataset are likely to be closer to the first rate.
+- **Noise alone** woke it once at 5 dB and 3 times at 0 dB (of 408), each time as "stop", and never with less noise.
+- **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
+- **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
+
+On aligned clips these favour 0.85 with stop at any over the demo's 0.9. But the demo's `Spotter` listens to a running stream every 0.25 s, which aligned clips do not cover, and on a stream (below) a stop at any probability stops the device for noise. One false stop is safe, but many would make the device unusable.
+
+**On a running stream** (`--stream 0.85 0.9`): the 11,005 test clips one after another, in a shuffled order, each after 1 s of silence (or of the same noise), fed to the demo's own `Spotter` in 0.25 s pieces as the phone's sound comes. A word it gives goes to the clip its 1 s window overlaps most. A word given while no clip is in the window is counted in the gaps (3.1 hours of them per run). Noise alone is also streamed on its own, with no clips (below).
+
+| Sound | Setting | Right | Wrong | Missed | False activations (of 6,931) | of which held-out words (of 818) | Other words heard as "go" | Other words heard as "stop" | Stop missed (of 411) | Stop heard as "go" | Words in the gaps |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| clean | 0.9, the demo's | 90.3% (3,679) | 0.6% | 9.1% | 6.4% (447) | 9.4% | 34 | 15 | 2.7% (11) | 0 | 0 |
+| clean | 0.9, stop at any | 90.3% (3,677) | 1.1% | 8.6% | 9.6% (665) | 11.2% | 34 | 245 | 0.2% (1) | 0 | 0 |
+| clean | 0.85 | 92.3% (3,760) | 1.0% | 6.8% | 9.6% (666) | 15.4% | 54 | 19 | 1.5% (6) | 0 | 0 |
+| clean | 0.85, stop at any | 92.1% (3,751) | 1.4% | 6.5% | 12.6% (875) | 17.2% | 54 | 243 | 0.2% (1) | 0 | 0 |
+| noise at 10 dB | 0.9, the demo's | 82.5% | 1.0% | 16.5% | 6.1% (421) | 9.7% | 20 | 22 | 9.0% (37) | 0 | 0 |
+| noise at 10 dB | 0.9, stop at any | 82.2% | 2.9% | 14.9% | 13.5% (935) | 16.5% | 19 | 563 | 2.2% (9) | 0 | 48 |
+| noise at 10 dB | 0.85 | 85.9% | 1.5% | 12.5% | 9.4% (651) | 14.3% | 41 | 37 | 6.6% (27) | 0 | 0 |
+| noise at 10 dB | 0.85, stop at any | 85.5% | 3.3% | 11.3% | 16.4% (1,138) | 20.7% | 36 | 560 | 2.2% (9) | 0 | 48 |
+| noise at 0 dB | 0.9, the demo's | 60.9% | 0.7% | 38.3% | 3.6% (252) | 4.4% | 16 | 15 | 36.0% (148) | 3 | 0 |
+| noise at 0 dB | 0.9, stop at any | 63.1% | 4.3% | 32.6% | 12.9% (896) | 14.5% | 16 | 675 | 7.5% (31) | 3 | 148 |
+| noise at 0 dB | 0.85 | 67.5% | 1.1% | 31.4% | 6.5% (448) | 8.6% | 33 | 26 | 29.0% (119) | 3 | 0 |
+| noise at 0 dB | 0.85, stop at any | 68.9% | 4.3% | 26.8% | 15.4% (1,064) | 18.1% | 31 | 670 | 7.3% (30) | 3 | 148 |
+
+- **On a stream there are about three times as many false activations as on aligned clips** (9.6% clean at 0.85, against 3.0%). The `Spotter` scores each word in several overlapping windows, and one passing window is enough.
+- **0.9, the demo's setting, misses more stops in noise:** 2.7% clean, 9.0% at 10 dB and 36.0% at 0 dB, against 1.5%, 6.6% and 29.0% at 0.85. It has fewer false activations (6.4% against 9.6% clean).
+- **Stop at any probability keeps stops from being missed** (0.2% clean, 2.2% at 10 dB, 7.5% at 0 dB), **but it stops for noise:** in the 3.1 hours of gaps it fired 48 times at 10 dB and 148 times at 0 dB, each time as "stop" (with a threshold on stop, none). That is a floor. Only one window per 1 s gap lies wholly in it; a firing in a window that also overlaps a clip is charged to that clip. So a noise "stop" just before a stop clip counts as right, which also flatters stop at any's stop-missed figures. Streamed on its own with no clips, at the clips' average speech level less 10 or 0 dB, the 1.7 minutes of held-out noise (the test quarter of each noise file) made stop at any fire once at 10 dB and 3 times at 0 dB, at 0.9 and at 0.85, and a threshold never. That is about 36 and 109 an hour, but from very few firings. Other words were heard as "stop" 245 times clean and 675 times at 0 dB, of 6,931 (at 0.9).
+- **So neither suits "stop" on a stream:** a threshold misses too many in noise, and any probability stops the device for noise alone: at least 15 times an hour at 10 dB and 48 at 0 dB counted in the gaps, and about 36 and 109 an hour on the short sample of noise alone. A threshold of stop's own, between the two, is the next thing to measure, chosen on the validation list; the demo keeps 0.9 until then.
+- **"Go" by mistake:** another word started it 34 times clean at 0.9 and 54 at 0.85, of 6,931. Stop was heard as "go" 3 times in 411 at 0 dB, and never clean or at 10 dB.
+- No word was given in the gaps of silence (clean), at any setting.
+
+**A threshold of stop's own** (`--stream 0.9 0.85 --stop-at 0 0.3 0.5 0.7`): "stop" acts from its own probability when it is the top class, the other nine words from the threshold. This is what the demo's `--kws-stop-threshold` does (`Spotter(stop_threshold=)`).
+
+The rule, applied to the validation run only: on `validation_list.txt` (9,981 clips, 350 of them stop), at the demo's 0.9, take the highest stop threshold tried (0.3, 0.5, 0.7) whose stop misses at 10 dB are within 1 percentage point of stop at any's, and which gives no word in the gaps at 10 dB. Noise at 0 dB is reported, not used to choose.
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Other words heard as "stop" | Words in the gaps (2.8 h) |
+|---|---|---|---|
+| any probability | 2.0% (7) | 551 | 48 |
+| **0.3** | **2.0% (7)** | **369** | **0** |
+| 0.5 | 3.1% (11) | 197 | 0 |
+| 0.7 | 4.9% (17) | 97 | 0 |
+| 0.9 (no threshold of its own) | 9.1% (32) | 29 | 0 |
+
+So stop acts from **0.3**, by one clip: within 1 point of 7 of 350 is at most 10 missed, and 0.5 missed 11. 0.4 was not tried. On the testing list, at 0.9 for the other words:
+
+| Sound | Stop acts from | Stop missed (of 411) | Other words heard as "stop" (of 6,931) | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|
+| clean | 0.9 | 2.7% (11) | 15 | 6.4% | 0 | |
+| clean | any | 0.2% (1) | 245 | 9.6% | 0 | |
+| clean | **0.3** | **0.2% (1)** | **224** | **9.3%** | **0** | |
+| 10 dB | 0.9 | 9.0% (37) | 22 | 6.1% | 0 | 0 |
+| 10 dB | any | 2.2% (9) | 563 | 13.5% | 48 | 1 |
+| 10 dB | **0.3** | **2.7% (11)** | **376** | **10.9%** | **0** | **0** |
+| 0 dB | 0.9 | 36.0% (148) | 15 | 3.6% | 0 | 0 |
+| 0 dB | any | 7.5% (31) | 675 | 12.9% | 148 | 3 |
+| 0 dB | **0.3** | **9.5% (39)** | **369** | **8.6%** | **2** | **0** |
+
+- **Stop from 0.3 keeps nearly all that stop at any gains**: 2.7% of stops missed at 10 dB and 9.5% at 0 dB, against 9.0% and 36.0% at 0.9.
+- **No stop for noise alone was measured at 10 dB:** 0 words in the 3.1 hours of gaps, against 48 for stop at any. At 0 dB it gave 2, against 148. None came in the 1.7 minutes of noise alone at either level. The gap count is a floor (see above), and the gaps and the noise alone both come from the same six noise files (the test quarter of each), so this shows far fewer stops for noise than stop at any, not a rate: none in 1.7 minutes cannot rule out about 100 an hour.
+- **The price is other words heard as "stop":** 376 of 6,931 at 10 dB (5.4%), against 563 for stop at any and 22 at 0.9. A stop not asked for stops the device, the safe side, and is said again as "go".
+- Stop was heard as "go" 3 times in 411 at 0 dB whatever stop's threshold, as before, and never clean or at 10 dB.
+- For this 5-epoch model, 0.3 for stop: at 10 dB about 1 in 20 other words is then heard as "stop" and stops the device. The 100-epoch model below needs 0.7, and the demo's default follows it.
+- The full table, every setting at 0.9 and 0.85 for the clean, 10 dB and 0 dB runs, is printed by the command above. The validation and testing runs were played on GitHub's machines (`heavy-runs.yml`). The testing run gave exactly the same table as the same run on the laptop.
+
+**BC-ResNet-8 trained for 100 epochs on a GPU.** The same training, held-out words and seed, with `--epochs 100 --device cuda`, on a free Kaggle notebook (a T4): 1 minute an epoch, against about 28 on the laptop's CPU. Its best validation accuracy was 98.2% (epoch 98), against 95.9% after 5 epochs. The weights and the log are the release `models-kws8-gpu100`. It was scored by the same commands as above, on GitHub's machines. `--device` comes from #217 (`tools/train_commands.py`, commit 487a27a), which this branch now has. GPU training is not bit-for-bit repeatable (cuDNN is not set to be deterministic), so a retrain with the same seed gives a close model, not the same weights: the model measured here is the release `models-kws8-gpu100`'s `model.pt`.
+
+On aligned clips, testing list, its top class (threshold 0):
+
+| Sound | Right, 100 epochs | Right, 5 epochs | False activations, 100 epochs (of 6,931) |
+|---|---|---|---|
+| clean | 98.5% (4,013) | 96.3% | 5.2% (359) |
+| noise at 20 dB | 97.6% | | 6.6% |
+| noise at 10 dB | **96.6% (3,936)** | 94.3% | 9.0% (627) |
+| noise at 5 dB | 95.2% | | 11.9% |
+| noise at 0 dB | 92.8% | 88.7% | 17.7% |
+
+- **#46's 95% at 10 dB is met, at its top class:** 96.6% of the command clips right, where the 5-epoch model gave 94.3%. It also holds 95.2% at 5 dB.
+- **The threshold**, chosen on the validation list by the same rule (the highest, in steps of 0.05, that keeps 90% of the clean command clips right): **0.95** (93.1%), with stop at any probability (`--choose`). At 0.95 with stop at any, on the testing list:
+
+| Sound | Right | Missed | False activations (of 6,931) | Held-out words (of 818) | Stop missed (of 411) | Stop heard as "go" |
+|---|---|---|---|---|---|---|
+| clean | 93.6% | 6.3% | 0.8% (58) | 2.4% | 0 | 0 |
+| noise at 10 dB | 88.8% | 10.8% | 1.5% (107) | 3.5% | 1.2% (5) | 0 |
+| noise at 0 dB | 76.6% | 22.7% | 2.8% (193) | 4.3% | 4.4% (18) | 0 |
+
+- Against the 5-epoch model at its 0.85 with stop at any (10 dB): more commands right (88.8% against 85.0%), and a third of the false activations (1.5% against 4.2%) and half on the held-out words (3.5% against 7.2%).
+
+**On a running stream**, at the demo's 0.9. Stop's own threshold was chosen on the validation list by the rule above (within 1 point of stop at any's misses at 10 dB, and no word in the gaps there):
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Words in the gaps (2.8 h) |
+|---|---|---|
+| any probability | 1.4% | 35 |
+| 0.3 | 1.4% | 23 |
+| 0.5 | 1.4% | 6 |
+| **0.7** | **2.0%** | **0** |
+
+This model is surer of itself on noise than the 5-epoch one, so stop needs a higher bar: **0.7**, the highest of 0.3, 0.5 and 0.7 that passes the rule (0.8 was not tried), where the 5-epoch model needed 0.3. On the testing list:
+
+| Sound | Stop acts from | Right | Stop missed (of 411) | Other words heard as "stop" | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|---|
+| clean | 0.9 | 95.9% | 0.2% (1) | 16 | 6.3% | 0 | |
+| clean | **0.7** | **95.9%** | **0.2% (1)** | **67** | **7.1%** | **0** | |
+| 10 dB | 0.9 | 92.6% | 2.9% (12) | 23 | 7.4% | 0 | 0 |
+| 10 dB | any | 92.0% | 0.7% (3) | 743 | 17.4% | 43 | 1 |
+| 10 dB | **0.7** | **92.7%** | **1.7% (7)** | **106** | **8.5%** | **0** | **0** |
+| 0 dB | 0.9 | 82.4% | 12.2% (50) | 40 | 6.6% | 0 | 0 |
+| 0 dB | any | 82.8% | 2.2% (9) | 838 | 17.8% | 65 | 1 |
+| 0 dB | **0.7** | **83.0%** | **6.1% (25)** | **125** | **7.8%** | **0** | **0** |
+
+- **On the stream the 100-epoch model with stop from 0.7 beats the 5-epoch one with stop from 0.3 on commands right and on stop, but not on "go" by mistake or on the held-out words** (stops missed clean are the same, 0.2%): 92.7% of commands right at 10 dB (against 82.8%), 1.7% of stops missed (against 2.7%), and 106 other words heard as "stop" (against 376). At 0 dB it misses 6.1% of stops, against 9.5%, and gives no word in the gaps, against 2. With stop at any probability, the same model misses 9 of 411 (2.2%) at 0 dB, so stop from 0.7 costs 16 more missed stops there.
+
+| Sound | Other words heard as "go", 100 epochs (0.7) | 5 epochs (0.3) | Held-out words, 100 epochs (0.7), of 818 | 5 epochs (0.3) |
+|---|---|---|---|---|
+| clean | 41 | 34 | 118 (14.4%) | 89 (10.9%) |
+| noise at 10 dB | 51 | 20 | 136 (16.6%) | 107 (13.1%) |
+| noise at 0 dB | 42 | 16 | 124 (15.2%) | 79 (9.7%) |
+
+- **"Go" given by mistake went up on the stream at 0.9** (of 6,931 other words, at 10 dB from 20 to 51). This is the unsafe direction: the chair moves without being asked. It is the same 51 with no stop threshold at all, so it comes from this model at 0.9, not from stop's 0.7. The held-out words heard as a command also went up.
+- On the stream, stop was never heard as "go", at any level. On aligned clips at its top class, stop was heard as "go" once at 10 dB and 5 times at 0 dB.
+- The other nine words still act from 0.9, the demo's value, not this model's own 0.95. The same stream at 0.95 (`--stream 0.95 0.9`, heavy-runs run 44392294750), with stop from 0.7, at 10 dB:
+
+| Other words act from | Right | Other words heard as "go" | Held-out words (of 818) | False activations | Stop missed (of 411) | Words in the gaps |
+|---|---|---|---|---|---|---|
+| 0.9 | 92.7% | 51 | 136 (16.6%) | 8.5% | 7 (1.7%) | 0 |
+| **0.95** | **90.4%** | **17** | **80 (9.8%)** | **5.2%** | **7 (1.7%)** | **0** |
+
+  At 0.95 "go" by mistake falls from 51 to 17 of 6,931, below the 5-epoch model's 20 at 0.9, and stop is missed as often. The price is 2.3 points of commands right (90.4% against 92.7%). Clean: 17 against 41, at 0 dB 18 against 42. So 0.95 for the other words, with stop from 0.7, is the safer pair for this model; the demo keeps 0.9 until it is tried there.
+- The demo's default stop threshold is now 0.7 (`--kws-stop-threshold`), for this model (`--kws` with `models-kws8-gpu100`'s `model.pt`). At 10 dB about 1 in 65 other words (106 of 6,931) is then heard as "stop".
+
+## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
+
+`tools/sound_hazards.py` scores both AudioSet taggers as they come, with no training, on all 8,732 clips of UrbanSound8K.
+- A clip's siren score is the highest score of AudioSet's siren classes over the clip: Siren, Civil defense siren, Emergency vehicle, and the police car, ambulance and fire engine sirens. Its horn score is the same over Vehicle horn, Toot and Air horn.
+- The `siren` and `car_horn` clips are the positives; every other clip is a negative.
+- Each threshold is the best F1 on folds 1 to 5. Precision and recall are reported on folds 6 to 10, so the threshold was not fitted to the clips it is scored on.
+- Code and weights: EfficientAT at commit a425fdc (`mn10_as`, mAP 0.471 on AudioSet), and YAMNet from tensorflow/models at commit c14bf9a. Both are kept outside the repository.
+
+Measured on 10 November 2026:
+
+| Model | Hazard | Positives (folds 6-10) | Threshold (folds 1-5) | Precision | Recall | F1 | TP / FP / FN | Average precision |
+|---|---|---|---|---|---|---|---|---|
+| EfficientAT-mn10 | siren | 396 | 0.22 | 95% | 79% | 0.86 | 311 / 15 / 85 | 0.93 |
+| EfficientAT-mn10 | horn | 151 | 0.08 | 73% | 75% | 0.74 | 114 / 43 / 37 | 0.83 |
+| YAMNet | siren | 396 | 0.60 | 87% | 68% | 0.76 | 270 / 41 / 126 | 0.78 |
+| YAMNet | horn | 151 | 0.18 | 57% | 66% | 0.61 | 100 / 76 / 51 | 0.65 |
+
+What the runs show:
+- **EfficientAT is better on both hazards:** average precision 0.93 against 0.78 for sirens, and 0.83 against 0.65 for horns.
+- **Horns are harder than sirens for both models.**
+- **Thresholds are low for EfficientAT** (0.22 and 0.08). At 0.5 its precision is 97% for both hazards, but recall falls to 51% for sirens and 37% for horns. The threshold has to be set for the model; 0.5 is not a safe default.
+- **EfficientAT needs 10 s of sound.** It was trained on AudioSet's 10 s clips. A shorter clip given as it is gets nonsense: every clip under 2 s (982 of them) scored over 0.9 for both siren and horn. In that first run, siren average precision was 0.22. Clips are now padded with silence to 10 s, as AudioSet's shorter clips were (`ten_seconds`). On a microphone stream, the model has to be given a 10 s window.
+- **Time:** a median 79 ms per clip for EfficientAT and 132 ms for YAMNet, on this laptop's CPU. Other heavy jobs ran at the same time, so these are upper bounds. Either keeps up with a microphone heard once a second.
+
+Not done here: the model on the phone's microphone stream, and the hazard report to the core.
+
+## Does the detector's confidence mean what the core's trust assumes? (#87)
+
+Measured on 9 November 2026 with `tools/calibrate_detector.py`: `yolo26n.pt` at 416, as the ROS
+node runs it, on SANPO-Real frames with masks (`tools/fetch_sanpo.py`, 30 train and 30 test
+sessions, one annotated frame in 30). That is 197 train frames and 194 test frames, with 2705 and
+1803 detections of an obstacle class at confidence 0.05 or more. A detection is right when its box
+meets an object of that kind in the mask with IoU 0.5 or more, each object once: a person a
+pedestrian or a rider, a car, bus or truck a vehicle, a dog an animal, and every other obstacle
+label (a chair, a bench, a potted plant, a fire hydrant...) SANPO's broad "obstacle" class, a loose
+match. Boxes under 40 pixels high are left out. SANPO's masks can still miss objects, so "right" is
+a lower bound.
+
+| Confidence | Train: n | Train: right | Test: n | Test: right |
+|---|---|---|---|---|
+| 0.0 to 0.1 | 1175 | 8% | 780 | 8% |
+| 0.1 to 0.2 | 761 | 18% | 409 | 21% |
+| 0.2 to 0.3 | 231 | 34% | 151 | 26% |
+| 0.3 to 0.4 | 133 | 56% | 101 | 44% |
+| 0.4 to 0.5 | 94 | 80% | 78 | 77% |
+| 0.5 to 0.6 | 92 | 88% | 66 | 80% |
+| 0.6 to 0.7 | 87 | 92% | 71 | 89% |
+| 0.7 to 0.8 | 79 | 95% | 80 | 93% |
+| 0.8 to 1.0 | 53 | 92% | 67 | 97% |
+| **Expected calibration error** | | 0.074 | | 0.071 |
+
+On the test split by kind: people 876 detections (ECE 0.106), vehicles 699 (0.070), the other
+obstacles 228 (0.074). People and vehicles are under-confident from 0.4 up (a person at 0.4 to 0.5
+was right 81 percent of the time, 36 boxes); the other obstacles are right about half the time at
+0.4 to 0.6 and do not follow their confidence above it (2 to 12 boxes a bin).
+
+- **The confidence is under-confident from 0.3 to 0.8, though its overall error is low.** The error
+  is 0.07, low because most detections sit in the well-calibrated bins under 0.2 (1189 of the 1803
+  on the test split). A confidence of 0.4 to 0.5 was right 77 to 80 percent of the time, of 0.5 to
+  0.6 80 to 88 percent, and of 0.6 to 0.8 89 to 95 percent: 18 to 24 points over the confidence.
+- **What a map does is move the core's gate.** Platt scaling (a logistic map of the confidence's
+  logit) and isotonic regression lowered the test error to 0.028 and 0.027. Both put a trust of 0.5
+  at a confidence of 0.30. Near the gate neither is exact: their trusts of 0.5 to 0.6 were right 39
+  percent of the time on the test split (about 16 points under), where the raw confidence of 0.5 to
+  0.6 was right 80 percent (about 25 points over). So a map does not make the gate more accurate;
+  it lowers it, from a confidence of 0.5 to 0.30: more objects passed to the core, at a lower share
+  right. Waqas's run on 2,331 SANPO test frames shows the trade: the raw gate passed 2,857 boxes,
+  89 percent right (2,554 of the 5,802 right ones); Platt passed 5,314, 76 percent right (4,025).
+- So the detector's trust stays its confidence, times the light factor (D14): that keeps the core's
+  operating point where it is until min_trust itself is chosen (below), rather than moving it as a
+  side effect of calibration. The ground
+  classifier's calibration needs the trained model (#38), and the light factor needs dark frames
+  (#89); both are still open.
+- **What it means for min_trust (0.5):** the core drops every report under 0.5, and a confidence
+  of 0.4 to 0.5 was right 77 to 80 percent of the time (172 boxes on both splits). For obstacles a
+  missed person costs more than a needless stop, so this table is the evidence for lowering the
+  detector's threshold. That is a separate decision, not made here.
+
 ## Mutation testing (#83)
 
 Whether the tests would catch a broken rule: mutmut changes the code one small step at a time and runs the tests on each change. The survivors, and why each one does not change behaviour, are in [mutation.md](mutation.md).
@@ -287,11 +679,11 @@ Whether the tests would catch a broken rule: mutmut changes the code one small s
 <!-- gazebo results: made by python3 -m mana_sim.gazebo_results, do not edit by hand -->
 ## Scenarios in Gazebo (#16)
 
-The ten original scripted scenarios of `mana_core.scenarios`, played in Gazebo with the same pass
+Eleven scripted scenarios of `mana_core.scenarios`, played in Gazebo with the same pass
 marks (the same functions and limits; only the distances in them are the ones of the Gazebo route).
 Generated by `python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md` from
 the traces of `ros2 run mana_core evaluate --world gazebo`.
-**39 of 39 pass marks are met in Gazebo.**
+**43 of 44 pass marks are met in Gazebo.**
 
 ### How a scenario is played
 
@@ -324,47 +716,57 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 |---|---|---|---|---|---|
 | `level` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `level` | Full speed on wheels | PASS | PASS | slowest 100% of top speed |  |
-| `level` | Reaches the end of the route | PASS | PASS | reached 4.56 of 4.5 m |  |
+| `level` | Reaches the end of the route | PASS | PASS | reached 4.59 of 4.5 m |  |
 | `level` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `ramp` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `ramp` | Slower on the ramp, on wheels | PASS | PASS | at most 30% of top speed on the ramp |  |
 | `ramp` | Reaches the end of the route | PASS | PASS | reached 12.02 of 12 m |  |
 | `ramp` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.96 m before the first step |  |
-| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.80 m |  |
-| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.81 of 6.8 m |  |
+| `stairs` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.97 m before the first step |  |
+| `stairs` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.79 m |  |
+| `stairs` | Reaches the end of the route | PASS | PASS | reached 6.80 of 6.8 m |  |
 | `stairs` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.91 m before the first step |  |
-| `curb` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 6.02 m |  |
-| `curb` | Reaches the end of the route | PASS | PASS | reached 6.23 of 6.2 m |  |
+| `curb` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.93 m before the first step |  |
+| `curb` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 6.00 m |  |
+| `curb` | Reaches the end of the route | PASS | PASS | reached 6.21 of 6.2 m |  |
 | `curb` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `stop` | Stop acted on within 1 s | PASS | PASS | stopped 0.20 s after the command |  |
 | `stop` | Stays stopped until the user says go | PASS | PASS | held the stop |  |
 | `stop` | Moving again within 1 s of go | PASS | PASS | moving 0.20 s after go |  |
-| `stop` | Says "Stopped by you" | PASS | PASS | at 2.1 s |  |
+| `stop` | Says "Stopped by you" | PASS | PASS | at 2.2 s |  |
 | `stop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `drop` | Stops before the drop | PASS | PASS | stopped 0.58 m before the drop, after rolling 0.03 m |  |
-| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.7 s |  |
+| `stairs_down` | Says "Stairs down ahead. Say yes to go down on tracks" | PASS | PASS | at 0.9 s |  |
+| `stairs_down` | Waits before the stairs until the user says YES | PASS | PASS | 1.58 m before the stairs until YES |  |
+| `stairs_down` | Back on wheels once the ground is level | PASS | PASS | back on wheels at 5.14 m |  |
+| `stairs_down` | Reaches the end of the route | PASS | PASS | reached 6.01 of 6 m |  |
+| `stairs_down` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
+| `drop` | Stops before the drop | PASS | PASS | stopped 0.60 m before the drop, after rolling 0.01 m |  |
+| `drop` | Says "Drop ahead, stopping" | PASS | PASS | at 6.5 s |  |
 | `drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `manual_drop` | Follows the user in manual mode | PASS | PASS | manual from 0.3 s |  |
-| `manual_drop` | Stops before the drop | PASS | PASS | stopped 0.81 m before the drop, after rolling 0.22 m |  |
+| `manual_drop` | Follows the user in manual mode | PASS | PASS | manual from 0.2 s |  |
+| `manual_drop` | Stops before the drop | PASS | PASS | stopped 0.88 m before the drop, after rolling 0.25 m |  |
 | `manual_drop` | Says "Drop ahead, stopping" | PASS | PASS | at 2.0 s |  |
 | `manual_drop` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 | `picture` | No track request on flat ground or ramps | PASS | PASS | never on tracks |  |
 | `picture` | Slower on the way to the picture, on wheels | PASS | PASS | at most 30% of top speed on the way to the picture |  |
 | `picture` | Reaches the end of the route | PASS | PASS | reached 9.03 of 9 m |  |
 | `picture` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `dark` | Stops before the person | PASS | PASS | stopped 0.92 m before the person, after rolling 0.03 m |  |
-| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 7.5 s |  |
+| `dark` | Stops before the person | PASS | PASS | stopped 0.91 m before the person, after rolling 0.01 m |  |
+| `dark` | Says "Obstacle ahead, stopping" | PASS | PASS | at 6.8 s |  |
 | `dark` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
-| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.97 m before the first step |  |
+| `imu_lost` | Track request at least 1.5 m before the first step | PASS | PASS | tracks requested 1.93 m before the first step |  |
 | `imu_lost` | Stays on tracks while the tilt cannot be checked | PASS | PASS | stayed on tracks |  |
-| `imu_lost` | Shows "On tracks until the ground is level" | PASS | PASS | at 18.2 s |  |
+| `imu_lost` | Shows "On tracks until the ground is level" | PASS | FAIL | not told | #171 |
 | `imu_lost` | No mishap: never on a step on wheels, over a drop or into an obstacle | PASS | PASS | none |  |
 
 What is known about the missed marks:
 
-- none
+- **Shows "On tracks until the ground is level" (#171):** in `imu_lost` the IMU goes quiet during
+  the climb. When it is missed, the chair reached the top with no tilt to judge the ground by, the
+  3D camera read the edge as stairs down, and the core asked about going down ("Say yes to go down
+  on tracks") and, with no yes, stopped at the edge ("Drop ahead, stopping"), so the message about
+  level ground never came. Stopping is the safe outcome; the mark is about the message. The same
+  scenario has met this mark in other runs.
 
 ### The routes
 
@@ -375,6 +777,7 @@ What is known about the missed marks:
 | `stairs` | 18.2 m | 25 m | 3 steps of 17 cm in 0.66 m; the run ends 1 m before the stairs down |
 | `curb` | 27 m | 33.2 m | the 12 cm curb is the edge of a 3 m platform; the end is 0.8 m before its end |
 | `stop` | -1 m | 8 m | same marks, same limits |
+| `stairs_down` | 23.5 m | 29.5 m | from the top of the stairs up (51 cm): 3 steps down of 17 cm in 0.66 m; the user says yes at 20 s |
 | `drop` | 34.5 m | 38 m | the drop is at 38 m, 4 m after the curb; a drop is 1 m deep |
 | `manual_drop` | 34.5 m | 38 m | in Gazebo nobody drives in manual mode: the speed stays at the last limit |
 | `picture` | -1 m | 8 m | the picture is only in what the camera stand-in reports; nothing is in the world |
@@ -389,12 +792,81 @@ stairs down (26 m) and the drop (38 m) are never driven over. A drop is 1 m deep
 
 ```bash
 colcon build && source install/setup.bash
-ros2 run mana_core evaluate --world gazebo               # all ten (about 20 minutes)
+ros2 run mana_core evaluate --world gazebo               # all eleven
 ros2 run mana_core evaluate --world gazebo stairs curb   # some of them
 ros2 run mana_core evaluate --world gazebo --rerun       # play again, also those with a trace
 python3 -m mana_sim.gazebo_results gazebo_traces --update docs/results.md
 ```
 <!-- end of gazebo results -->
+
+Played on 17 November 2026 with `evaluate --world gazebo --compare`, one simulation for each controller and scenario: **MANA met 44 of 44 pass marks and the baseline 32 of 44**, and the baseline went over the drop in `manual_drop` (in manual mode it does not slow down for the drop, so it reaches the edge at full speed and goes over before its stop takes hold; MANA slows down at 0.7 m). One run each is a small sample, and MANA's own score in Gazebo is not always the same: an earlier run of the same code met 41 of 44, because `level` asks for tracks at the start of the run and stops for a step that is not there (#202).
+
+<!-- drives:start (written by mana_sim.drive_summary; do not edit) -->
+### Each drive, and the same drive with the baseline
+
+Every drive is summarised, and each one is played again with the if-else baseline (`mana_core/baseline.py`) deciding in place of the core, with the same route, faults and driver commands. The two are separate simulations, so the last column gives the first place on the route where they decided differently (for a scenario in which the user speaks at set times, `stop`, the first moment instead, because the stop comes at a different place in each simulation). `python3 -m mana_sim.drive_summary` writes this section from the traces; `mana_core.evaluate --world gazebo --compare` plays both.
+
+- **level:** 3.9 s, 4.1 m; 0.0 s on tracks; 0 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the 3D camera), slowing down (0.6 s, at 0.5 m)
+  - mishaps: none
+- **ramp:** 31.1 s, 11.5 m; 0.0 s on tracks; 1 message; 0 takeovers
+  - stops: none
+  - slow-downs: Waiting for the ground sensors (1 of 2 up: the camera), slowing down (0.3 s, at 0.5 m); Ramp ahead, slowing down (29.4 s, at 1.3 m)
+  - mishaps: none
+- **stairs:** 24.5 s, 6.3 m; 17.6 s on tracks; 9 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.1 s, at 6.0 m)
+  - slow-downs: Possible step ahead, slowing down (20.1 s, at 0.5 m); Drop ahead, slowing down (3.3 s, at 6.0 m)
+  - mishaps: none
+- **curb:** 21.7 s, 5.8 m; 14.0 s on tracks; 6 messages; 0 takeovers
+  - stops: Step ahead, stopping (1.0 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (17.6 s, at 0.5 m); Possible step ahead, slowing down (3.1 s, at 5.5 m)
+  - mishaps: none
+- **stop:** 6.9 s, 4.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Stopped by you (3.1 s, at 2.9 m)
+  - slow-downs: none
+  - mishaps: none
+- **stairs_down:** 38.0 s, 5.3 m; 14.2 s on tracks; 6 messages; 0 takeovers
+  - stops: Stairs down ahead. Say yes to go down on tracks (19.5 s, at 0.9 m); Step ahead, stopping (1.1 s, at 5.1 m)
+  - slow-downs: Drop ahead, slowing down (0.6 s, at 0.7 m); Going down the stairs on tracks (14.7 s, at 1.6 m); Possible step ahead, slowing down (1.2 s, at 5.1 m); Possible step ahead, slowing down (0.3 s, at 5.8 m)
+  - mishaps: none
+- **drop:** 29.9 s, 2.5 m; 0.0 s on tracks; 2 messages; 0 takeovers
+  - stops: Drop ahead, stopping (22.8 s, at 2.9 m)
+  - slow-downs: Drop ahead, slowing down (7.1 s, at 0.5 m)
+  - mishaps: none
+- **manual_drop:** 19.9 s, 2.1 m; 0.0 s on tracks; 1 message; 1 takeover
+  - stops: Drop ahead, stopping (18.1 s, at 2.6 m)
+  - slow-downs: Drop ahead, slowing down (0.2 s, at 0.7 m)
+  - mishaps: none
+- **picture:** 19.6 s, 8.6 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: none
+  - slow-downs: Possible step ahead, slowing down (13.6 s, at 0.5 m); Ramp ahead, slowing down (4.1 s, at 7.4 m)
+  - mishaps: none
+- **dark:** 19.9 s, 6.4 m; 0.0 s on tracks; 3 messages; 0 takeovers
+  - stops: Obstacle ahead, stopping (11.4 s, at 6.9 m)
+  - slow-downs: Obstacle ahead, slowing down (2.1 s, at 6.0 m)
+  - mishaps: none
+- **imu_lost:** 19.9 s, 6.2 m; 18.4 s on tracks; 6 messages; 0 takeovers
+  - stops: Drop ahead, stopping (0.9 s, at 5.5 m)
+  - slow-downs: Possible step ahead, slowing down (15.9 s, at 0.7 m); On tracks until the ground is level (3.1 s, at 5.7 m)
+  - mishaps: none
+
+| Drive | MANA stops | Baseline stops | MANA on tracks | Baseline on tracks | MANA mishaps | Baseline mishaps | First difference |
+|---|---|---|---|---|---|---|---|
+| `level` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `ramp` | 0 | 0 | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs` | 1 (Step ahead, stopping) | 0 | 17.6 s | 26.7 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `curb` | 1 (Step ahead, stopping) | 0 | 14.0 s | 20.6 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `stop` | 1 (Stopped by you) | 1 (Stopped by you) | 0.0 s | 0.0 s | none | none | the same everywhere |
+| `stairs_down` | 2 (Stairs down ahead. Say yes to go down on tracks) | 1 (Drop ahead, stopping) | 14.2 s | 89.9 s | none | none | 0.1 s: MANA wheels at 30% (Drop ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+| `drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | none | 2.9 m: MANA stops (Drop ahead, stopping); baseline wheels at 30% (Drop ahead, slowing down) |
+| `manual_drop` | 1 (Drop ahead, stopping) | 1 (Drop ahead, stopping) | 0.0 s | 0.0 s | none | 1 | 1.9 s: MANA stops (Drop ahead, stopping); baseline wheels at 100% (Manual mode) |
+| `picture` | 0 | 0 | 0.0 s | 25.1 s | none | none | 0.5 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline wheels at 100% (Level ground) |
+| `dark` | 1 (Obstacle ahead, stopping) | 1 (Obstacle ahead, stopping) | 0.0 s | 0.0 s | none | none | 6.9 m: MANA stops (Obstacle ahead, stopping); baseline wheels at 30% (Obstacle ahead, slowing down) |
+| `imu_lost` | 1 (Drop ahead, stopping) | 2 (Drop ahead, stopping) | 18.4 s | 30.4 s | none | none | 0.7 m: MANA wheels at 30% (Possible step ahead, slowing down); baseline tracks at 30% (Stairs ahead, changing to tracks) |
+
+11 drives.
+<!-- drives:end -->
 
 ## Zero-shot detectors on the SANPO test split (#51, #49)
 
@@ -527,4 +999,302 @@ What follows:
 
 ```
 python tools/wifi_csi.py --data datasets/office_csi --fetch --out demo/csi_model/wifi_csi_office.npz
+```
+
+## A first fine-tune on SANPO, on a laptop CPU (#49)
+
+A trial run before the GPU runs of #49, to check the pipeline end to end and to see whether
+SANPO's labels teach the classes the zero-shot models miss. YOLO26n (COCO weights) was fine-tuned
+on 48 SANPO training walks: the 45 that show stairs (one annotated frame in 20) and 3 others
+already on disk (one in 10). That is 1,166 training frames from 43 walks, with 378 stairs, and
+145 validation frames from the other 5 walks, held out by walk. 20 epochs at image size 416,
+batch 16, Ultralytics' default settings otherwise, 72 minutes on the laptop CPU above. It was then
+scored exactly as the zero-shot models were, on the same 2,331 test frames, so the rows compare.
+
+Near objects, against zero-shot YOLO26n and YOLOE-26s (rows from the table above):
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26n fine-tuned, SANPO's 15 names (416, 35 ms) | pedestrian | 2,993 | 0.77 | 0.87 | 0.71 | 0.93 | 0.63 |
+| | vehicle | 1,438 | 0.72 | 0.84 | 0.64 | 0.92 | 0.56 |
+| | stairs | 37 | 0.14 | 0.06 | 0.19 | 0.11 | 0.16 |
+| | opening-door | 175 | 0.04 | 0.14 | 0.03 | 0.43 | 0.02 |
+| | pole | 1,942 | 0.10 | 0.33 | 0.09 | 0.43 | 0.04 |
+| YOLO26n zero-shot (416, 36 ms) | pedestrian | 2,993 | 0.74 | 0.85 | 0.67 | 0.91 | 0.54 |
+| | vehicle | 1,438 | 0.67 | 0.83 | 0.55 | 0.94 | 0.40 |
+| YOLOE-26s zero-shot (480, 82 ms) | pedestrian | 2,993 | 0.78 | 0.80 | 0.78 | 0.87 | 0.71 |
+| | vehicle | 1,438 | 0.69 | 0.80 | 0.54 | 0.90 | 0.37 |
+| | stairs | 37 | 0.05 | 0.25 | 0.03 | 0.50 | 0.03 |
+| | opening-door | 175 | 0.01 | 0.20 | 0.01 | 0.50 | 0.01 |
+| | pole | 1,942 | 0.02 | 0.62 | 0.01 | 0.50 | 0.00 |
+
+**Stairs per walk.** The fine-tuned model found stairs in 7 of the 65 test frames with stairs, in
+2 of the 6 walks (YOLOE-26s: 1 frame, 1 walk). Counting near staircases only, it found 7 of 37
+frames, with a mean recall per walk of 0.24 over 5 walks.
+
+What follows:
+
+- **Fine-tuning helps the obstacles that stop the chair, at no cost in time.** At the obstacle
+  threshold 0.5, people near the chair go from 0.54 to 0.63 recall and vehicles from 0.40 to
+  0.56, with precision staying at 0.92 to 0.93; the model is the same size, 35 ms a frame.
+  Against zero-shot YOLOE-26s, the larger open-vocabulary model the demo can run, it is ahead on
+  vehicles (0.56 against 0.37 at 0.5) but not yet on people (0.63 against 0.71), at under half
+  the time (35 against 82 ms). That is the comparison that matters if these weights are proposed
+  as the default.
+- **Stairs are found more often but not trusted.** Recall at 0.3 rises from 0.03 to 0.19, but
+  only 6 % of the stairs boxes at 0.3 are right (11 % at 0.5), so most of the time it reports
+  stairs where there are none. 378 training stairs and 20 CPU epochs are not enough. On the
+  chair a stairs box from the camera alone is not acted on, since stairs need the 3D camera too
+  (the two-source rule), but a detector this noisy would make that check carry all the weight.
+  It is still far from the 0.85 target.
+- **Doors and poles stay low.** Against YOLOE-26s, door AP50 goes from 0.01 to 0.04 and recall at
+  0.3 from 0.01 to 0.03; pole AP50 from 0.02 to 0.10 and recall from 0.01 to 0.09, a fivefold rise
+  that is still far from useful. Poles are thin and often far;
+  SANPO's door boxes are mostly doors set into shop fronts. Both need more data than this run had.
+- The GPU runs of #49 (YOLO26s and YOLOv8s, image size 640, more epochs, every frame of the
+  stairs walks) are the real test; this table is the floor they start from. The fine-tuned
+  weights are not yet the node's default.
+
+Run it (after the fetch above):
+
+```
+python3 tools/fetch_sanpo.py --root datasets/sanpo-masks --train -1 --test -1 --every 10 \
+    --masks-only --sessions stairs   # writes datasets/sanpo-masks/sessions_with_stairs.txt
+python3 tools/fetch_sanpo.py --root datasets/sanpo-eval --every 20 \
+    --only datasets/sanpo-masks/sessions_with_stairs.txt
+python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-stairs-yolo
+yolo detect train data=datasets/sanpo-stairs-yolo/data.yaml model=yolo26n.pt imgsz=416 \
+    epochs=20 batch=16 device=cpu seed=0
+python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
+    --weights runs/detect/train/weights/best.pt   # train2, train3 ... if train already exists
+```
+
+### YOLO26s against YOLOv8s, the same CPU run (#49)
+
+#49 compares YOLO26s with YOLOv8s trained the same way. Both were fine-tuned exactly as the
+YOLO26n above (same 1,166 training frames, 20 epochs, image size 416, batch 16, seed 0, the
+laptop CPU), from their COCO weights, and scored on the same 2,331 test frames. Training took
+168 minutes for YOLO26s and 126 for YOLOv8s. Near objects:
+
+| Model (image size, ms per frame) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned (416, 53 ms) | pedestrian | 2,993 | 0.80 | 0.84 | 0.77 | 0.89 | 0.72 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.62 |
+| | stairs | 37 | 0.22 | 0.15 | 0.24 | 0.31 | 0.24 |
+| | opening-door | 175 | 0.04 | 0.14 | 0.05 | 0.27 | 0.02 |
+| | pole | 1,942 | 0.14 | 0.36 | 0.14 | 0.47 | 0.07 |
+| YOLOv8s fine-tuned (416, 48 ms) | pedestrian | 2,993 | 0.77 | 0.87 | 0.72 | 0.92 | 0.67 |
+| | vehicle | 1,438 | 0.74 | 0.80 | 0.70 | 0.88 | 0.64 |
+| | stairs | 37 | 0.20 | 0.18 | 0.27 | 0.28 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.14 | 0.03 | 0.38 | 0.03 |
+| | pole | 1,942 | 0.12 | 0.36 | 0.11 | 0.49 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 9 of the 65 test frames with stairs and YOLOv8s in
+10, both in 2 of the 6 walks (YOLO26n: 7 frames, 2 walks; YOLOE-26s: 1 frame, 1 walk).
+
+What follows:
+
+- **The two small models are close.** YOLO26s is ahead on people (AP50 0.80 against 0.77, recall
+  at 0.5 0.72 against 0.67, at 0.89 against 0.92 precision), and they tie on vehicles (AP50 0.74).
+  YOLOv8s was 5 ms a frame faster here. With one seed and 20 epochs each, a gap of 0.02 to 0.03 in
+  AP50 is within what a second run could change, so this does not settle the choice.
+- **Against the nano model and the demo's zero-shot model.** Both small models are ahead of the
+  fine-tuned YOLO26n (35 ms) on vehicles and in people's recall at 0.5, at a little less
+  precision: for YOLO26s, people at 0.5 go from 0.63 to 0.72 and vehicles from 0.56 to 0.62
+  (YOLOv8s ties it on people AP50, 0.77). Against YOLOE-26s zero-shot (82 ms, at image size
+  480), both are far ahead on vehicles (0.62 and 0.64 against 0.37 at 0.5). On people only
+  YOLO26s keeps up (0.72 against 0.71 at 0.5, 0.77 against 0.78 at 0.3); YOLOv8s is behind (0.67
+  at 0.5, AP50 0.77 against 0.78). YOLO26s takes about two thirds of YOLOE-26s's time, though
+  that one ran at 480, not 416.
+- **Stairs improve, but not near the target.** AP50 0.20 to 0.22 against 0.14 for the nano model,
+  and stairs precision at 0.3 rises from 0.06 to 0.15 (YOLO26s) and 0.18 (YOLOv8s). That is still
+  a quarter of the near staircases at 0.3, against the 0.85 target, and most stairs boxes are
+  wrong. The 37 near staircases of the test split are also too few to tell these models apart on
+  stairs.
+- **Doors and poles stay low** for both (door recall 0.03 to 0.05, pole 0.11 to 0.14 at 0.3).
+- These are CPU runs at 416 with 20 epochs and one frame in 20 of the stairs walks. The GPU runs of
+  #49 at 640, with more epochs and every frame, are still needed before one of them becomes the
+  node's default; until then the node keeps YOLO26n zero-shot.
+
+Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
+
+### The same fine-tune on a GPU, at 640 (#49)
+
+Measured on 18 November 2026. YOLO26s and YOLO26n were fine-tuned again on a free Kaggle notebook
+(one T4), to see whether a bigger image and more epochs help. They were fine-tuned from their COCO
+weights, at image size 640, for up to 100 epochs with early stopping (patience 20), batch 16 and
+seed 0. The data was built inside the notebook with `tools/fetch_sanpo.py` and
+`tools/sanpo_to_yolo.py`:
+- the 45 stairs walks, at one frame in 20, as on the CPU;
+- 3 other training walks at one frame in 10;
+- 1,211 training images and 97 validation images in all.
+
+The CPU run had 1,166 and 145. Its 3 other walks could not be recovered, so 3 different ones were
+used. YOLO26s stopped at epoch 43 (best 30) after 38 minutes; YOLO26n stopped at epoch 33 (best
+13) after 28 minutes. Both were scored with `tools/eval_detector.py` at 640 on the same 2,331 test
+frames as above.
+
+| Model (image size) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.81 | 0.85 | 0.78 | 0.91 | 0.73 |
+| | vehicle | 1,438 | 0.74 | 0.78 | 0.70 | 0.85 | 0.64 |
+| | stairs | 37 | 0.18 | 0.18 | 0.22 | 0.42 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.08 | 0.03 | 0.12 | 0.01 |
+| | pole | 1,942 | 0.14 | 0.44 | 0.12 | 0.59 | 0.06 |
+| YOLO26n fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.79 | 0.85 | 0.75 | 0.91 | 0.69 |
+| | vehicle | 1,438 | 0.75 | 0.81 | 0.68 | 0.89 | 0.59 |
+| | stairs | 37 | 0.12 | 0.16 | 0.19 | 0.23 | 0.16 |
+| | opening-door | 175 | 0.02 | 0.15 | 0.02 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.13 | 0.45 | 0.09 | 0.58 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 8 of the 65 test frames with stairs and YOLO26n in
+7, both in 2 of the 6 walks (on the CPU: YOLO26s 9 frames, YOLO26n 7).
+
+What follows:
+
+- **A bigger image and more epochs did not help.** On the CPU at 416, YOLO26s had AP50 0.80 on
+  people, 0.74 on vehicles and 0.22 on stairs. Here it has 0.81, 0.74 and 0.18. YOLO26n moved
+  from 0.77 to 0.79 on people and from 0.72 to 0.75 on vehicles. With one seed each, both changes
+  are within what a second run could give.
+- **Stairs stay far from the target.** 0.18 against 0.22 is no real difference with 37 near
+  staircases. A quarter of them are found at 0.3, against the 0.85 target, so stairs need more
+  stairs examples: our own recordings (#89) or every frame of the stairs walks. A bigger image or
+  more epochs is not enough.
+- This run tested the image size and the epochs only. The stairs walks were still sampled at one
+  frame in 20, so training on every frame is still to be tried. The node keeps YOLO26n zero-shot.
+
+The weights, the epoch logs and the scores are in the release `models-yolo26-sanpo-gpu640`. It is
+not a MANA release. GPU training is not bit-for-bit repeatable, so a new run gives a close model,
+not the same weights.
+
+## Where the detector fails on SANPO, with pictures (#51)
+
+The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SANPO test frames.
+`tools/failure_examples.py` finds every near box a model missed and every box it gave wrongly at
+confidence 0.3, scored exactly as `tools/eval_detector.py` scores them, and draws the strongest one
+per walk: SANPO's boxes in green (a missed one drawn thicker), the model's in orange with its
+confidence. At 0.3, near the chair. 0.3 is what the detector node keeps, but only a box of 0.5
+or more becomes an obstacle (`min_confidence`, the core's `min_trust`), so the last column gives
+the wrong boxes the chair would act on:
+
+| Class | Near boxes missed | In walks | Boxes given wrongly | In walks | Of them at 0.5 or more |
+|---|---:|---:|---:|---:|---:|
+| stairs | 28 of 37 | 4 | 52 | 13 | 20 |
+| opening-door | 166 of 175 | 13 | 55 | 13 | 11 |
+| pole | 1,674 of 1,942 | 44 | 485 | 41 | 151 |
+
+**Stairs.** 22 of the 37 near staircases of the test split are in one walk, up an outdoor flight
+with railings, and 16 of the 28 misses are there (6 of its 22 found). Looked at by eye, the strongest wrong stairs box
+in each of the 13 walks was on:
+
+| What the wrong stairs box was on | Walks |
+|---|---:|
+| Real stairs: entrance steps and a subway stair seen from above, neither labelled in SANPO, and the lower part of a staircase whose SANPO box covers more | 3 |
+| Probably a stoop (brick steps behind a railing) | 1 |
+| A single raised edge: a curb, a planter's edge, a block | 5 |
+| A railing | 2 |
+| Crosswalk stripes | 2 |
+
+So a few of the "wrong" stairs are stairs that SANPO does not label, but most are things with
+stripes or an edge that look like a step: railings, crosswalks and curbs.
+
+**The box's extent.** SANPO's boxes are drawn round its masks, so one box can cover a whole flight
+of stairs or a whole scaffold labelled "pole", where the model boxes the part in view; and a pole is
+so thin that a box a few pixels narrower falls under IoU 0.5. To see how much of the score that
+costs, the same model was scored again with a match at IoU 0.3 (`--iou 0.3`), near objects:
+
+| Class | AP at IoU 0.5 | AP at IoU 0.3 | Recall at 0.3, IoU 0.5 | Recall at 0.3, IoU 0.3 | Precision at 0.3, IoU 0.5 | Precision at 0.3, IoU 0.3 |
+|---|---:|---:|---:|---:|---:|---:|
+| pedestrian | 0.80 | 0.86 | 0.77 | 0.80 | 0.84 | 0.89 |
+| vehicle | 0.74 | 0.82 | 0.70 | 0.75 | 0.80 | 0.86 |
+| stairs | 0.22 | 0.26 | 0.24 | 0.32 | 0.15 | 0.20 |
+| opening-door | 0.04 | 0.05 | 0.05 | 0.06 | 0.14 | 0.16 |
+| pole | 0.14 | 0.23 | 0.14 | 0.17 | 0.36 | 0.45 |
+
+With the looser match, 12 of the 37 near staircases are found instead of 9. So the box's
+extent explains part of the stairs and pole scores, not most of them: at either IoU most near
+stairs, doors and poles are missed.
+
+Pictures (SANPO frames, CC BY 4.0, Google Research; the walk and frame of each are listed under
+the pictures):
+
+| | |
+|---|---|
+| ![](failures/stairs-box-extent.jpg) | ![](failures/stairs-unlabelled-from-above.jpg) |
+| **Stairs, the box's extent.** SANPO's box covers the whole flight from underfoot; the model boxed the steps ahead (0.42). Under IoU 0.5, so a miss. | **Stairs seen from above, not labelled.** A subway stair going down, found at 0.63; SANPO has no stairs there, so it counts as wrong. |
+| ![](failures/stairs-railing.jpg) | ![](failures/door-glass-missed.jpg) |
+| **A railing taken for stairs** (0.74). | **Glass doors missed.** Shop doors of glass at close range, with nothing found. |
+| ![](failures/door-sign.jpg) | ![](failures/pole-thin-box.jpg) |
+| **A sign board taken for a door** (0.77). | **A thin pole.** Found at 0.94, but SANPO's box also takes in the base, so the overlap is under 0.5. |
+
+SANPO test frames, in the order above (walk, camera, frame): `i2jglnBfoIqIIA7ojQGe-4vK07hUm4T3`,
+chest, 510; `wta4PcYCd4Kfjw_DuB8Bd-dO2Du3ZcnN`, chest, 120; `ZR3hpsQxnbI8C4aSV2UMIKf15QvS6qvQ`,
+chest, 410; `6lm2fRHPl4AtOLKJkEXRJo9MQJVeCT_y`, head, 180; `WCzpj9Vid4Wo4Y0mForLrXk9idQqqxxi`,
+chest, 390; `y-W7aubs2gI5x5AioURb0dPfr9qWveYC`, chest, 110. Scaled to 640 pixels wide, boxes drawn.
+
+What follows:
+
+- **Glass doors are missed, and doors in general.** 166 of the 175 near doors, in all 13 walks
+  that have them. The looser match does not change that, so these are real misses; the ones looked
+  at were doors set into shop fronts at the side of the path, glass ones among them. The detector
+  alone cannot be relied on for doors. Glass is also hard for the lidar and the 3D camera, which
+  can see through it, so a glass door is a case to test on the chair itself (#89).
+- **Stairs are confused with striped and edged ground**, and are missed in the one walk that has
+  most of them. Some of SANPO's stairs labels are loose (a box over a whole flight) or missing, so
+  a stairs figure from SANPO alone is not exact, and the 37 near staircases are too few for one.
+  Stairs from our own recordings (#89) are still needed, as the two-source rule already requires
+  the 3D camera too.
+- **Dark corridors are not in this set.** SANPO's walks are mostly outdoors in daylight, so this cannot
+  show the detector in the dark; that needs the dark frames of #89.
+
+Run it:
+
+```
+python3 tools/failure_examples.py --data datasets/sanpo-stairs-yolo --imgsz 416 \
+    --weights runs/detect/train/weights/best.pt --out datasets/failures
+python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 --iou 0.3 \
+    --weights runs/detect/train/weights/best.pt
+```
+
+## Stairs: segmentation beats boxes (#49, #51)
+
+The section above shows the box detector stuck at about 0.22 AP50 on SANPO stairs, missing most
+near staircases at either IoU, and confusing stairs with railings, curbs and crosswalk stripes.
+Part of that is the box itself: a staircase is a repeating surface that fills the lower frame, and
+SANPO's box is drawn round the whole flight, so a box fits it badly. Published work on stair
+detection reports the same, and reaches far higher numbers by marking stairs as pixels or step
+lines, not boxes.
+
+SANPO already labels stairs as a segmentation mask (class id 15), so the same frames were scored
+that way: a small U-Net (`tools/train_stair_seg.py`, about 8 MB) was trained to mark each pixel
+stair or not, on an equal mix of stair and non-stair frames from SANPO's training walks (4,000
+each), with a seeded sixth held out by frame for validation. Same frames, same classes, only the
+output changes from a box to a per-pixel mask.
+
+| Stairs on SANPO | Precision | Recall | IoU / AP50 |
+|---|---:|---:|---:|
+| Box detector (YOLO26s, #49), near | 0.15 | 0.24 | 0.22 (AP50) |
+| Segmentation (this U-Net), stair pixels | 0.88 | 0.85 | 0.77 (IoU) |
+
+Marking the stairs as pixels raises the overlap with the label from about 0.22 to 0.77 and the
+recall from 0.24 to 0.85 on the same walks: a staircase in the path is now marked in most frames,
+where the box detector found one in only two of the six test walks. The weights are saved to
+`runs/stair_seg.pt`.
+
+Two caveats keep this honest. First, the two numbers are not the same measure: the box row is AP50
+for a detection, the segmentation row is the overlap of the predicted stair pixels with the label,
+so the 0.22-to-0.77 jump is the gain from changing the question (is there a stair region here),
+not a like-for-like AP. The point is that the question MANA actually needs answered — is there a
+stair surface in the path — is answered far better by a mask than by a box. Second, this is still
+SANPO, mostly outdoor daylight walks, and the model is RGB only. On a separate RealSense set with
+depth, adding the depth map to the same U-Net raised stair IoU by about 6.5 points over RGB alone,
+so MANA's 3D camera is expected to help here too; the SANPO export has no depth, so that is not
+measured on these walks. Stairs from our own recordings with depth (#89), scored as a per-approach
+hazard (was the staircase marked before the chair reached it) rather than a per-frame overlap, are
+the next step, and the two-source rule already requires the 3D camera alongside the detector.
+
+Run it:
+
+```
+python3 tools/train_stair_seg.py --root datasets/sanpo --epochs 30 --out runs/stair_seg.pt
 ```

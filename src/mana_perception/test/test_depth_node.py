@@ -9,7 +9,7 @@ from mana_perception.depth_node import DepthNode
 from rclpy.executors import SingleThreadedExecutor
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport, MotionReport
+from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport
 from mana_perception import depth as dp
 from mana_perception import synthetic as syn
 
@@ -110,3 +110,43 @@ def test_the_chairs_pitch_from_motion_keeps_level_ground_level(ros, with_motion)
     assert reports[-1].ground in no_hazard
     # read with the mounting tilt alone, the same image is a hazard: the pitch is what fixes it
     assert dp.read_ground(metres, CAM).ground not in no_hazard
+
+
+def test_a_wall_in_a_depth_frame_is_reported_as_an_obstacle_and_clear_ground_is_not(ros):
+    """The 3D camera also reports what blocks the path (mana_perception.structure): a wall 1.5 m
+    ahead reaches the core's obstacle topic, and level ground sends no obstacle at all."""
+    node, probe = DepthNode(), rclpy.create_node("probe")
+    obstacles, grounds = [], []
+    probe.create_subscription(ObstacleReport, "obstacle", obstacles.append, 10)
+    probe.create_subscription(GroundReport, "ground", grounds.append, 10)
+    info_pub = probe.create_publisher(CameraInfo, "depth/camera_info", 10)
+    image_pub = probe.create_publisher(Image, "depth/image", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    executor.add_node(probe)
+
+    info = CameraInfo(width=syn.COLS, height=syn.ROWS)
+    info.k = [CAM.fx, 0.0, CAM.cx, 0.0, CAM.fy, CAM.cy, 0.0, 0.0, 1.0]
+
+    def send(metres, until):
+        image = Image(height=syn.ROWS, width=syn.COLS, encoding="32FC1", is_bigendian=0)
+        image.step = syn.COLS * 4
+        image.data = np.where(np.isfinite(metres), metres, np.nan).astype("<f4").tobytes()
+        end = time.monotonic() + 5.0
+        while not until() and time.monotonic() < end:
+            info_pub.publish(info)
+            image_pub.publish(image)
+            executor.spin_once(timeout_sec=0.05)
+
+    send(syn.render(syn.flat), lambda: len(grounds) >= 5)
+    assert grounds and not obstacles, "level ground gave an obstacle report"
+    send(syn.render_boxes([(1.5, 1.6, -3.0, 3.0, 0.0, 2.5)]), lambda: bool(obstacles))
+    for n in (node, probe):
+        n.destroy_node()
+
+    assert obstacles, "no obstacle report was published"
+    o = obstacles[0]
+    assert o.source == ObstacleReport.DEPTH_CAMERA
+    assert o.label == "wall"
+    assert abs(o.distance_m - 1.5) < 0.1
+    assert o.trust == pytest.approx(0.9)

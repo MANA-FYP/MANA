@@ -1,6 +1,6 @@
 # Datasets
 
-The datasets the MANA models are trained and tested on: where each one comes from, its licence, its size, and the split we use. None of the data is kept in git. One script fetches all of it into `datasets/` (git ignores that folder):
+The datasets the MANA models are trained and tested on: where each one comes from, its licence, its size, and the split we use. None of the data is kept in git, except six SANPO test frames, scaled down with boxes drawn on them, in `docs/failures/` as pictures of the detector's failures (#51; CC BY 4.0, credited there). One script fetches all of it into `datasets/` (git ignores that folder):
 
 ```bash
 tools/fetch_datasets.sh            # every dataset
@@ -20,7 +20,7 @@ A dataset that is already on disk is skipped, and a stopped download picks up wh
 | [UrbanSound8K](#urbansound8k) | EfficientAT-mn10 siren and horn detection (#47) | CC BY-NC 4.0 (non-commercial) | 6.0 GB, 8,732 clips | Automatic |
 | [Office Localization](#office-localization-wi-fi-csi) | Wi-Fi sensing: people and their zone from ESP32 CSI (#194) | CC BY 4.0 | About 950 MB, 11 sessions | `tools/wifi_csi.py --fetch` |
 
-EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only fine-tune and test on UrbanSound8K.
+EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only test on UrbanSound8K: both models are used as they come, with no fine-tuning (#183), and its licence (CC BY-NC 4.0) keeps it to non-commercial use.
 
 ## StairNet
 
@@ -88,7 +88,7 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Source:** Warden, *Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition*, arXiv:1804.03209, 2018.
 - **Licence:** CC BY 4.0.
 - **Contents:** 105,829 one-second 16 kHz WAV clips of 35 words from 2,618 speakers (2.4 GB), plus background-noise recordings. MANA's ten command words (`COMMAND_WORDS` in `demo/speech.py`: stop, go, yes, no, left, right, up, down, on, off) are among them.
-- **Split:** the official one. `validation_list.txt` and `testing_list.txt` inside the archive name the validation and test clips (split by speaker, so a speaker is in one part only); every other clip is training. The separate official test set (`speech_commands_test_set_v0.02`, 113 MB) goes to `datasets/speech_commands/test_set/` and is the one we report.
+- **Split:** the official one. `validation_list.txt` and `testing_list.txt` inside the archive name the validation and test clips (split by speaker, so a speaker is in one part only); every other clip is training. The separate official test set (`speech_commands_test_set_v0.02`, 113 MB: 4,074 clips of the ten words, 408 other words, 408 of noise alone) goes to its own folder and is read with `tools/command_words.py --official`. `docs/results.md` reports both the testing list and this set. Noise for tests is the last quarter of each `_background_noise_` file; training uses the rest.
 
 ## UrbanSound8K
 
