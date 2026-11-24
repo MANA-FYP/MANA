@@ -650,6 +650,42 @@ def test_asking_for_the_destination_and_clearing_it():
     assert len(said_ways(mw)) == 4  # nothing more once cleared
 
 
+def test_starting_again_forgets_the_walk_and_counts_from_here():
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.track.mark()
+    walk_legs(mw.nav, [(0, 20)])
+    mw.set_destination(0.0, 40.0, now=12.0)
+    mw.tick(12.5)
+    assert mw.nav.track.steps == 20 and mw.decisions
+    mw.start_again(now=13.0)
+    v = mw.nav.view(13.0)
+    assert (v["steps"], v["distance_m"], v["marks"], v["x"], v["y"]) == (0, 0.0, {}, 0.0, 0.0)
+    assert [d["text"] for d in mw.decisions] == ["Starting again from here."]
+    assert not mw.heard and not mw.inputs
+    mw.tick(14.0)  # the current decision is written again, and no way to the old destination
+    assert [d["kind"] for d in mw.decisions][-1] == "decision"
+    for t in range(15, 25):  # and "Starting again from here." is said, not dropped (#191)
+        mw.tick(float(t))
+    assert [h["text"] for h in mw.heard][0] == "Starting again from here."
+    walk_legs(mw.nav, [(90, 10)], t0=14.0)
+    assert mw.nav.view(30.0)["x"] == pytest.approx(7.0, abs=0.01)  # 7 m east of the new start
+
+
+def test_a_stop_waiting_to_be_said_is_still_said_after_starting_again():
+    from mana_core.messages import Message, Priority
+
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.nav.on_orientation(None, None, None, compass=90)
+    mw.queue.push(Message("Stop. Steps down ahead.", Priority.URGENT, True, 10.0), 10.0)
+    mw.start_again(now=10.0)
+    assert [m.text for m in mw.queue.waiting] == ["Stop. Steps down ahead."]
+    assert mw.nav.view(10.0)["heading"] == 90  # and which way the phone faces
+
+
 def test_held_fixes_do_not_stop_gps_correcting_the_steps():
     """Waqas's case (#180): fixes keep coming at the start, slow, while steps walk 42 m east, then
     30 s standing, then 10 m at 1 m/s. Held fixes used to keep the source GPS, so GPS never put
