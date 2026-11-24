@@ -620,3 +620,38 @@ def test_the_stairs_window_uses_the_cameras_distance_not_the_cores_from_the_fron
     assert the_stairs(app["live"]["stairs"], from_camera + 1.45, mw.clock())
     # the core's copy, 0.12 m less, would have put it outside: an obstacle, as before this change
     assert not the_stairs(mw.core.ground[Source.DETECTOR], from_camera + 1.45, mw.clock())
+
+
+def test_the_models_run_where_mana_device_says_else_on_the_gpu_when_there_is_one(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setenv("MANA_DEVICE", "cpu")
+    assert dz.device() == "cpu"  # to leave a shared GPU alone
+    monkeypatch.delenv("MANA_DEVICE")
+    assert dz.device() == ("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def test_the_depth_models_input_goes_to_the_models_device_and_its_output_comes_back():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    moved = []
+
+    class Inputs(dict):
+        def to(self, where):
+            moved.append(where)
+            return self
+
+    class Model:
+        device = "cpu"
+
+        def __call__(self, **inputs):
+            return type("Out", (), {"predicted_depth": torch.ones(1, 4, 4)})()
+
+    frame = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(frame, "JPEG")
+    model = dz.DepthModel(lambda **kw: Inputs(), Model(), 4)
+    assert model.estimate(frame.getvalue()).shape == (4, 4)
+    assert moved == ["cpu"]
