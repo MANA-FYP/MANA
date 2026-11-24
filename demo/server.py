@@ -666,6 +666,11 @@ def door_sign(app: web.Application, jpeg: bytes, detections, now: float) -> None
     def read():
         try:
             side, _ = reader.read(jpeg, box)
+            if side is None and box is not None:
+                # the detector may box another door than the one with the sign, or the sign may
+                # be on the wall beside it: on a door photo with PULL drawn on, the detector boxed
+                # the door next to it, and only the whole frame read the sign
+                side, _ = reader.read(jpeg)
             if side is not None:
                 app["mw"].on_door_sign(side)
         except Exception as e:  # one bad frame must not stop the reading
