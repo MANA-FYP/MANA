@@ -11,11 +11,43 @@ from demo.middleware import WORD_COMMANDS
 from demo.speech import COMMAND_WORDS, CommandRecognizer, grammar, parse_result, to_pcm16_16k
 
 
-def test_the_grammar_is_the_ten_command_words_plus_unknown():
+def test_the_grammar_is_the_ten_command_words_the_phrase_words_and_unknown():
     words = json.loads(grammar())
-    assert words[-1] == "[unk]"
-    assert set(words[:-1]) == set(COMMAND_WORDS)
-    assert len(COMMAND_WORDS) == 10
+    assert words[-1] == "[unk]" and len(COMMAND_WORDS) == 10
+    assert set(words[:-1]) == set(COMMAND_WORDS) | set(speech.PHRASE_WORDS)
+    # every word the middleware's phrases look for can be heard by the laptop's recogniser
+    from demo.middleware import DESTINATION, FLOOR_WORDS, MARK_PHRASES
+
+    needed = {w for p in MARK_PHRASES for w in p.split()} | {DESTINATION, "where", "floor"}
+    assert needed | set(FLOOR_WORDS) <= set(words)
+
+
+def test_a_phrase_is_a_result_with_a_word_that_is_not_a_command():
+    def result(text):
+        return json.dumps({"text": text})
+
+    assert speech.phrase_of(result("floor two")) == "floor two"
+    assert speech.phrase_of(result("[unk] where go")) == "(unclear) where go"
+    assert speech.phrase_of(result("stop")) == speech.phrase_of(result("go go")) == ""
+    assert speech.phrase_of(result("[unk]")) == speech.phrase_of(result("[unk] [unk]")) == ""
+    assert speech.phrase_of("not json") == ""
+    # Waqas (#196): Vosk hears "don't go", "can we go", "let's go now" as unknown words and "go"
+    from demo.middleware import in_sentence
+
+    for said in ("[unk] go", "[unk] [unk] go", "go [unk]"):
+        assert in_sentence(speech.phrase_of(result(said))), said
+
+
+def test_feeding_a_phrase_keeps_it_for_the_server():
+    class Fake:
+        def AcceptWaveform(self, data):  # noqa: N802
+            return True
+
+        def Result(self):  # noqa: N802
+            return json.dumps({"text": "on the first floor", "result": [{"word": "on", "conf": 1}]})
+
+    rec = CommandRecognizer(Fake())
+    assert rec.feed(b"\x00\x00") == [("on", 1.0)] and rec.last_phrase == "on the first floor"
 
 
 def test_every_command_word_the_recogniser_can_return_is_understood_by_the_middleware():
