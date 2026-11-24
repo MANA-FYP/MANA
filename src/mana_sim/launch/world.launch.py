@@ -207,6 +207,9 @@ def generate_launch_description():
                         # the tracks reach this far ahead of the camera (config/core.yaml:
                         # front_tracks_m less depth_camera_m): nearer, it sees the chair itself
                         "body_m": 0.75,
+                        # the chair is 0.8 m wide (its footprint, config/nav2.yaml), not the
+                        # node's default of a manual wheelchair's 0.7 m
+                        "device_width_m": 0.8,
                     }
                 ],
             ),
