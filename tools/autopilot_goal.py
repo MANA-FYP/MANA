@@ -151,6 +151,10 @@ def main(argv=None) -> int:
     if not node.client.wait_for_server(timeout_sec=60) or not node.wait_active(180):
         print("Nav2 is not up and active: start autopilot.launch.py", file=sys.stderr)
         return 2
+    # a sim-time clock reads 0 until the first /clock message; a start taken then would make the
+    # first goal's time the run's time so far (it read 167 s for a 48 s drive in 3 of 6 runs)
+    while node.now() == 0.0:
+        rclpy.spin_once(node, timeout_sec=0.1)
     rows = []
     for x, y, yaw in [tuple(a.goal)] if a.goal else GOALS:
         row = node.go(x, y, yaw, a.timeout)
