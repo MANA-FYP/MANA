@@ -57,11 +57,15 @@ body { display: flex; flex-direction: column; }
 /* map */
 .mapbox { position: relative; flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; background: #dfe4ee; }
 .mapbox canvas { width: 100%; height: 100%; display: block; }
-.imagery { position: absolute; left: 10px; bottom: 10px; background: rgba(255,255,255,.93); border-radius: 10px; padding: 7px 11px; font-size: 12.5px; line-height: 1.35; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.imagery { position: absolute; left: 10px; bottom: 36px; background: rgba(255,255,255,.93); border-radius: 10px; padding: 7px 11px; font-size: 12.5px; line-height: 1.35; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 .imagery b { color: var(--indigo); }
 .maphint { position: absolute; right: 10px; top: 10px; background: rgba(20,26,51,.78); color: #fff; font-size: 12.5px; font-weight: 600; padding: 6px 10px; border-radius: 9px; }
 .seg { display: flex; background: #f1f2f8; border-radius: 10px; padding: 3px; font-family: var(--body); }
 .seg button { border: 0; background: transparent; font: 600 12.5px var(--body); color: var(--ink2); padding: 5px 10px; border-radius: 8px; cursor: pointer; }
+.seg .sepv { width: 1px; margin: 4px 3px; background: var(--line); }
+.mapbox .credit { position: absolute; right: 6px; bottom: 4px; max-width: calc(100% - 12px); padding: 1px 6px; border-radius: 6px;
+  background: rgba(255,255,255,.8); color: var(--ink2); font-size: 10.5px; }
+.mapbox .credit:empty { display: none; }
 .seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 
 /* height */

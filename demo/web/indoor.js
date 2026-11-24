@@ -1,7 +1,7 @@
 // MANA Indoor: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
 "use strict";
 const $ = (id) => document.getElementById(id);
-let ws = null, snap = null, layer = "satellite";
+let ws = null, snap = null, layer = "satellite", labels = true, placesOn = false, pins = [];
 const tiles = new Map();
 let frameSeq = -1, loading = false, imageryAt = null;
 
@@ -137,7 +137,9 @@ function drawEvents(ev) {
 }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-// ---- the map: the newest satellite imagery, and when it was taken
+// ---- the map: the newest satellite imagery with place names over it, when it was taken, and the
+// places around (places.js) once Places is on
+Places.onChange = () => snap && drawMap(snap.position.track);
 function tile(url) {
   let im = tiles.get(url);
   if (!im) { im = new Image(); im.onload = () => snap && drawMap(snap.position.track); im.src = url; tiles.set(url, im); }
@@ -150,6 +152,10 @@ function mercator(lat, lon, z) {
 function drawMap(t) {
   const [ctx, w, h] = fit($("mapCv"));
   ctx.fillStyle = "#dfe4ee"; ctx.fillRect(0, 0, w, h);
+  pins = [];
+  const credit = Places.credit(layer, labels, placesOn);
+  if ($("credit").textContent !== credit) $("credit").textContent = credit;
+  Places.legend($("plegend"), placesOn && !!(t && t.origin));
   if (!t || !t.origin) {
     $("mapHint").hidden = false; $("mapHint").textContent = "No GPS fix yet: the map needs one outdoors"; $("imagery").hidden = true;
     return;
@@ -158,7 +164,7 @@ function drawMap(t) {
   const ll = (x, y) => [lat0 + y / k, lon0 + x / (k * cos)];
   const pts = t.path.map((p) => ll(p[0], p[1])).concat([ll(t.x, t.y)]);
   const [plat, plon] = pts[pts.length - 1];
-  let z = 19;
+  let z = placesOn ? 18 : 19;   // with Places on, about 400 m across: the places asked for
   for (; z > 14; z--) {   // the whole path in view
     const ps = pts.map((p) => mercator(p[0], p[1], z));
     const xs = ps.map((p) => p[0]), ys = ps.map((p) => p[1]);
@@ -175,9 +181,19 @@ function drawMap(t) {
       if (im) ctx.drawImage(im, tx * 256 - ox, ty * 256 - oy, 256, 256);
     }
   }
+  for (let tx = Math.floor(ox / 256); layer === "satellite" && labels && tx * 256 < ox + w; tx++) {
+    for (let ty = Math.floor(oy / 256); ty * 256 < oy + h; ty++) {
+      const im = tile(`/tiles/labels/${z}/${tx}/${ty}.png`);
+      if (im) ctx.drawImage(im, tx * 256 - ox, ty * 256 - oy, 256, 256);
+    }
+  }
   ctx.lineJoin = ctx.lineCap = "round";
   const line = (width, colour) => { ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.beginPath(); ps.forEach((p, i) => (i ? ctx.lineTo(p[0] - ox, p[1] - oy) : ctx.moveTo(p[0] - ox, p[1] - oy))); ctx.stroke(); };
   line(9, "rgba(255,255,255,.9)"); line(5, css("--indigo"));
+  if (placesOn) {   // the places around the person, asked again once they moved ~100 m
+    Places.want(plat, plon);
+    pins = Places.draw(ctx, (lat, lon) => { const p = mercator(lat, lon, z); return [p[0] - ox, p[1] - oy]; }, w, h);
+  }
   const me = ps[ps.length - 1];
   ctx.beginPath(); ctx.arc(me[0] - ox, me[1] - oy, 10, 0, 7); ctx.fillStyle = css("--indigo"); ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
   $("mapHint").hidden = false;
@@ -196,10 +212,19 @@ async function loadImagery(lat, lon) {
 }
 $("layers").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
-  layer = b.dataset.layer;
-  document.querySelectorAll("#layers button").forEach((x) => x.classList.toggle("on", x === b));
+  if (b.dataset.layer) layer = b.dataset.layer;
+  else if (b.dataset.toggle === "labels") labels = !labels;
+  else { placesOn = !placesOn; if (!placesOn) Places.card($("pcard"), null); }
+  document.querySelectorAll("#layers [data-layer]").forEach((x) => x.classList.toggle("on", x.dataset.layer === layer));
+  $("tLabels").classList.toggle("on", labels); $("tLabels").hidden = layer !== "satellite";
+  $("tPlaces").classList.toggle("on", placesOn);
   $("imagery").hidden = layer !== "satellite" || !$("imagery").innerHTML;
   if (snap) drawMap(snap.position.track);
+};
+
+$("mapCv").onclick = (e) => {   // a tap on a pin shows the place
+  const r = $("mapCv").getBoundingClientRect(), p = Places.hit(pins, e.clientX - r.left, e.clientY - r.top);
+  if (p) Places.card($("pcard"), p);
 };
 
 // ---- the camera

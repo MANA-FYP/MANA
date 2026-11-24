@@ -1,0 +1,26 @@
+/* Places on the map (places.js): the key to the pins, and the card of a tapped place. */
+.plegend { position: absolute; left: 10px; bottom: 42px; max-width: calc(100% - 80px); padding: 6px 9px; border-radius: 10px;
+  background: rgba(255, 255, 255, .94); box-shadow: 0 2px 8px rgba(28, 32, 36, .16); font: 600 11.5px/1.35 "Inter", "Segoe UI", sans-serif; color: #1c2024; }
+.pl-keys { display: flex; flex-wrap: wrap; gap: 3px 9px; }
+.pl-keys span { display: inline-flex; align-items: center; gap: 4px; }
+.pl-keys i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .18); }
+.pl-keys i.sq { border-radius: 1px; background: #1c2024; }
+.pl-keys i.dm { border-radius: 1px; background: #1c2024; transform: rotate(45deg) scale(.85); }
+.pl-note { margin-top: 3px; font-weight: 500; color: #60646c; }
+.pcard { position: absolute; left: 10px; bottom: 42px; z-index: 3; width: min(270px, calc(100% - 80px)); max-height: calc(100% - 60px); overflow: auto;
+  display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 12px; background: #fff;
+  box-shadow: 0 4px 18px rgba(28, 32, 36, .25); font: 500 13px/1.35 "Inter", "Segoe UI", sans-serif; color: #1c2024; }
+.pcard img { width: 100%; max-height: 150px; object-fit: cover; border-radius: 8px; margin-bottom: 4px; background: #eef0f3; }
+.pcard b { font-size: 14.5px; padding-right: 22px; }
+.pc-kind { color: #60646c; text-transform: capitalize; }
+.pc-wc { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.pc-wc i { width: 10px; height: 10px; border-radius: 50%; }
+.pc-detail { color: #60646c; font-size: 12px; }
+.pcard small { margin-top: 3px; color: #60646c; font-size: 11px; }
+.pcard a { color: #0b68d4; }
+.pc-x { position: absolute; right: 6px; top: 6px; width: 26px; height: 26px; border: 0; border-radius: 8px; background: rgba(240, 241, 244, .95);
+  font: 700 17px/1 sans-serif; color: #1c2024; cursor: pointer; }
+.pcard img + b { padding-right: 0; }
+.plegend[hidden], .pcard[hidden] { display: none; }
+.mapbox .plegend, .mapbox .pcard { bottom: 80px; }
+@media (max-width: 600px) { .pcard img { max-height: 84px; } }  /* a short map box on a phone: keep the credit in view */
