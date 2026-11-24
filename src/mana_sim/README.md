@@ -98,6 +98,37 @@ Taking the controls does **not** put the core in manual mode. In manual mode the
 mode and the speed to the user, and skips its own change to tracks and its slow-downs, which is
 what a test drive is meant to show. `m` and `a` stay available as the user's own commands.
 
+### The autopilot: Nav2 to a goal on the map (#78)
+
+Nav2 drives the chair to a goal, and MANA caps it like any driver. Nav2's controller publishes on `cmd_vel/autopilot` (the behaviour tree here has no recovery behaviours). `driver_select` passes them on below the supervisor's keyboard, and the host caps them with MANA's decision. Nav2's own localisation is not used:
+- `/map` comes from slam_toolbox localising on a saved map (#43);
+- `map` to `odom` comes from `ekf_global`, fed by the lidar gate.
+
+```bash
+tools/autopilot.sh --map ~/mana_maps/indoor --out runs/t78       # all of it, and four goals
+ros2 launch mana_sim autopilot.launch.py                          # Nav2 only, beside a running world
+rviz2 -d $(ros2 pkg prefix mana_sim)/share/mana_sim/config/autopilot.rviz   # then "2D Goal Pose"
+python3 tools/autopilot_goal.py --goal 13 0 0                     # one goal from the command line
+```
+
+`tools/autopilot.sh` starts these, then sends four goals around the indoor corridor loop with `tools/autopilot_goal.py`:
+- the indoor world with a driver and wheel odometry;
+- the core;
+- slam_toolbox on the saved map, the lidar gate and `ekf_global`;
+- Nav2.
+
+For each goal it writes down:
+- whether it was reached, and how long it took;
+- how far from the goal the chair stopped, by Gazebo's ground truth;
+- what MANA did on the way: its lowest speed limit, its stops and its modes.
+
+**When MANA stops or slows the chair mid-goal**, the intent is that Nav2 keeps its goal: a stop is a cap on Nav2's command, not a new command, so the chair stands and Nav2 can go on once the stop is lifted. With no retries, though, any failure of the controller ends the goal, and the controller fails when it sees a collision ahead (`failure_tolerance` 0.3 s), as a person in front could cause; that a goal survives a stop has not been observed with this tree, so it may end instead. `tools/autopilot_goal.py` then stops sending goals, unless `--keep-going` (Komail, #187). Nav2's progress checker would abort a goal that makes no progress, so it allows 60 s (`config/nav2.yaml`). A longer stop (MANA deactivated by the user, a question about stairs) ends the goal: the behaviour tree (`config/navigate_no_recovery.xml`) has no recoveries and no retries, so when the progress checker fails the goal is aborted and has to be given again. Nav2's default tree would instead clear the costmaps, spin, wait and back up, up to 6 times, and the chair could set off by itself if the stop lifted meanwhile (Waqas, #187). That the abort happens has not been measured in a run yet.
+
+Limits of this first version:
+- Nav2 plans in 2D on the lidar's map. Stairs, curbs and drops are walls to it or are not seen at all, so goals are on routes without them. MANA's own rules still stop the chair at them.
+- The indoor world has no ramps. Goals over ramps need a lidar map of the route world, which is not made yet.
+- In this world the camera's ground classifier does not run. MANA therefore holds the chair at 30% of top speed, waiting for its second ground sensor ("Waiting for the ground sensors (1 of 2 up: the 3D camera)").
+
 ### The supervisor's panel
 
 With `panel:=true`, `panel_node` serves a page on http://localhost:8090, on this computer only (it
