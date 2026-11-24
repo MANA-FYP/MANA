@@ -98,6 +98,9 @@ ASK_DOWN = "Stairs down ahead. Say yes to go down on tracks"
 STEP_STOP = "Step ahead, stopping"
 SOMEONE_NEAR = "Someone may be near"  # sensed by Wi-Fi, not seen; then where, if known
 STOPS = ("drop", "obstacle", "lone step", "stairs down")  # the stop branches that hold (#97)
+# an obstacle's approach is its trend over this long (at least 3 reports spanning 0.4 s); a jump
+# by more than APPROACH_JUMP_M is another obstacle, and starts its trend again
+APPROACH_WINDOW_S, APPROACH_SPAN_S, APPROACH_JUMP_M = 1.0, 0.4, 0.5
 
 
 @dataclass(frozen=True)
@@ -175,6 +178,9 @@ class Limits:
     position_max_age_s: float = 2.5
     presence_max_age_s: float = 2.5  # Wi-Fi sensing gives a verdict for each second
     clock_back_s: float = 5.0  # a report this much older than the one held: the clock went back
+    # an obstacle coming towards the device at least this fast (a person walking at it) counts
+    # nearer, by how far it comes while the device stops; slower is taken for depth noise
+    approach_mps: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -206,6 +212,21 @@ class Mount:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
         v = speed_limit * self.top_mps
         return v * self.reaction_s + (v * v / (2.0 * self.decel_mps2) if self.decel_mps2 else 0.0)
+
+    def stop_s(self, speed_limit: float) -> float:
+        """How long the chair takes, at this speed limit, from a stop decided to standing still."""
+        v = speed_limit * self.top_mps
+        return self.reaction_s + (v / self.decel_mps2 if self.decel_mps2 else 0.0)
+
+    def speed_mps(self, speed_limit: float, stopped_s: float) -> float:
+        """How fast the chair goes stopped_s after a stop decided at this speed limit (braking
+        as above), or at the limit itself when stopped_s is negative (no stop)."""
+        v = speed_limit * self.top_mps
+        if stopped_s <= self.reaction_s:
+            return v
+        if not self.decel_mps2:
+            return 0.0
+        return max(0.0, v - self.decel_mps2 * (stopped_s - self.reaction_s))
 
     def ahead_of_sensor(self, source: Source, mode: Mode, switching: bool) -> float:
         """How far the front is ahead of the sensor of this source."""
@@ -266,6 +287,12 @@ class DecisionCore:
         self.mount = mount or Mount()
         self.mode_changed_at = -math.inf
         self.moving_speed = 1.0  # the speed limit of the last decision that was not a stop
+        # how far the device has gone, from the speeds it allowed (with Mount.top_mps), so that
+        # an obstacle's own approach can be told from the device's: (stamp, odometer + distance)
+        # per source, for the last APPROACH_WINDOW_S
+        self.travelled_m = 0.0
+        self.stopped_at = -math.inf
+        self.tracks: dict[Source, list[tuple[float, float]]] = {}
         self.ground: dict[Source, GroundReport] = {}
         self.obstacles: dict[Source, ObstacleReport] = {}
         self.motion: MotionReport | None = None
@@ -319,7 +346,54 @@ class DecisionCore:
         self._keep(self.ground, report.source, self._from_front(report))
 
     def on_obstacle(self, report: ObstacleReport) -> None:
+        if self._newer(self.obstacles.get(report.source), report) and self.mount.top_mps > 0:
+            self._track(report)
         self._keep(self.obstacles, report.source, self._from_front(report))
+
+    def _track(self, report: ObstacleReport) -> None:
+        """Where the obstacle is along the way, as the distance from its sensor (fixed on the
+        device) plus how far the device has gone; it moves only when the obstacle does."""
+        track = self.tracks.setdefault(report.source, [])
+        if not math.isfinite(report.distance_m):
+            track.clear()
+            return
+        at = self.travelled_m + self._own_mps() * (report.stamp - self.now) + report.distance_m
+        if track and (report.stamp <= track[-1][0] or abs(at - track[-1][1]) > APPROACH_JUMP_M):
+            track.clear()
+        track.append((report.stamp, at))
+        while track[0][0] < report.stamp - APPROACH_WINDOW_S:
+            track.pop(0)
+
+    def _own_mps(self) -> float:
+        """How fast the device goes now, as far as the core knows: at the speed limit it allowed,
+        and after a stop, braking as the mount says."""
+        if not self.decision.stop:
+            return self.mount.speed_mps(self.decision.speed_limit, -1.0)
+        return self.mount.speed_mps(self.moving_speed, self.now - self.stopped_at)
+
+    def _approach_m(self, source: Source, speed_limit: float) -> float:
+        """How much nearer an obstacle counts for coming towards the device: how far it comes
+        while the device stops from this speed limit. 0 for one standing still or moving away,
+        and with no top_mps (the scripted world, the phone), where its approach cannot be told
+        from the device's."""
+        track = [p for p in self.tracks.get(source, ()) if p[0] >= self.now - APPROACH_WINDOW_S]
+        if len(track) < 3 or track[-1][0] - track[0][0] < APPROACH_SPAN_S:
+            return 0.0
+        mt = sum(t for t, _ in track) / len(track)
+        ma = sum(a for _, a in track) / len(track)
+        slope = sum((t - mt) * (a - ma) for t, a in track) / sum((t - mt) ** 2 for t, _ in track)
+        if -slope < self.limits.approach_mps:
+            return 0.0
+        return -slope * self.mount.stop_s(speed_limit)
+
+    def _obstacle_within(self, distance_m: float, speed_limit: float) -> bool:
+        """An obstacle this near, or this near once its approach is counted for a stop from this
+        speed limit."""
+        return any(
+            r.distance_m <= distance_m + self._approach_m(source, speed_limit)
+            for source, r in self.obstacles.items()
+            if self._ok(r)
+        )
 
     def on_motion(self, report: MotionReport) -> None:
         if self._newer(self.motion, report):
@@ -369,6 +443,10 @@ class DecisionCore:
     # ---- one decision
 
     def tick(self, now: float) -> Decision:
+        if now < self.now:
+            self.tracks.clear()  # the clock went back: the trends are from another run
+        else:
+            self.travelled_m += self._own_mps() * (now - self.now)
         self.now = now
         motion = self.motion if self._ok(self.motion) else None
         lim = self.limits
@@ -384,7 +462,9 @@ class DecisionCore:
         reach = self.mount.travel_m(self.moving_speed)  # the stop distances hold at standstill
         seen = {
             "drop": self._drop_at_edge(lim.edge_m + reach + past["drop"]),
-            "obstacle": self._nearest_obstacle() <= lim.obstacle_stop_m + reach + past["obstacle"],
+            "obstacle": self._obstacle_within(
+                lim.obstacle_stop_m + reach + past["obstacle"], self.moving_speed
+            ),
             "lone step": self._lone_step_at_edge(lim.edge_m + reach + past["lone step"]),
             "stairs down": self._stairs_down(lim.step_m + past["stairs down"]),
         }
@@ -397,11 +477,14 @@ class DecisionCore:
             self.down_seen_at = now  # only a sensor's own stairs down keeps a yes alive
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
+        was_stop = self.decision.stop
         self.tree.tick_once()
         if self.decision.mode != self.mode:
             self.mode_changed_at = now
         if not self.decision.stop:
             self.moving_speed = self.decision.speed_limit
+        elif not was_stop:
+            self.stopped_at = now
         self.mode = self.decision.mode
         self.asking_down = self.decision.reason == ASK_DOWN
         if self.asking_down:
@@ -448,9 +531,6 @@ class DecisionCore:
     def _really_down(self) -> bool:
         """A sensor reports stairs down itself: not a drop taken for them after a yes."""
         return any(r.ground == Ground.STAIRS_DOWN for r in self.ground.values() if self._ok(r))
-
-    def _nearest_obstacle(self) -> float:
-        return min((r.distance_m for r in self.obstacles.values() if self._ok(r)), default=math.inf)
 
     def _drop_at_edge(self, edge_m: float | None = None) -> bool:
         """A drop at the edge, or stairs going down at the edge that only one sensor sees: a fall
@@ -576,7 +656,8 @@ class DecisionCore:
 
     def _slow_reason(self) -> str | None:
         lim = self.limits
-        if self._nearest_obstacle() <= lim.obstacle_slow_m:
+        # at full speed's stop time: slowing down must not shrink the reach that asked for it
+        if self._obstacle_within(lim.obstacle_slow_m, 1.0):
             return "Obstacle ahead, slowing down"
         near = [
             r for r in self._grounds() if not r.distance_m > lim.step_m

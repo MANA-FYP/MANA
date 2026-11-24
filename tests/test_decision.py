@@ -589,6 +589,83 @@ def test_once_stopped_the_travel_of_the_last_speed_still_counts():
     assert c.decision.stop and c.moving_speed == 1.0
 
 
+# ---- an obstacle coming towards the device counts nearer by how far it comes while it stops
+
+
+def meet(walker_mps, mount=BRAKES, limits=None, start_m=8.0, noise_m=0.0, seconds=15.0):
+    """The chair drives at a person walking towards it at walker_mps (0: standing), on flat
+    ground, with the lidar's report every 0.1 s. The chair goes at the speed it is allowed and
+    brakes as the mount says. Returns the gap when the chair first stands still after a stop,
+    and where the chair is then."""
+    import random
+
+    rnd = random.Random(1)
+    c = DecisionCore(limits or Limits(), mount)
+    chair, person, v, stopped_at = 0.0, start_m, 0.0, None
+    for i in range(int(seconds / 0.1)):
+        t = NOW + i * 0.1
+        c.on_ground(GroundReport(t, 0.9, CAM, Ground.FLAT))
+        c.on_ground(GroundReport(t, 0.9, DEPTH, Ground.FLAT))
+        c.on_motion(MotionReport(t, 0.9))
+        c.on_obstacle(ObstacleReport(t, 0.9, LIDAR, person - chair + rnd.gauss(0, noise_m)))
+        d = c.tick(t)
+        if d.stop and stopped_at is None:
+            stopped_at, braking_from = t, v
+        if stopped_at is None:
+            v = d.speed_limit * mount.top_mps
+        else:
+            v = mount.speed_mps(braking_from / mount.top_mps, t - stopped_at)
+        if stopped_at is not None and v == 0.0:
+            return person - chair, chair
+        chair += v * 0.1
+        person -= walker_mps * 0.1
+    return None, chair
+
+
+OFF = Limits(approach_mps=math.inf)
+
+
+def test_a_person_walking_at_the_chair_is_stopped_for_sooner():
+    for walker in (1.4, 2.0):
+        on, _ = meet(walker)
+        off, _ = meet(walker, limits=OFF)
+        # the chair stands still well short of them; without, they reach it first (a gap below
+        # 0). Short of obstacle_stop_m by up to a tick (0.1 s) of both coming closer.
+        assert on >= 0.45 and off < 0.0, (walker, on, off)
+
+
+def test_a_standing_obstacle_is_stopped_for_where_it_was_before():
+    # the core's own braking counts as its own travel, not as the obstacle coming nearer
+    on, at = meet(0.0)
+    off, at_off = meet(0.0, limits=OFF)
+    assert on is not None and on == pytest.approx(off) and at == pytest.approx(at_off)
+
+
+def test_depth_noise_alone_does_not_count_as_an_approach():
+    on, at = meet(0.0, noise_m=0.03)
+    off, at_off = meet(0.0, limits=OFF, noise_m=0.03)
+    assert on is not None and at == pytest.approx(at_off, abs=0.15)
+
+
+def test_with_no_top_speed_the_approach_is_not_counted():
+    # the scripted world and the phone: the device's own speed is not known to the core
+    still = Mount(reaction_s=0.4)
+    c, off = DecisionCore(mount=still), DecisionCore(Limits(approach_mps=math.inf), still)
+    for i in range(10):
+        for x in (c, off):
+            x.on_obstacle(ObstacleReport(NOW + i * 0.1, 0.9, LIDAR, 3.0 - 0.2 * i))
+            x.tick(NOW + i * 0.1)
+    assert c.tracks == {} and c.decision == off.decision
+
+
+def test_a_jump_to_another_obstacle_starts_its_trend_again():
+    c = DecisionCore(mount=BRAKES)
+    for i, d in enumerate((6.0, 6.0, 6.0, 2.0)):  # someone steps in front, nearer
+        c.on_obstacle(ObstacleReport(NOW + i * 0.1, 0.9, LIDAR, d))
+        c.tick(NOW + i * 0.1)
+    assert len(c.tracks[LIDAR]) == 1
+
+
 # ---- position and alert link
 
 
