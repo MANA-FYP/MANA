@@ -100,9 +100,26 @@ def has_stairs(mask_path: Path) -> bool:
     return bool((red == STAIR_ID).any())
 
 
+def dim(rgb: np.ndarray, rng: np.random.Generator, light=None, gamma=None, noise=None):
+    """A frame as a dim scene would give it: less light, a darker gamma curve, and the sensor
+    noise that grows as the light falls. Unset parts are drawn at random (training); DARK sets
+    all three for a fixed dark copy of the validation frames."""
+    light = rng.uniform(0.15, 1.0) if light is None else light
+    gamma = rng.uniform(1.0, 2.2) if gamma is None else gamma
+    noise = rng.uniform(0.0, 0.04) if noise is None else noise
+    out = np.power(rgb, gamma) * light
+    return np.clip(out + rng.normal(0.0, noise, out.shape), 0.0, 1.0)
+
+
+DARK = {"light": 0.3, "gamma": 2.0, "noise": 0.03}  # the fixed dark copy of the validation frames
+
+
 class StairSeg(Dataset):
-    def __init__(self, pairs: list[tuple[Path, Path]]):
-        self.pairs = pairs
+    """Frames and stair masks. low_light: a random dim version of each training frame half the
+    time. dark: every frame darkened the same way (DARK, seeded by its index), to score with."""
+
+    def __init__(self, pairs: list[tuple[Path, Path]], low_light=False, dark=False):
+        self.pairs, self.low_light, self.dark = pairs, low_light, dark
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -112,6 +129,10 @@ class StairSeg(Dataset):
         rgb = np.array(Image.open(fp).convert("RGB").resize((IMG, IMG))) / 255.0
         m = np.array(Image.open(mp).convert("RGB").resize((IMG, IMG), Image.NEAREST))
         seg = (m[..., 0] == STAIR_ID).astype(np.float32)
+        if self.dark:
+            rgb = dim(rgb, np.random.default_rng(i), **DARK)
+        elif self.low_light and np.random.random() < 0.5:
+            rgb = dim(rgb, np.random.default_rng())
         x = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32))
         return x, torch.from_numpy(seg)[None]
 
@@ -139,6 +160,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--cap", type=int, default=4000, help="max stair frames (+ equal non-stair)")
     ap.add_argument("--out", type=Path, default=Path("runs/stair_seg.pt"))
+    ap.add_argument(
+        "--low-light",
+        action="store_true",
+        help="train on dim versions of half the frames too, and keep the model best on the "
+        "plain and the dark validation frames together",
+    )
+    ap.add_argument(
+        "--eval",
+        type=Path,
+        metavar="WEIGHTS",
+        help="only score these weights on the validation frames, plain and dark",
+    )
     a = ap.parse_args(argv)
     torch.manual_seed(0)
     np.random.seed(0)
@@ -162,12 +195,20 @@ def main(argv: list[str] | None = None) -> int:
     va, tr = data[:nval], data[nval:]
     print(f"stair {len(stair)}  balanced {len(data)}  train {len(tr)} val {len(va)}", flush=True)
 
-    tl = DataLoader(StairSeg(tr), batch_size=16, shuffle=True, num_workers=8, drop_last=True)
     vl = DataLoader(StairSeg(va), batch_size=16, num_workers=4)
+    dark = DataLoader(StairSeg(va, dark=True), batch_size=16, num_workers=4)
     model = UNet(3).to(dev)
+    if a.eval:
+        model.load_state_dict(torch.load(a.eval, map_location=dev))
+        for name, dl in (("plain", vl), ("dark", dark)):
+            p, r, i = score(model, dl, dev)
+            print(f"{a.eval.name} {name}: precision {p:.3f} recall {r:.3f} IoU {i:.3f}")
+        return 0
+    train = StairSeg(tr, low_light=a.low_light)
+    tl = DataLoader(train, batch_size=16, shuffle=True, num_workers=8, drop_last=True)
     opt = torch.optim.Adam(model.parameters(), 1e-3)
     a.out.parent.mkdir(parents=True, exist_ok=True)
-    best = (0.0, 0.0, 0.0)
+    best = (-1.0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
     for ep in range(a.epochs):
         model.train()
         loss = torch.tensor(0.0)
@@ -177,18 +218,19 @@ def main(argv: list[str] | None = None) -> int:
             loss.backward()
             opt.step()
         p, r, i = score(model, vl, dev)
-        if i > best[2]:
-            best = (p, r, i)
+        dp, dr, di = score(model, dark, dev)
+        keep = (i + di) / 2 if a.low_light else i  # what the saved model is chosen on
+        if keep > best[0]:
+            best = (keep, (p, r, i), (dp, dr, di))
             torch.save(model.state_dict(), a.out)
         print(
             f"ep{ep + 1} loss {loss.item():.3f} val P {p:.3f} R {r:.3f} IoU {i:.3f}"
-            f" (best IoU {best[2]:.3f})",
+            f" | dark P {dp:.3f} R {dr:.3f} IoU {di:.3f}",
             flush=True,
         )
-    print(
-        f"best stair-pixel precision {best[0]:.3f} recall {best[1]:.3f} IoU {best[2]:.3f};"
-        f" saved {a.out}"
-    )
+    (p, r, i), (dp, dr, di) = best[1], best[2]
+    print(f"plain: precision {p:.3f} recall {r:.3f} IoU {i:.3f}")
+    print(f"dark:  precision {dp:.3f} recall {dr:.3f} IoU {di:.3f}; saved {a.out}")
     return 0
 
 
