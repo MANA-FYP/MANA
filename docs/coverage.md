@@ -21,9 +21,10 @@ Rows that an open pull request covers say so: they become **covered** when it me
 | Obstacle ahead (person, furniture) | lidar, detector, 3D camera | obstacle: stop at 0.8 m, slow from 2 m | `dark` | `test_obstacle_stops_close_and_slows_further_out` | #16 | covered; the stop holds through a noisy reading (#97) |
 | Moving people, crowds | detector (nearest only), lidar | obstacle, on the nearest only | none: scripted obstacles stand still | none | none | not covered: no motion or prediction |
 | Glass door | detector (`glass door` in YOLOE's names) | obstacle | none | none | none | partly: a detector class only. Real lidars can see through glass; Gazebo's cannot show that |
-| Narrow doorway | lidar, by bearing | none | none | none | none | not covered: nothing checks the width ahead against the device |
-| Obstacle at head height (table edge, branch) | detector (`table`); the lidar is one plane, about 0.6 m up in #92's model | obstacle, if the detector reports it | none | none | none | not covered: nothing compares an obstacle's height with the device or the user, which matters most for a cane user |
-| Low obstacle, under the lidar plane | 3D camera (a rise over 0.25 m is "an object, not a step") | none | none | `tests/test_depth_ground.py` | none | not covered: the 3D camera sees it, but `depth_node` sends only ground reports, never an obstacle |
+| Wall across the path | 3D camera (`structure.py`: every cell of the device's corridor blocked), lidar | obstacle | none | `tests/test_structure.py`, `test_a_wall_in_a_depth_frame_is_reported_as_an_obstacle_and_clear_ground_is_not` | none | covered by the structure pull request, as any obstacle |
+| Narrow doorway | 3D camera (`structure.py`: blocked on both sides of the corridor, the gap narrower than `device_width_m` plus a margin) | obstacle, labelled `narrow opening` with its width | `narrow_door` | `tests/test_structure.py` | none | covered by the structure pull request; the core says "Obstacle ahead", not that the door is too narrow |
+| Obstacle above the lidar (table edge, shelf, sign) | 3D camera (`structure.py`: anything in the corridor up to 2.03 m, the ADA headroom; `overhang` when its lowest edge is above 0.685 m), detector (`table`) | obstacle | `table_edge` | `tests/test_structure.py` | none | partly: the planned mount (1.0 m up, tilted 0.6 rad down) sees nothing above its own height, so a sign or branch at head height needs a camera tilted less or a sensor looking up |
+| Low obstacle, under the lidar plane | 3D camera (`structure.py`: from 3 cm high near, growing with the depth noise to 4 cm at 2 m and 9 cm at 3 m) | obstacle | `low_box` | `tests/test_structure.py` | none | covered by the structure pull request; a cable thinner than the depth noise is not seen |
 | Vehicle | detector (car, bus, truck, motorcycle) | obstacle | none | `tests/test_detection.py` | none | partly: as any obstacle |
 | Siren or horn | microphone (#47) | none yet | none | none | none | not covered: #47 is open |
 | Wet or slippery floor | wheel encoders against ground speed (slip) | slip: tracks | none | `test_wheel_slip_changes_to_tracks` | #15 | partly: no scenario. The simulation reads slip from the wheels against the ground speed, and in a turn against the gyro (#112) |
@@ -74,8 +75,9 @@ FR-4 is named in #48 only, without its text; the report's own list should be che
 
 These have no rule, and they are stated as limits in the report rather than tracked as issues for this version:
 - **Moving people and crowds:** the core acts on the nearest obstacle as it is now, with no prediction of where it is going.
-- **Narrow doorways:** nothing compares the width ahead with the device's width.
-- **Obstacles at head height** (a table edge, a branch) **and low obstacles under the lidar plane:** nothing compares an obstacle's height with the device or the user. The 3D camera sees a low object but `depth_node` reports only the ground.
+- **Obstacles at head height** (a sign, a branch): the 3D camera reads anything in the device's path up to 2.03 m, but the planned mount sees nothing above its own height (1.0 m). A camera tilted less, or a sensor looking up, is needed for these.
+- **What the 3D camera reports as an obstacle is named in the report** (`wall`, `obstacle`, `overhang`, `narrow opening`), but the core's message is "Obstacle ahead" for all of them.
+- **Glass walls and doors:** depth mostly sees through glass, so the 3D camera reports the space behind it; only the detector's `glass door` class covers it.
 - **Gravel and uneven ground:** nothing reads how rough the ground is. Only a steady tilt is held on tracks.
 - **Small potholes:** less missing ground than `hole_m` (0.3 m) is not a drop to the depth reader.
 - **Sirens and horns:** no microphone input yet (#47).

@@ -35,6 +35,37 @@ def render(ground, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0) -> np.nd
     return image
 
 
+def render_boxes(boxes, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0) -> np.ndarray:
+    """Depth of a flat floor with boxes on or above it: walls, door jambs, a table top, a box on
+    the floor. Each box is (ahead_from, ahead_to, left_from, left_to, bottom, top) in metres, in
+    the level frame under the camera (left is positive, REP 103). inf where a ray meets nothing
+    within far."""
+    v = np.arange(rows, dtype=np.float64)[:, None]
+    u = np.arange(cols, dtype=np.float64)[None, :]
+    yn, xn = (v - cam.cy) / cam.fy, (u - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    # a point at depth z along each pixel's ray: ahead z*a, left z*b, height h0 - z*d
+    a = np.broadcast_to(c - yn * s, (rows, cols))
+    b = np.broadcast_to(-xn, (rows, cols))
+    d = np.broadcast_to(yn * c + s, (rows, cols))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        best = np.where(d > 0, cam.height_m / d, np.inf)  # the floor
+        for x0, x1, y0, y1, z0, z1 in boxes:
+            near = np.zeros((rows, cols))
+            exit_ = np.full((rows, cols), np.inf)
+            for rate, lo, hi, at in ((a, x0, x1, 0.0), (b, y0, y1, 0.0), (-d, z0, z1, None)):
+                start = cam.height_m if at is None else at  # height starts at the camera's
+                t0, t1 = (lo - start) / rate, (hi - start) / rate
+                inside = (start >= lo) & (start <= hi)
+                t0 = np.where(rate == 0, np.where(inside, -np.inf, np.inf), t0)
+                t1 = np.where(rate == 0, np.where(inside, np.inf, -np.inf), t1)
+                near = np.maximum(near, np.minimum(t0, t1))
+                exit_ = np.minimum(exit_, np.maximum(t0, t1))
+            hit = (near <= exit_) & (near > 0)
+            best = np.where(hit & (near < best), near, best)
+    return np.where(best < far, best, np.inf)
+
+
 def noisy(image: np.ndarray, rng, noise=0.01, missing=0.1) -> np.ndarray:
     """Depth noise as a share of the depth, and a share of pixels with no reading."""
     out = image * (1.0 + rng.normal(0.0, noise, image.shape))
