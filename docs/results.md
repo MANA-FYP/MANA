@@ -1391,3 +1391,57 @@ python3 tools/estimate_sanpo_depth.py datasets/sanpo
 python3 tools/train_stair_seg.py --root datasets/sanpo --depth depth_dav2 --only-with depth_npy --out runs/rgb_dav2.pt
 python3 tools/train_stair_seg.py --root datasets/sanpo --low-light --out runs/dim.pt
 ```
+
+## Which way a door opens: its PUSH or PULL sign
+
+A wheelchair user can push a door open from the chair, but often cannot pull one; a blind user
+needs to know before reaching for the handle. The plainest cue is the door's own sign, so the
+phone demo (`--door-signs`) reads the text on a door the detector sees (its box grown by a
+quarter each way), or on the whole frame every 2 s when no door is boxed, as the detector finds
+doors poorly. The reader is RapidOCR (PaddleOCR's models on ONNX Runtime, Apache-2.0), capped at
+1.6 of the processor's cores (207 ms for a 640 x 480 frame). A word read as "push" or "pull",
+with neither both nor a doubtful reading (`demo/doorsign.py`), is told once: "Door ahead. Push to
+open." In a chair, a pull door is "It opens towards you: pull. You may need help." A door with
+no readable sign stays unknown: handles and push plates are not read.
+
+**Real photos (TextOCR, CC BY 4.0, `tools/eval_door_signs.py`).** Every photo whose labelled
+words say push or pull (80), and as many without (80), shrunk to the phone's 640 pixels wide:
+
+| | |
+|---|---|
+| Read the right way | 19 of 80 (24%) |
+| Read the wrong way | 0 |
+| Photos without the words read as push or pull | 0 of 80 |
+
+Most of these 80 are not doors: book pages, phone boxes, packets and screens, with small,
+vertical or styled lettering (a hand dryer's vertical PUSH; "PULL UP" read as one word). So the
+24% is how well small text in clutter is read, not door signs; the 0 wrong and 0 false are what
+carry over.
+
+**Door signs, drawn on (`tools/door_sign_sizes.py`).** GSD-S's test photos where a door fills at
+least a tenth of the picture (118) get a PUSH or PULL plate at handle height, in four common
+colourings, letters 5 to 40 pixels tall; another sign (EXIT, TOILET, OFFICE, ROOM 204) on each
+door counts false readings. A letter's height in pixels is given as the distance at which a 5 cm
+letter, typical of door signs, is that tall to a 66 degree phone camera. Plain signs, facing the
+camera, were read right at every size from 8 pixels (3.1 m) up. With `--hard` (the sign turned
+20 to 50 degrees away, its contrast worn down by up to 40%, the light down to 35%, the frame
+smeared 3 to 7 pixels sideways as walking does):
+
+| Letter (pixels) | About (m) | PUSH or PULL read right | Wrong way | Other signs read as one |
+|---|---|---|---|---|
+| 6 | 4.1 | 1% | 0 | 0 of 118 |
+| 8 | 3.1 | 10% | 0 | 0 of 118 |
+| 10 | 2.5 | 32% | 0 | 0 of 118 |
+| 12 | 2.1 | 64% | 0 | 0 of 118 |
+| 16 | 1.5 | 85% | 0 | 0 of 118 |
+| 20 | 1.2 | 98% | 0 | 0 of 118 |
+| 28 | 0.9 | 100% | 0 | 0 of 118 |
+
+The sign is read once a second while the user comes nearer, so in practice it is told by about
+1.5 m. These signs are drawn on, not filmed: the real doors of the route, their fonts and their
+glare, are the check still to make.
+
+```
+python3 tools/eval_door_signs.py --ann TextOCR_0.1_train.json TextOCR_0.1_val.json --images train_images --width 640
+python3 tools/door_sign_sizes.py --root datasets/gsds --hard
+```
