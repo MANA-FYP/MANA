@@ -121,3 +121,33 @@ def test_only_a_door_filling_a_tenth_of_the_picture_is_used():
     assert ds.door_box(seg) == (20, 10, 39, 59)
     seg[10:60, 39] = 0
     assert ds.door_box(seg) is None
+
+
+class SignBesideTheDoor:
+    """Nothing in the boxed door; PULL somewhere else in the frame."""
+
+    def __init__(self):
+        self.boxes = []
+
+    def read(self, jpeg, box=None):
+        self.boxes.append(box)
+        return (None, 0.0) if box is not None else ("pull", 0.9)
+
+
+def test_a_sign_outside_the_boxed_door_is_read_from_the_whole_frame():
+    import time
+
+    from demo import server
+    from demo.vision import Detection
+
+    reader = SignBesideTheDoor()
+    app = server.build_app(door_signs=reader)
+    server.door_sign(app, jpeg(), [Detection("door", 0.8, 10, 10, 100, 200)], 5.0)
+    for _ in range(100):
+        if not app["live"]["door_reading"]:
+            break
+        time.sleep(0.01)
+    assert reader.boxes == [(10, 10, 100, 200), None]
+    assert [d["text"] for d in app["mw"].decisions if d["kind"] == "door"] == [
+        "Door ahead. It opens towards you: pull. You may need help."
+    ]
