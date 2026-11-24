@@ -377,6 +377,15 @@ KIND_PRIORITY = {
     "switch": Priority.INFO,
     "coverage": Priority.INFO,
     "sound": Priority.WARNING,
+    "door": Priority.INFO,
+}
+# which way a door ahead opens, from its sign (demo/doorsign.py): on foot, and in a chair, where
+# a door that opens towards the user is hard to open alone
+DOOR_TEXT = {
+    ("push", True): "Door ahead. Push to open.",
+    ("pull", True): "Door ahead. Pull to open.",
+    ("push", False): "Door ahead. It opens away from you: push.",
+    ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
 
 
@@ -559,7 +568,7 @@ class Middleware:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
         detection also goes into the message queue, which says one at a time, urgent first."""
-        if kind in ("switch", "link", "position", "coverage", "sound"):  # stop and go may repeat
+        if kind in ("switch", "link", "position", "coverage", "sound", "door"):  # stop, go repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
                 return
@@ -1107,6 +1116,11 @@ class Middleware:
             }
         )
         del self.detections[:-10]
+
+    def on_door_sign(self, side: str, now: float | None = None) -> None:
+        """A door ahead says PUSH or PULL (demo/doorsign.py): told once, not again within 10 s."""
+        now = self.clock() if now is None else now
+        self._decide(now, "door", DOOR_TEXT[(side, self.on_foot)])
 
     def on_detections(
         self, found: list[tuple[str, float | None]], now: float | None = None

@@ -11,3 +11,4 @@ cryptography>=3.4     # the https certificate (--https)
 # transformers>=4.45 # depth from the camera image (--depth), with torch; about 100 MB model
 # torchaudio         # sirens and horns (--sounds), with torch and an EfficientAT checkout
 # opencv-python>=4.8 # any camera or a video file as the vision input (python -m demo.camera)
+# rapidocr_onnxruntime>=1.4  # PUSH or PULL read from door signs (--door-signs)

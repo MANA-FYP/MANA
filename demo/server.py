@@ -58,6 +58,7 @@ from demo import (  # noqa: E402
     access,
     caregiver,
     csi,
+    doorsign,
     floors,
     navigation,
     places,
@@ -114,6 +115,7 @@ def build_app(
     laptop_wifi=None,
     wifi_sensing=None,
     frame_ms=200,
+    door_signs=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
@@ -122,6 +124,7 @@ def build_app(
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
     app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
     app["frame_ms"] = frame_ms  # told to the phone: how often to send a camera frame
+    app["door_signs"] = door_signs  # reads PUSH or PULL on a door seen (demo.doorsign), or None
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -140,6 +143,8 @@ def build_app(
         "phone_seen": None,
         "snapshot": None,  # the last tick's state, for /api/status
         "stairs": None,  # the detector's last stairs, measured from the camera (#159)
+        "door_read_at": None,  # when a door's sign was last read: at most once a second
+        "door_reading": False,
     }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
@@ -545,6 +550,7 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
             mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
         mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
         stairs_seen(app, detections, w, h, now)
+        door_sign(app, jpeg, detections, now)
         frame["boxes"] = [
             {"label": d.label, "confidence": round(d.confidence, 2), "x1": d.x1, "y1": d.y1,
              "x2": d.x2, "y2": d.y2,
@@ -632,6 +638,42 @@ async def walk_geojson(request: web.Request) -> web.Response:
     disposition = 'attachment; filename="mana-walk.geojson"'
     return web.json_response(data, content_type="application/geo+json",
                              headers={"Content-Disposition": disposition})  # fmt: skip
+
+
+DOORS = ("door", "glass door")
+DOOR_CONFIDENCE = 0.3
+DOOR_READ_S = 1.0  # OCR takes longer than the detector: a door's sign is read this often
+# and the whole frame this often when no door is boxed: the detector finds doors poorly (about
+# 0.04 AP50 on SANPO), and on 80 real photos without the words the reader never said push or pull
+FRAME_READ_S = 2.0
+
+
+def door_sign(app: web.Application, jpeg: bytes, detections, now: float) -> None:
+    """Read the sign of the largest door in view, or the whole frame when none is boxed, in its
+    own thread so that the next frame does not wait for it; the middleware says which way the
+    door opens."""
+    reader, live = app["door_signs"], app["live"]
+    if reader is None or live["door_reading"]:
+        return
+    doors = [d for d in detections if d.label in DOORS and d.confidence >= DOOR_CONFIDENCE]
+    wait = DOOR_READ_S if doors else FRAME_READ_S
+    if live["door_read_at"] is not None and now - live["door_read_at"] < wait:
+        return
+    door = max(doors, key=lambda d: (d.x2 - d.x1) * (d.y2 - d.y1)) if doors else None
+    box = None if door is None else (door.x1, door.y1, door.x2, door.y2)
+    live["door_reading"], live["door_read_at"] = True, now
+
+    def read():
+        try:
+            side, _ = reader.read(jpeg, box)
+            if side is not None:
+                app["mw"].on_door_sign(side)
+        except Exception as e:  # one bad frame must not stop the reading
+            print(f"door sign: {e}", file=sys.stderr)
+        finally:
+            live["door_reading"] = False
+
+    threading.Thread(target=read, daemon=True).start()
 
 
 STAIRS_CONFIDENCE = 0.3  # YOLOE's stairs: no false alarm on 16 real level and ramp frames
@@ -916,6 +958,7 @@ def models_status(app: web.Application) -> dict:
         "speech": app["recognizer"] is not None,
         "depth": app["depth_model"] is not None,
         "sounds": app["listener"] is not None,
+        "door signs": app["door_signs"] is not None,
     }
 
 
@@ -1064,6 +1107,8 @@ def main(argv=None) -> None:
         help="weights of the stairs segmentation (tools/train_stair_seg.py); used instead of "
         "--stairs-model, on the GPU when there is one",
     )
+    p.add_argument("--door-signs", action="store_true",
+                   help="read PUSH or PULL on doors seen (needs rapidocr_onnxruntime)")  # fmt: skip
     p.add_argument("--sounds", metavar="EFFICIENTAT",
                    help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
@@ -1139,6 +1184,7 @@ def main(argv=None) -> None:
         frame_ms=max(30, a.frame_ms),
         laptop_wifi=wifi.LaptopWifi(),
         wifi_sensing=wifi_sensing_from(a),
+        door_signs=doorsign.DoorSign.load() if a.door_signs else None,
     )
     if a.record:
         print(f"recording the phone into {a.record}")
