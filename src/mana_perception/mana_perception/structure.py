@@ -17,8 +17,10 @@ How it works:
 4. A cell is occupied when enough of its points stand above that floor by more than the depth
    noise there. Stereo depth error grows with the square of the distance, so that height does too:
    about 3 cm out to 1.7 m, 4 cm at 2 m and 9 cm at 3 m.
-5. A bin where every cell is raised by no more than a riser is a step across the path: depth.py
-   reads it as a curb or stairs, and it is not an obstacle. Any other occupied cell blocks the path.
+5. A bin raised by no more than a riser across the path, from one side of the corridor to the
+   other (most of its cells, and the outermost ones on both sides), is a step: depth.py reads it as
+   a curb or stairs, and it is not an obstacle. Any other occupied cell blocks the path, so a low
+   box in the middle of the path is an obstacle however wide it is.
 
 The nearest blocked bin is the obstacle, labelled:
 - "wall": every cell across the corridor is blocked
@@ -67,6 +69,7 @@ class Settings:
     riser_max_m: float = 0.25  # as depth.py: a rise up to this across the path is a step
     step_share: float = 0.75  # of the cells seen, blocked by no more than a riser: a step (noise
     # far off leaves a few cells of a riser unblocked)
+    edge_check_m: float = 2.0  # nearer than this, a step must raise both edges of the corridor
     spill_m: float = 0.06  # a riser's depth noise reaches this far into the bin before it
     overhang_min_m: float = 0.685  # an object whose lowest edge is above this is an overhang
 
@@ -169,11 +172,17 @@ def find(
             # a riser far off has few points in some cells, but it raises them all; and a riser
             # whose face noise spills into the bin before it raises the floor itself just after
             touched = seen & (raised > 0)
-            after = max((x for x in low[i + 1 : i + 3] if x == x), default=NAN)
+            # a step runs across the whole path, so it raises the corridor's outermost seen cells
+            # on both sides; a low box in the middle leaves one of them flat. Checked out to
+            # edge_check_m: further off, stereo noise can leave a real riser's edge cell flat, and
+            # the bin is checked again on every frame as the device comes nearer
+            sides = np.flatnonzero(seen)
             edge = st.min_range_m + (i + 1) * st.bin_m  # where this bin ends
+            across_path = edge > st.edge_check_m or bool(touched[sides[0]] and touched[sides[-1]])
+            after = max((x for x in low[i + 1 : i + 3] if x == x), default=NAN)
             spill = float(np.percentile(ahead[a:b][hit], 5)) >= edge - st.spill_m
             rises = after - floor >= min_height(edge + st.bin_m, st)
-            if touched.sum() >= st.step_share * seen.sum() or (spill and rises):
+            if across_path and (touched.sum() >= st.step_share * seen.sum() or (spill and rises)):
                 continue  # a step across the path: depth.py's to read
         distance = float(np.percentile(ahead[a:b][hit], 5))  # its near face
         bearing = math.atan2(float(np.median(y[hit])), distance)

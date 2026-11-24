@@ -179,3 +179,37 @@ def test_the_simulated_chair_tells_the_depth_node_where_its_tracks_end():
 
     tracks = value("front_tracks_m", core) - value("depth_camera_m", core)
     assert value("body_m", launch) == pytest.approx(tracks)
+
+
+@pytest.mark.parametrize("width", [0.45, 0.5, 0.6])
+@pytest.mark.parametrize("height", [0.1, 0.2])
+def test_a_low_box_in_the_middle_of_the_path_is_an_obstacle_not_a_step(width, height):
+    """A low box narrower than the path raises most of the corridor's cells but leaves its edges
+    flat; it was taken for a step across the path, which the core does not stop for on tracks."""
+    boxes = [(1.5, 1.8, -width / 2, width / 2, 0.0, height)]
+    for body in (0.0, 0.75):
+        for image in frames(boxes, seeds=5):
+            found = st.find(image, syn.CAMERA, st.Settings(body_m=body))
+            assert found is not None and found.label == "obstacle", (width, height, body)
+
+
+CHAIR = st.Settings(body_m=0.75, device_width_m=0.8)  # as world.launch.py sets the node
+
+
+@pytest.mark.parametrize("width", [0.82, 0.85])
+def test_a_door_too_narrow_for_the_chair_is_a_narrow_opening(width):
+    boxes = [(1.5, 1.6, -W, -width / 2, 0.0, 2.5), (1.5, 1.6, width / 2, W, 0.0, 2.5)]
+    for image in frames(boxes, seeds=3):
+        found = st.find(image, syn.CAMERA, CHAIR)
+        assert found is not None and found.label == "narrow opening", (width, found)
+
+
+def test_a_door_wide_enough_for_the_chair_is_clear():
+    boxes = [(1.5, 1.6, -W, -0.5, 0.0, 2.5), (1.5, 1.6, 0.5, W, 0.0, 2.5)]
+    for image in frames(boxes, seeds=3):
+        assert st.find(image, syn.CAMERA, CHAIR) is None
+
+
+def test_the_simulated_chair_tells_the_depth_node_its_width():
+    launch = (ROOT / "src" / "mana_sim" / "launch" / "world.launch.py").read_text()
+    assert re.search(r'"device_width_m":\s*0\.8\b', launch)
