@@ -104,13 +104,13 @@ class BCResNet(nn.Module):
         return self.tail(self.blocks(self.head(x))).flatten(1)
 
 
-def mel():
-    """The log-mel front end: 30 ms windows every 10 ms, 40 bands."""
+def mel(device: str = "cpu"):
+    """The log-mel front end: 30 ms windows every 10 ms, 40 bands (on device, for training)."""
     import torchaudio
 
     spec = torchaudio.transforms.MelSpectrogram(
         sample_rate=RATE, n_fft=480, win_length=480, hop_length=160, n_mels=N_MELS
-    )
+    ).to(device)
     return lambda wave: torch.log(spec(wave) + 1e-6)
 
 
@@ -120,7 +120,8 @@ class Spotter:
     up to a second, so it is in several windows). Same use as speech.CommandRecognizer: feed()
     takes 16 kHz 16-bit PCM and gives (word, confidence) pairs. With stop_threshold, "stop" acts
     from that probability and the other words from threshold: a missed stop is the unsafe case
-    (docs/results.md, #46). Unset, stop has the same threshold as every word."""
+    (docs/results.md, #46). Unset, stop has the same threshold as every word; it is never higher,
+    so stop is never harder to give than the other words."""
 
     def __init__(
         self,
@@ -132,7 +133,8 @@ class Spotter:
     ):
         self.score = score  # 1 s of float sound -> a probability per class of LABELS
         self.threshold, self.hop, self.rearm = threshold, int(hop_s * RATE), int(rearm_s * RATE)
-        self.stop_threshold = threshold if stop_threshold is None else stop_threshold
+        stop = threshold if stop_threshold is None else stop_threshold
+        self.stop_threshold = min(stop, threshold)
         self.sound = np.zeros(0, dtype=np.float32)
         self.since_scored = 0  # samples heard since the last score
         self.since_said = self.rearm  # samples since a word was last given

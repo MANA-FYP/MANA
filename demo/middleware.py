@@ -33,7 +33,7 @@ from mana_core.decision import (
 )
 from mana_core.messages import Message, MessageQueue, direction
 
-from demo.navigation import Fix, Navigator, route_text, way_text
+from demo.navigation import COMPASS, Fix, Navigator, route_text, way_text
 from demo.vision import camera_trust_factor  # shared with the ROS detector node
 
 # ---- sensors the phone page lists
@@ -302,8 +302,26 @@ WORD_COMMANDS = {
 }
 
 MARK_PHRASES = ("mark this place", "mark the place", "mark this spot", "mark here")
+# a place picked on the supervisor's map, kept with the marks (so it is drawn and saved with them)
+DESTINATION = "destination"
+ARRIVED_M = 3.0  # nearer than this it is reached: about the error of a phone's GPS fix outdoors
+GUIDE_EVERY_M = 15.0  # the way is said again after this much walking
+# and sooner, but no more often than this, when it moves 2 hours round: indoors the compass can
+# swing that far with the person standing still
+GUIDE_TURN_GAP_S = 10.0
+GUIDE_TURN_DEG = 60.0  # 2 hours round on a clock face
+
+
+def _direction_deg(way: tuple[float, float | None, str]) -> float:
+    """The way's direction in degrees: from where the person faces, else from the compass. Not
+    rounded to clock hours, so a turn is compared in degrees (Komail, #188)."""
+    _, turn, compass = way
+    return turn % 360.0 if turn is not None else COMPASS.index(compass) * 45.0
+
 
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
+# a siren or a horn heard on the microphone (#47): said, not a decision of its own
+SOUND_TEXT = {"siren": "A siren nearby. Take care.", "horn": "A horn nearby. Take care."}
 # how urgent each kind of line is, when the core does not give a priority of its own
 KIND_PRIORITY = {
     "link": Priority.WARNING,
@@ -311,6 +329,7 @@ KIND_PRIORITY = {
     "mode": Priority.INFO,
     "switch": Priority.INFO,
     "coverage": Priority.INFO,
+    "sound": Priority.WARNING,
 }
 
 
@@ -428,6 +447,7 @@ class Middleware:
         self.decisions: deque = deque(maxlen=30)  # every decision MANA took, as text
         self._decision_n = 0
         self._decision_key: tuple | None = None
+        self._restarted: str | None = None  # "Starting again", said after the next tick's lines
         self._last_link: str | None = None
         self._last_position: str | None = None
         self._last_manual: bool | None = None
@@ -438,8 +458,12 @@ class Middleware:
         self._ever_active: set[str] = set()
         self._available_since: dict[str, float] = {}
         self._said_at: dict[str, float] = {}
+        # when the way to the destination was last said: the time, the distance walked by then and
+        # its clock hour
+        self._guided: tuple[float, float, float] | None = None
         self._speaking: tuple[str, float] | None = None  # the phrase being spoken right now
         self.detections: list[dict] = []
+        self.sounds: dict[str, tuple[float, float]] = {}  # hazard -> (score, when last heard)
         self._seen_candidate: tuple[frozenset | None, int] = (None, 0)
         self._seen_logged: frozenset | None = None
         self._last_active: set[str] | None = None
@@ -482,11 +506,12 @@ class Middleware:
         priority: Priority | None = None,
         state: str | None = None,
         why: str = "",
+        say: bool = True,
     ) -> None:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
         detection also goes into the message queue, which says one at a time, urgent first."""
-        if kind in ("switch", "link", "position", "coverage"):  # stop and go may repeat
+        if kind in ("switch", "link", "position", "coverage", "sound"):  # stop and go may repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
                 return
@@ -501,7 +526,7 @@ class Middleware:
                 **({"state": state, "why": why} if state else {}),
             }
         )
-        if kind != "detection":  # a detection is shown as a box, not said
+        if kind != "detection" and say:  # a detection is shown as a box, not said
             level = priority if priority is not None else KIND_PRIORITY.get(kind, Priority.WARNING)
             self.queue.push(Message(text, level, True, now), now)
 
@@ -732,6 +757,86 @@ class Middleware:
         self._decide(now, "way", text, Priority.INFO)
         return text
 
+    def set_destination(self, east: float, north: float, now: float | None = None) -> str:
+        """A place picked on the supervisor's map, in metres east and north of the start: its way
+        is said now, again as the person walks, and "arrived" when they are there."""
+        now = self.clock() if now is None else now
+        track = self.nav.track
+        track.marks[DESTINATION] = (float(east), float(north))
+        way = track.way_to(DESTINATION)
+        if way is not None and way[0] < ARRIVED_M:  # said once, not "set" and then "arrived"
+            track.marks.pop(DESTINATION)
+            self._guided = None
+            text = "That place is where you are now."
+            self._decide(now, "way", text, Priority.INFO)
+            return text
+        return self.say_destination(now, "Destination set. ")
+
+    def clear_destination(self, now: float | None = None) -> None:
+        now = self.clock() if now is None else now
+        if self.nav.track.marks.pop(DESTINATION, None) is not None:
+            self._guided = None
+            self._decide(now, "way", "Destination cleared.", Priority.INFO)
+
+    def say_destination(self, now: float | None = None, lead: str = "") -> str:
+        """Say how far the destination is and its direction, as a clock face."""
+        now = self.clock() if now is None else now
+        track = self.nav.track
+        way = track.way_to(DESTINATION)
+        if way is None:
+            text = "No destination yet. The supervisor picks one on the map."
+        else:
+            text = lead + way_text(way, DESTINATION)
+            self._guided = (now, track.distance_m, _direction_deg(way))
+        self._decide(now, "way", text, Priority.INFO)
+        return text
+
+    def _guide(self, now: float) -> None:
+        """While a destination is set: arrived, or the way again after a stretch of walking, or
+        sooner when it has moved 60 degrees, 2 hours round (a turn the wrong way)."""
+        track = self.nav.track
+        way = track.way_to(DESTINATION)
+        if way is None:
+            return
+        if way[0] < ARRIVED_M:
+            track.marks.pop(DESTINATION)
+            self._guided = None
+            self._decide(now, "way", "You have arrived at the destination.", Priority.INFO)
+            return
+        if self._guided is None:
+            self.say_destination(now)
+            return
+        said_t, said_walked, said_deg = self._guided
+        apart = abs(_direction_deg(way) - said_deg) % 360.0
+        turned = min(apart, 360.0 - apart) >= GUIDE_TURN_DEG and now - said_t >= GUIDE_TURN_GAP_S
+        if turned or track.distance_m - said_walked >= GUIDE_EVERY_M:
+            self.say_destination(now)
+
+    def start_again(self, now: float | None = None) -> None:
+        """Forget the walk so far: the path, the steps, the marks and the destination, and what was
+        said and decided. The track starts again where the person is now, tied to the map at the
+        next GPS fix. The sensors, the core and the link are kept."""
+        now = self.clock() if now is None else now
+        heading = self.nav.track.heading
+        self.nav = Navigator()
+        if heading is not None:  # which way the phone faces is kept: no arrow lost till it turns
+            self.nav.track.on_heading(heading)
+        self._guided = None
+        for kept in (self.decisions, self.heard, self.log, self.inputs):
+            kept.clear()
+        self._said_at.clear()
+        # what was waiting to be said is forgotten too, so the line below is not held behind the
+        # end of the last one and dropped by the next decision; a stop waiting is still said
+        urgent = [m for m in self.queue.waiting if m.priority >= Priority.URGENT]
+        self.queue = MessageQueue()
+        for m in urgent:
+            self.queue.push(m, m.stamp)
+        self._decision_key = None  # the current decision is written again, at the top
+        # written now, but said after the lines the next tick writes again: pushed first, the
+        # next decision pushed would drop it from the queue, and it was never said (#191)
+        self._restarted = "Starting again from here."
+        self._decide(now, "way", self._restarted, Priority.INFO, say=False)
+
     def set_on_foot(self, on_foot: bool, now: float | None = None) -> None:
         """How the phone is carried: by a person on foot, or on the device."""
         now = self.clock() if now is None else now
@@ -860,9 +965,20 @@ class Middleware:
         elif "mark" in words and set(words) & {"where", "way", "back", "find"}:
             self.way_back(now)
             found.append("Way back")
+        elif DESTINATION in words and set(words) & {"where", "way", "find", "how"}:
+            self.say_destination(now)
+            found.append("Destination")
         self.inputs.append(
             {"t": round(self._since_start(now), 1), "text": text, "command": ", ".join(found)}
         )
+
+    def on_sounds(self, heard: dict[str, float], now: float | None = None) -> None:
+        """Sirens and horns heard in the last 10 s of the microphone (demo.sounds), with their
+        scores. Each is said once, and not again within 10 s while it goes on."""
+        now = self.clock() if now is None else now
+        for hazard, score in heard.items():
+            self.sounds[hazard] = (score, now)
+            self._decide(now, "sound", SOUND_TEXT[hazard])
 
     def on_word(
         self,
@@ -1011,6 +1127,10 @@ class Middleware:
                 }
             )
         sentence = self._watch(now, d, self.fired_rule(), link, pos, sensors)
+        self._guide(now)
+        if self._restarted is not None:
+            self.queue.push(Message(self._restarted, Priority.INFO, True, now), now)
+            self._restarted = None
         if self.directions:
             if ahead := direction(self.core, now):
                 self.queue.push(ahead, now)
@@ -1068,5 +1188,10 @@ class Middleware:
                 "trust": self.link.trust(now),
             },
             "detections": self.detections[-5:],
+            "sounds": [
+                {"hazard": h, "score": s, "t": round(self._since_start(t), 1)}
+                for h, (s, t) in self.sounds.items()
+                if now - t < 4.0
+            ],
             "latency": dict(self.latency),
         }

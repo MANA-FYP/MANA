@@ -21,6 +21,43 @@ SATELLITE = (
 )
 AGENT = "MANA-FYP-demo/1.0 (+https://github.com/MANA-FYP/MANA)"
 FRESH_S = 7 * 24 * 3600  # OSM's tiles say they keep a week
+# when and by what the satellite picture at a point was taken (Esri's World Imagery metadata)
+IMAGERY_INFO = (
+    "https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/identify"
+    "?geometry={lon},{lat}&geometryType=esriGeometryPoint&sr=4326&layers=all&tolerance=2"
+    "&mapExtent={lon0},{lat0},{lon1},{lat1}&imageDisplay=800,600,96&returnGeometry=false&f=json"
+)
+MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+
+
+def imagery_info(reply: dict) -> dict | None:
+    """The capture date, source and resolution of the imagery at a point, from Esri's identify
+    reply: the newest dated layer that answers. None when no layer gives a date."""
+    best = None
+    for r in reply.get("results", []):
+        a = r.get("attributes", {})
+        day = str(a.get("DATE (YYYYMMDD)", ""))
+        if len(day) != 8 or not day.isdigit():
+            continue
+        if best is None or day > best[0]:
+            best = (day, a)
+    if best is None:
+        return None
+    day, a = best
+    source = " ".join(
+        str(a[k]) for k in ("SOURCE", "SOURCE_INFO") if a.get(k) not in (None, "", "Null")
+    )
+    try:
+        res = round(float(a.get("RESOLUTION (M)")), 2)
+    except (TypeError, ValueError):
+        res = None
+    return {
+        "date": f"{int(day[6:])} {MONTHS[int(day[4:6]) - 1]} {day[:4]}",
+        "ymd": day,
+        "source": source or None,
+        "resolution_m": res,
+        "release": a.get("ReleaseName"),
+    }
 
 
 class TileCache:

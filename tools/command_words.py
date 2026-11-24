@@ -32,12 +32,24 @@ With --held-out WORDS, the false activations on those words are given apart: wor
 never saw (tools/train_commands.py --hold-out), against the ones it was trained to reject.
 
 The clips are aligned 1 s recordings with the word in them; the demo's Spotter listens every
-0.25 s to a running stream, which these numbers do not cover.
+0.25 s to a running stream. With --stream THRESHOLD..., a trained model is run that way: the
+clips one after another, each after --gap seconds of silence (or of the same noise), fed to the
+demo's own Spotter in 0.25 s pieces. A word it gives goes to the clip its 1 s window overlaps
+most; a word given while no clip is in the window is counted on its own, as is a word given
+again for the same clip. Only one window per gap lies wholly in it, so the words in the gaps are a
+floor for noise alone. Noise alone is also measured directly: each noise file's test quarter
+streamed with no clips, at the clips' average speech level less the --snr. With --stop-at P...,
+stop also acts from each P (0: any probability) while the other words keep the threshold. Each
+window's probabilities are kept in stream_windows_<sound>.npz beside the CSVs, and used again for
+the same model and gap, so other thresholds take seconds, not the hour of scoring.
+
+    python tools/command_words.py --sc datasets/speech_commands --kws kws8/model.pt --stream 0.85
 """
 
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
 import random
 import sys
@@ -82,11 +94,15 @@ def official_clips(folder: Path) -> list[tuple[str, Path]]:
     return [(wav.parent.name, wav) for wav in sorted(folder.glob("*/*.wav"))]
 
 
-def mix(speech: np.ndarray, noise: np.ndarray, snr_db: float) -> np.ndarray:
-    """speech with noise added so that the speech's power is snr_db above the noise's."""
+def mix(
+    speech: np.ndarray, noise: np.ndarray, snr_db: float, level: np.ndarray | None = None
+) -> np.ndarray:
+    """speech with noise added so that the speech's power is snr_db above the noise's. With
+    level, that sound's power is used instead (a clip, when speech is the clip and its gap)."""
     s = speech.astype(np.float64)
     n = noise[: s.size].astype(np.float64)
-    ps, pn = np.mean(s**2), np.mean(n**2)
+    ps = np.mean((s if level is None else level.astype(np.float64)) ** 2)
+    pn = np.mean(n**2)
     if pn == 0 or ps == 0:
         return speech
     n *= np.sqrt(ps / (pn * 10 ** (snr_db / 10)))
@@ -124,6 +140,9 @@ def summary(rows: list[dict], held_out: frozenset = frozenset()) -> dict:
         "stop_as_go": sum(r["heard"] == "go" for r in stop),
         "stop_as_other": sum(r["outcome"] == "wrong" and r["heard"] != "go" for r in stop),
         "go_as_stop": sum(r["label"] == "go" and r["heard"] == "stop" for r in said),
+        # another word taken for the two that move or stop the device
+        "other_as_go": sum(r["heard"] == "go" for r in other),
+        "other_as_stop": sum(r["heard"] == "stop" for r in other),
         "held": len(held),
         "held_false": count(held, "false"),
     }
@@ -257,6 +276,169 @@ def run(
     return rows
 
 
+# Raise when stream_sound, mix or the noise changes: windows kept by an older version are then
+# scored again rather than read back for a stream they no longer match
+STREAM_VERSION = 1
+
+
+def stream_order(clips, seed: int = 0) -> list:
+    """The clips in the shuffled order stream_sound plays them (its rng's first draw)."""
+    order = list(clips)
+    random.Random(seed).shuffle(order)
+    return order
+
+
+def stream_sound(sc: Path, clips, snr: float | None, gap_s: float = 1.0, seed: int = 0):
+    """The clips as one running stream, in a shuffled order: each after gap_s of silence (or of
+    noise, snr_db below that clip's speech), padded to 1 s. Yields (label, path, gap + clip)."""
+    rng = random.Random(seed)
+    noises = [
+        noise_part(read_wav(p), "test") for p in sorted((sc / "_background_noise_").glob("*.wav"))
+    ]
+    order = list(clips)
+    rng.shuffle(order)  # the first draw, so stream_order gives the same order
+    gap = np.zeros(int(gap_s * TARGET_RATE), dtype=np.int16)
+    for label, path in order:
+        said = read_wav(path)
+        clip = np.pad(said, (0, max(0, TARGET_RATE - said.size)))[:TARGET_RATE]
+        segment = np.concatenate([gap, clip])
+        if snr is not None:  # the level of the speech as recorded, as run() mixes it
+            noise = rng.choice(noises)
+            start = rng.randrange(0, noise.size - segment.size)
+            segment = mix(segment, noise[start:], snr, level=said)
+        yield label, path, segment
+
+
+def noise_alone_sound(sc: Path, clips, snr: float, hop_s: float = 0.25):
+    """Each noise file's test quarter, cut to whole hops, with no clips: noise alone, snr_db below
+    the clips' average speech power. Yields (label, path, noise), as stream_sound does."""
+    power = np.mean([np.mean(read_wav(path).astype(np.float64) ** 2) for _, path in clips])
+    level = np.full(1, np.sqrt(power))  # a sound of that power, for mix()
+    hop = int(hop_s * TARGET_RATE)
+    for path in sorted((sc / "_background_noise_").glob("*.wav")):
+        noise = noise_part(read_wav(path), "test")
+        noise = noise[: noise.size - noise.size % hop]
+        yield "_noise_", path, mix(np.zeros_like(noise), noise, snr, level=level)
+
+
+def stream_scores(segments, score, hop_s: float = 0.25):
+    """Feed the stream to the demo's own Spotter in hop_s pieces, as the phone's sound comes, and
+    keep each window's probabilities, to replay at any threshold (stream_rows). Returns the
+    probabilities, the number of pieces fed, and each clip's (label, path, start, end) sample."""
+    from demo.kws import Spotter
+
+    probs = []
+    spotter = Spotter(lambda wave: probs.append(score(wave)) or probs[-1], threshold=2.0)
+    hop = int(hop_s * TARGET_RATE)
+    fed, pieces, spans = 0, 0, []
+    for label, path, segment in segments:
+        assert segment.size % hop == 0, "the gap and the clip must be whole hops"
+        start = fed + segment.size - TARGET_RATE
+        spans.append((label, path, start, start + TARGET_RATE))
+        for i in range(0, segment.size, hop):
+            piece = segment[i : i + hop]
+            spotter.feed(piece.tobytes())
+            fed, pieces = fed + piece.size, pieces + 1
+    return np.array(probs), pieces, spans
+
+
+def stream_scores_batched(segments, score_many, hop_s: float = 0.25, batch: int = 256):
+    """stream_scores without the Spotter in the loop: the same windows (the newest second, every
+    hop_s once a second has come, as Spotter.feed takes them), scored batch at a time by
+    score_many (windows, a float32 array of rows) for speed. Returns what stream_scores does."""
+    hop = int(hop_s * TARGET_RATE)
+    sound = np.zeros(0, dtype=np.float32)
+    fed, pieces, spans, windows, probs = 0, 0, [], [], []
+    for label, path, segment in segments:
+        assert segment.size % hop == 0, "the gap and the clip must be whole hops"
+        start = fed + segment.size - TARGET_RATE
+        spans.append((label, path, start, start + TARGET_RATE))
+        for i in range(0, segment.size, hop):
+            piece = segment[i : i + hop].astype("<i2").astype(np.float32) / 32768
+            sound = np.concatenate([sound, piece])[-TARGET_RATE:]
+            fed, pieces = fed + piece.size, pieces + 1
+            if sound.size == TARGET_RATE:
+                windows.append(sound)
+                if len(windows) == batch:
+                    probs.extend(score_many(np.stack(windows)))
+                    windows = []
+    if windows:
+        probs.extend(score_many(np.stack(windows)))
+    return np.array(probs), pieces, spans
+
+
+def batch_scorer(checkpoint: Path):
+    """The model of a checkpoint, as Spotter.load builds it, scoring many windows at once."""
+    import torch
+
+    from demo import kws
+
+    saved = torch.load(checkpoint, map_location="cpu")
+    model = kws.BCResNet(saved["tau"])
+    model.load_state_dict(saved["state"])
+    model.eval()
+    features = kws.mel()
+
+    def score_many(windows: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            x = features(torch.from_numpy(windows)).unsqueeze(1)
+            return torch.softmax(model(x), 1).numpy()
+
+    return score_many
+
+
+def stream_rows(
+    probs, pieces, spans, threshold: float, stop_at: float | None = None, hop_s: float = 0.25
+) -> tuple[list[dict], list[str]]:
+    """The kept probabilities replayed through a new Spotter at a threshold; with stop_at (no
+    more than the threshold), a stop acts from that probability, 0 for any. Each word it gives
+    goes to the clip its 1 s window overlaps most.
+    Returns a row per clip (as run() gives, with "extra": the words given after the first) and the
+    words given while no clip was in the window (noise or silence alone)."""
+    from demo.kws import LABELS, Spotter
+
+    stop = LABELS.index("stop")
+    scored = iter(probs)
+    last = [None]  # the window just scored, as the model gave it (before stop is lifted)
+
+    def score(_):
+        p = last[0] = next(scored)
+        if stop_at is not None and int(np.argmax(p)) == stop and p[stop] >= stop_at:
+            p = p.copy()
+            p[stop] = 1.0
+        return p
+
+    spotter, hop = Spotter(score, threshold), int(hop_s * TARGET_RATE)
+    starts = [s for _, _, s, _ in spans]
+    heard = [[] for _ in spans]
+    alone = []
+    silent = np.zeros(hop, dtype=np.int16).tobytes()
+    for n in range(1, pieces + 1):
+        for word, _ in spotter.feed(silent):
+            p = float(last[0][LABELS.index(word)])  # the model's own probability, kept in the CSV
+            end = n * hop
+            near = range(max(bisect.bisect_right(starts, end - TARGET_RATE) - 1, 0),
+                          bisect.bisect_left(starts, end))  # fmt: skip
+            overlap = {i: min(end, spans[i][3]) - max(end - TARGET_RATE, spans[i][2]) for i in near}
+            best = max(overlap, key=overlap.get, default=None)
+            if best is None or overlap[best] <= 0:
+                alone.append(word)
+            else:
+                heard[best].append((word, p))
+    rows = [
+        {
+            "clip": f"{path.parent.name}/{path.name}",
+            "label": label,
+            "heard": h[0][0] if h else "",
+            "conf": round(h[0][1], 3) if h else "",
+            "outcome": outcome(label, h),
+            "extra": len(h[1:]),
+        }
+        for (label, path, _, _), h in zip(spans, heard, strict=True)
+    ]
+    return rows, alone
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--sc", type=Path, help="Speech Commands v2, unpacked")
@@ -279,12 +461,24 @@ def main(argv=None) -> int:
                    help="the authors' test set, speech_commands_test_set_v0.02")  # fmt: skip
     p.add_argument("--held-out", nargs="*", default=[],
                    help="words left out of training (train_commands.py --hold-out)")  # fmt: skip
+    p.add_argument("--stream", type=float, nargs="+", metavar="THRESHOLD",
+                   help="BC-ResNet on a running stream through the demo's Spotter, at these "
+                        "thresholds, each also with stop from each --stop-at")  # fmt: skip
+    p.add_argument("--stop-at", type=float, nargs="+", default=[0.0], metavar="P",
+                   help="--stream: stop acts from this probability (0: any), each no more "
+                        "than the threshold it goes with")  # fmt: skip
+    p.add_argument("--gap", type=float, default=1.0,
+                   help="--stream: seconds of silence or noise before each clip")  # fmt: skip
     a = p.parse_args(argv)
     if a.choose:
         return choose_report(a.choose)
     if not a.sc or not (a.vosk or a.kws):
         p.error("--sc and one of --vosk or --kws are needed")
     out = a.out or a.sc
+    if a.stream:
+        if not a.kws:
+            p.error("--stream needs --kws")
+        return stream_report(a, out)
     if a.vosk:
         listen, prefix = vosk_listener(a.vosk), "vosk"
     else:
@@ -326,6 +520,120 @@ def main(argv=None) -> int:
     if held:
         said = [f"{sound} {pct(s['held_false'], s['held'])}" for sound, s in results]
         print("\nWords left out of training: " + "; ".join(said))
+    return 0
+
+
+def save_windows(path: Path, model: Path, gap_s: float, probs, pieces, spans, seed: int = 0):
+    """Keep each window's probabilities, so other thresholds can be scored without the hour of
+    scoring again; with what made the stream (the model's size and time, the gap, the clips in
+    order, the seed and STREAM_VERSION), so windows of another stream are not taken for them."""
+    st = Path(model).stat()
+    np.savez_compressed(
+        path,
+        probs=probs,
+        pieces=pieces,
+        labels=np.array([s[0] for s in spans]),
+        paths=np.array([str(s[1]) for s in spans]),
+        bounds=np.array([(s[2], s[3]) for s in spans], dtype=np.int64),
+        model=np.array([st.st_size, st.st_mtime_ns], dtype=np.int64),
+        gap=np.array(gap_s),
+        seed=np.array(seed),
+        version=np.array(STREAM_VERSION),
+    )
+
+
+def load_windows(path: Path, model: Path, gap_s: float, order, seed: int = 0):
+    """The kept windows, or (None, None, None) when there are none for this model, gap, seed,
+    stream version and these clips in this order (order: stream_order's (label, path) list)."""
+    if not path.exists():
+        return None, None, None
+    st = Path(model).stat()
+    with np.load(path) as k:
+        same = (
+            "version" in k
+            and int(k["version"]) == STREAM_VERSION
+            and int(k["seed"]) == seed
+            and k["model"].tolist() == [st.st_size, st.st_mtime_ns]
+            and float(k["gap"]) == gap_s
+            and k["paths"].tolist() == [str(p) for _, p in order]
+        )
+        if not same:
+            return None, None, None
+        spans = [
+            (str(lab), Path(str(p)), int(b[0]), int(b[1]))
+            for lab, p, b in zip(k["labels"], k["paths"], k["bounds"], strict=True)
+        ]
+        return k["probs"], int(k["pieces"]), spans
+
+
+def stream_report(a, out: Path) -> int:
+    """--stream: the clips as a running stream, through the demo's Spotter, at each threshold."""
+    from demo import kws
+
+    spotter = kws.Spotter.load(str(a.kws))
+    if spotter is None:
+        print(f"cannot load {a.kws}", file=sys.stderr)
+        return 1
+    score_many = batch_scorer(a.kws)  # the Spotter's windows, scored many at a time
+    clips = official_clips(a.official) if a.official else test_clips(a.sc, a.list)
+    part = "official_" if a.official else "" if a.list == "testing_list.txt" else "val_"
+    held = frozenset(a.held_out)
+    pct = lambda n, d: f"{n} ({n / d:.1%})" if d else "-"  # noqa: E731
+    settings = [(t, None) for t in a.stream]
+    settings += [(t, s) for t in a.stream for s in a.stop_at if s <= t]
+
+    def name_of(threshold: float, stop_at: float | None) -> str:
+        if stop_at is None:
+            return f"{threshold:g}"
+        return (
+            f"{threshold:g}, stop at any"
+            if stop_at == 0
+            else f"{threshold:g}, stop from {stop_at:g}"
+        )
+
+    print(
+        "| Sound | Setting | Right | Wrong | Missed | False activations | of which held-out words "
+        '| Other words heard as "go" | Other words heard as "stop" | Stop missed '
+        '| Stop heard as "go" | Words in the gaps |'
+    )
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for snr in [None, *a.snr]:
+        name = "clean" if snr is None else f"snr{snr:g}"
+        sound = "clean" if snr is None else f"noise at {snr:g} dB"
+        kept = out / f"{part}stream_windows_{name}.npz"
+        probs, pieces, spans = load_windows(kept, a.kws, a.gap, stream_order(clips))
+        if probs is None:
+            segments = stream_sound(a.sc, clips, snr, a.gap)
+            probs, pieces, spans = stream_scores_batched(segments, score_many)
+            save_windows(kept, a.kws, a.gap, probs, pieces, spans)
+        for threshold, stop_at in settings:
+            rows, alone = stream_rows(probs, pieces, spans, threshold, stop_at)
+            tag = f"{threshold:g}" + (
+                "" if stop_at is None else "s" if stop_at == 0 else f"s{stop_at:g}"
+            )
+            with open(out / f"{part}stream_{tag}_{name}.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(rows[0]))
+                w.writeheader()
+                w.writerows(rows)
+            s = summary(rows, held)
+            print(f"| {sound} | {name_of(threshold, stop_at)} | {pct(s['right'], s['said'])} "
+                  f"| {pct(s['wrong'], s['said'])} | {pct(s['missed'], s['said'])} "
+                  f"| {pct(s['false'], s['other'])} | {pct(s['held_false'], s['held'])} "
+                  f"| {s['other_as_go']} | {s['other_as_stop']} "
+                  f"| {pct(s['stop_missed'], s['stop'])} | {s['stop_as_go']} "
+                  f"| {len(alone)} in {len(spans) * a.gap / 3600:.1f} h |",
+                  flush=True)  # fmt: skip
+    if a.snr:
+        print("\nNoise alone (each noise file's test quarter, no clips):")
+    for snr in a.snr:
+        probs, pieces, _ = stream_scores_batched(noise_alone_sound(a.sc, clips, snr), score_many)
+        hours = pieces * 0.25 / 3600
+        said = []
+        for threshold, stop_at in settings:
+            _, alone = stream_rows(probs, pieces, [], threshold, stop_at)
+            n = len(alone)
+            said.append(f"{name_of(threshold, stop_at)}: {n} ({n / hours:.0f} an hour)")
+        print(f"- {snr:g} dB, {hours * 60:.1f} min: " + "; ".join(said), flush=True)
     return 0
 
 

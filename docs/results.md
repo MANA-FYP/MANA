@@ -175,6 +175,17 @@ Not tested in this world: the switch from GPS to the lidar map, which needs the 
 - **Coming back:** 5.1 to 5.3 s after each outage ended, its `back_s` of 5 s.
 - **The failure in run 1:** the extra two changes were not in the outage. All times here are the simulation clock, which both `fault_script`'s log ("clock") and `/position` use: the outages ran from 46.5 to 76.5 s and from 106.5 to 136.5 s. GPS was taken back at 81.7 s, then left again at 85.4 s and taken back at 90.5 s, between the two outages, with the GPS on. Leaving needs 1.5 s with no good fix. Run 1 did not log the fixes, so the cause is not known.
 - **Fix logging since run 3:** the script now logs them (`fix.csv`). In runs 3 and 4, fixes outside the outages never came more than 0.2 s apart (5 Hz). Runs 1, 3 and 4 all ran alongside other CPU-heavy jobs on the laptop, so load alone does not explain it.
+- **Five more runs, no flap (#201):** played on 18 November 2026 on GitHub's machines (`heavy-runs.yml`, one run on each 4-core machine, the map from #43 as the release `maps-indoor-sim`), with the fixes logged. All five pass:
+
+  | Run | Outage 1: to the lidar map after / changes / GPS back after its end | Outage 2 | Result |
+  |---|---|---|---|
+  | 9 | 1.6 s / 2 / 5.2 s | 1.6 s / 2 / 5.1 s | pass |
+  | 10 | 1.5 s / 2 / 5.2 s | 1.5 s / 2 / 5.1 s | pass |
+  | 11 | 1.6 s / 2 / 5.1 s | 1.6 s / 2 / 5.3 s | pass |
+  | 12 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+  | 13 | 1.4 s / 2 / 5.3 s | 1.6 s / 2 / 5.1 s | pass |
+
+  Outside the outages the fixes never came more than 0.2 s apart in any of them. So the flap of run 1 has not come back in 5 runs on other machines (12 of 13 runs pass in all), and its cause is still not known: it is the one fail in 26 outages.
 
 ## Lidar localisation indoors (#43)
 
@@ -497,7 +508,129 @@ The official set's 4,074 command clips give the same within 0.6 points, and its 
 - **#46's 95% at 10 dB is not met** at any threshold here: the top class gives 94.3% (94.6% on the official set).
 - **Time:** a median of 32 to 45 ms per clip on this laptop's CPU.
 
-These favour 0.85 with stop at any over the demo's 0.9. The demo is not changed here: its `Spotter` listens to a running stream every 0.25 s, which these aligned clips do not cover, and a stop at any probability should be tried on a stream first. One false stop is safe, but many would make the device unusable.
+On aligned clips these favour 0.85 with stop at any over the demo's 0.9. But the demo's `Spotter` listens to a running stream every 0.25 s, which aligned clips do not cover, and on a stream (below) a stop at any probability stops the device for noise. One false stop is safe, but many would make the device unusable.
+
+**On a running stream** (`--stream 0.85 0.9`): the 11,005 test clips one after another, in a shuffled order, each after 1 s of silence (or of the same noise), fed to the demo's own `Spotter` in 0.25 s pieces as the phone's sound comes. A word it gives goes to the clip its 1 s window overlaps most. A word given while no clip is in the window is counted in the gaps (3.1 hours of them per run). Noise alone is also streamed on its own, with no clips (below).
+
+| Sound | Setting | Right | Wrong | Missed | False activations (of 6,931) | of which held-out words (of 818) | Other words heard as "go" | Other words heard as "stop" | Stop missed (of 411) | Stop heard as "go" | Words in the gaps |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| clean | 0.9, the demo's | 90.3% (3,679) | 0.6% | 9.1% | 6.4% (447) | 9.4% | 34 | 15 | 2.7% (11) | 0 | 0 |
+| clean | 0.9, stop at any | 90.3% (3,677) | 1.1% | 8.6% | 9.6% (665) | 11.2% | 34 | 245 | 0.2% (1) | 0 | 0 |
+| clean | 0.85 | 92.3% (3,760) | 1.0% | 6.8% | 9.6% (666) | 15.4% | 54 | 19 | 1.5% (6) | 0 | 0 |
+| clean | 0.85, stop at any | 92.1% (3,751) | 1.4% | 6.5% | 12.6% (875) | 17.2% | 54 | 243 | 0.2% (1) | 0 | 0 |
+| noise at 10 dB | 0.9, the demo's | 82.5% | 1.0% | 16.5% | 6.1% (421) | 9.7% | 20 | 22 | 9.0% (37) | 0 | 0 |
+| noise at 10 dB | 0.9, stop at any | 82.2% | 2.9% | 14.9% | 13.5% (935) | 16.5% | 19 | 563 | 2.2% (9) | 0 | 48 |
+| noise at 10 dB | 0.85 | 85.9% | 1.5% | 12.5% | 9.4% (651) | 14.3% | 41 | 37 | 6.6% (27) | 0 | 0 |
+| noise at 10 dB | 0.85, stop at any | 85.5% | 3.3% | 11.3% | 16.4% (1,138) | 20.7% | 36 | 560 | 2.2% (9) | 0 | 48 |
+| noise at 0 dB | 0.9, the demo's | 60.9% | 0.7% | 38.3% | 3.6% (252) | 4.4% | 16 | 15 | 36.0% (148) | 3 | 0 |
+| noise at 0 dB | 0.9, stop at any | 63.1% | 4.3% | 32.6% | 12.9% (896) | 14.5% | 16 | 675 | 7.5% (31) | 3 | 148 |
+| noise at 0 dB | 0.85 | 67.5% | 1.1% | 31.4% | 6.5% (448) | 8.6% | 33 | 26 | 29.0% (119) | 3 | 0 |
+| noise at 0 dB | 0.85, stop at any | 68.9% | 4.3% | 26.8% | 15.4% (1,064) | 18.1% | 31 | 670 | 7.3% (30) | 3 | 148 |
+
+- **On a stream there are about three times as many false activations as on aligned clips** (9.6% clean at 0.85, against 3.0%). The `Spotter` scores each word in several overlapping windows, and one passing window is enough.
+- **0.9, the demo's setting, misses more stops in noise:** 2.7% clean, 9.0% at 10 dB and 36.0% at 0 dB, against 1.5%, 6.6% and 29.0% at 0.85. It has fewer false activations (6.4% against 9.6% clean).
+- **Stop at any probability keeps stops from being missed** (0.2% clean, 2.2% at 10 dB, 7.5% at 0 dB), **but it stops for noise:** in the 3.1 hours of gaps it fired 48 times at 10 dB and 148 times at 0 dB, each time as "stop" (with a threshold on stop, none). That is a floor. Only one window per 1 s gap lies wholly in it; a firing in a window that also overlaps a clip is charged to that clip. So a noise "stop" just before a stop clip counts as right, which also flatters stop at any's stop-missed figures. Streamed on its own with no clips, at the clips' average speech level less 10 or 0 dB, the 1.7 minutes of held-out noise (the test quarter of each noise file) made stop at any fire once at 10 dB and 3 times at 0 dB, at 0.9 and at 0.85, and a threshold never. That is about 36 and 109 an hour, but from very few firings. Other words were heard as "stop" 245 times clean and 675 times at 0 dB, of 6,931 (at 0.9).
+- **So neither suits "stop" on a stream:** a threshold misses too many in noise, and any probability stops the device for noise alone: at least 15 times an hour at 10 dB and 48 at 0 dB counted in the gaps, and about 36 and 109 an hour on the short sample of noise alone. A threshold of stop's own, between the two, is the next thing to measure, chosen on the validation list; the demo keeps 0.9 until then.
+- **"Go" by mistake:** another word started it 34 times clean at 0.9 and 54 at 0.85, of 6,931. Stop was heard as "go" 3 times in 411 at 0 dB, and never clean or at 10 dB.
+- No word was given in the gaps of silence (clean), at any setting.
+
+**A threshold of stop's own** (`--stream 0.9 0.85 --stop-at 0 0.3 0.5 0.7`): "stop" acts from its own probability when it is the top class, the other nine words from the threshold. This is what the demo's `--kws-stop-threshold` does (`Spotter(stop_threshold=)`).
+
+The rule, applied to the validation run only: on `validation_list.txt` (9,981 clips, 350 of them stop), at the demo's 0.9, take the highest stop threshold tried (0.3, 0.5, 0.7) whose stop misses at 10 dB are within 1 percentage point of stop at any's, and which gives no word in the gaps at 10 dB. Noise at 0 dB is reported, not used to choose.
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Other words heard as "stop" | Words in the gaps (2.8 h) |
+|---|---|---|---|
+| any probability | 2.0% (7) | 551 | 48 |
+| **0.3** | **2.0% (7)** | **369** | **0** |
+| 0.5 | 3.1% (11) | 197 | 0 |
+| 0.7 | 4.9% (17) | 97 | 0 |
+| 0.9 (no threshold of its own) | 9.1% (32) | 29 | 0 |
+
+So stop acts from **0.3**, by one clip: within 1 point of 7 of 350 is at most 10 missed, and 0.5 missed 11. 0.4 was not tried. On the testing list, at 0.9 for the other words:
+
+| Sound | Stop acts from | Stop missed (of 411) | Other words heard as "stop" (of 6,931) | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|
+| clean | 0.9 | 2.7% (11) | 15 | 6.4% | 0 | |
+| clean | any | 0.2% (1) | 245 | 9.6% | 0 | |
+| clean | **0.3** | **0.2% (1)** | **224** | **9.3%** | **0** | |
+| 10 dB | 0.9 | 9.0% (37) | 22 | 6.1% | 0 | 0 |
+| 10 dB | any | 2.2% (9) | 563 | 13.5% | 48 | 1 |
+| 10 dB | **0.3** | **2.7% (11)** | **376** | **10.9%** | **0** | **0** |
+| 0 dB | 0.9 | 36.0% (148) | 15 | 3.6% | 0 | 0 |
+| 0 dB | any | 7.5% (31) | 675 | 12.9% | 148 | 3 |
+| 0 dB | **0.3** | **9.5% (39)** | **369** | **8.6%** | **2** | **0** |
+
+- **Stop from 0.3 keeps nearly all that stop at any gains**: 2.7% of stops missed at 10 dB and 9.5% at 0 dB, against 9.0% and 36.0% at 0.9.
+- **No stop for noise alone was measured at 10 dB:** 0 words in the 3.1 hours of gaps, against 48 for stop at any. At 0 dB it gave 2, against 148. None came in the 1.7 minutes of noise alone at either level. The gap count is a floor (see above), and the gaps and the noise alone both come from the same six noise files (the test quarter of each), so this shows far fewer stops for noise than stop at any, not a rate: none in 1.7 minutes cannot rule out about 100 an hour.
+- **The price is other words heard as "stop":** 376 of 6,931 at 10 dB (5.4%), against 563 for stop at any and 22 at 0.9. A stop not asked for stops the device, the safe side, and is said again as "go".
+- Stop was heard as "go" 3 times in 411 at 0 dB whatever stop's threshold, as before, and never clean or at 10 dB.
+- For this 5-epoch model, 0.3 for stop: at 10 dB about 1 in 20 other words is then heard as "stop" and stops the device. The 100-epoch model below needs 0.7, and the demo's default follows it.
+- The full table, every setting at 0.9 and 0.85 for the clean, 10 dB and 0 dB runs, is printed by the command above. The validation and testing runs were played on GitHub's machines (`heavy-runs.yml`). The testing run gave exactly the same table as the same run on the laptop.
+
+**BC-ResNet-8 trained for 100 epochs on a GPU.** The same training, held-out words and seed, with `--epochs 100 --device cuda`, on a free Kaggle notebook (a T4): 1 minute an epoch, against about 28 on the laptop's CPU. Its best validation accuracy was 98.2% (epoch 98), against 95.9% after 5 epochs. The weights and the log are the release `models-kws8-gpu100`. It was scored by the same commands as above, on GitHub's machines. `--device` comes from #217 (`tools/train_commands.py`, commit 487a27a), which this branch now has. GPU training is not bit-for-bit repeatable (cuDNN is not set to be deterministic), so a retrain with the same seed gives a close model, not the same weights: the model measured here is the release `models-kws8-gpu100`'s `model.pt`.
+
+On aligned clips, testing list, its top class (threshold 0):
+
+| Sound | Right, 100 epochs | Right, 5 epochs | False activations, 100 epochs (of 6,931) |
+|---|---|---|---|
+| clean | 98.5% (4,013) | 96.3% | 5.2% (359) |
+| noise at 20 dB | 97.6% | | 6.6% |
+| noise at 10 dB | **96.6% (3,936)** | 94.3% | 9.0% (627) |
+| noise at 5 dB | 95.2% | | 11.9% |
+| noise at 0 dB | 92.8% | 88.7% | 17.7% |
+
+- **#46's 95% at 10 dB is met, at its top class:** 96.6% of the command clips right, where the 5-epoch model gave 94.3%. It also holds 95.2% at 5 dB.
+- **The threshold**, chosen on the validation list by the same rule (the highest, in steps of 0.05, that keeps 90% of the clean command clips right): **0.95** (93.1%), with stop at any probability (`--choose`). At 0.95 with stop at any, on the testing list:
+
+| Sound | Right | Missed | False activations (of 6,931) | Held-out words (of 818) | Stop missed (of 411) | Stop heard as "go" |
+|---|---|---|---|---|---|---|
+| clean | 93.6% | 6.3% | 0.8% (58) | 2.4% | 0 | 0 |
+| noise at 10 dB | 88.8% | 10.8% | 1.5% (107) | 3.5% | 1.2% (5) | 0 |
+| noise at 0 dB | 76.6% | 22.7% | 2.8% (193) | 4.3% | 4.4% (18) | 0 |
+
+- Against the 5-epoch model at its 0.85 with stop at any (10 dB): more commands right (88.8% against 85.0%), and a third of the false activations (1.5% against 4.2%) and half on the held-out words (3.5% against 7.2%).
+
+**On a running stream**, at the demo's 0.9. Stop's own threshold was chosen on the validation list by the rule above (within 1 point of stop at any's misses at 10 dB, and no word in the gaps there):
+
+| Stop acts from (validation, 10 dB) | Stop missed (of 350) | Words in the gaps (2.8 h) |
+|---|---|---|
+| any probability | 1.4% | 35 |
+| 0.3 | 1.4% | 23 |
+| 0.5 | 1.4% | 6 |
+| **0.7** | **2.0%** | **0** |
+
+This model is surer of itself on noise than the 5-epoch one, so stop needs a higher bar: **0.7**, the highest of 0.3, 0.5 and 0.7 that passes the rule (0.8 was not tried), where the 5-epoch model needed 0.3. On the testing list:
+
+| Sound | Stop acts from | Right | Stop missed (of 411) | Other words heard as "stop" | False activations | Words in the gaps (3.1 h) | Noise alone (1.7 min) |
+|---|---|---|---|---|---|---|---|
+| clean | 0.9 | 95.9% | 0.2% (1) | 16 | 6.3% | 0 | |
+| clean | **0.7** | **95.9%** | **0.2% (1)** | **67** | **7.1%** | **0** | |
+| 10 dB | 0.9 | 92.6% | 2.9% (12) | 23 | 7.4% | 0 | 0 |
+| 10 dB | any | 92.0% | 0.7% (3) | 743 | 17.4% | 43 | 1 |
+| 10 dB | **0.7** | **92.7%** | **1.7% (7)** | **106** | **8.5%** | **0** | **0** |
+| 0 dB | 0.9 | 82.4% | 12.2% (50) | 40 | 6.6% | 0 | 0 |
+| 0 dB | any | 82.8% | 2.2% (9) | 838 | 17.8% | 65 | 1 |
+| 0 dB | **0.7** | **83.0%** | **6.1% (25)** | **125** | **7.8%** | **0** | **0** |
+
+- **On the stream the 100-epoch model with stop from 0.7 beats the 5-epoch one with stop from 0.3 on commands right and on stop, but not on "go" by mistake or on the held-out words** (stops missed clean are the same, 0.2%): 92.7% of commands right at 10 dB (against 82.8%), 1.7% of stops missed (against 2.7%), and 106 other words heard as "stop" (against 376). At 0 dB it misses 6.1% of stops, against 9.5%, and gives no word in the gaps, against 2. With stop at any probability, the same model misses 9 of 411 (2.2%) at 0 dB, so stop from 0.7 costs 16 more missed stops there.
+
+| Sound | Other words heard as "go", 100 epochs (0.7) | 5 epochs (0.3) | Held-out words, 100 epochs (0.7), of 818 | 5 epochs (0.3) |
+|---|---|---|---|---|
+| clean | 41 | 34 | 118 (14.4%) | 89 (10.9%) |
+| noise at 10 dB | 51 | 20 | 136 (16.6%) | 107 (13.1%) |
+| noise at 0 dB | 42 | 16 | 124 (15.2%) | 79 (9.7%) |
+
+- **"Go" given by mistake went up on the stream at 0.9** (of 6,931 other words, at 10 dB from 20 to 51). This is the unsafe direction: the chair moves without being asked. It is the same 51 with no stop threshold at all, so it comes from this model at 0.9, not from stop's 0.7. The held-out words heard as a command also went up.
+- On the stream, stop was never heard as "go", at any level. On aligned clips at its top class, stop was heard as "go" once at 10 dB and 5 times at 0 dB.
+- The other nine words still act from 0.9, the demo's value, not this model's own 0.95. The same stream at 0.95 (`--stream 0.95 0.9`, heavy-runs run 44392294750), with stop from 0.7, at 10 dB:
+
+| Other words act from | Right | Other words heard as "go" | Held-out words (of 818) | False activations | Stop missed (of 411) | Words in the gaps |
+|---|---|---|---|---|---|---|
+| 0.9 | 92.7% | 51 | 136 (16.6%) | 8.5% | 7 (1.7%) | 0 |
+| **0.95** | **90.4%** | **17** | **80 (9.8%)** | **5.2%** | **7 (1.7%)** | **0** |
+
+  At 0.95 "go" by mistake falls from 51 to 17 of 6,931, below the 5-epoch model's 20 at 0.9, and stop is missed as often. The price is 2.3 points of commands right (90.4% against 92.7%). Clean: 17 against 41, at 0 dB 18 against 42. So 0.95 for the other words, with stop from 0.7, is the safer pair for this model; the demo keeps 0.9 until it is tried there.
+- The demo's default stop threshold is now 0.7 (`--kws-stop-threshold`), for this model (`--kws` with `models-kws8-gpu100`'s `model.pt`). At 10 dB about 1 in 65 other words (106 of 6,931) is then heard as "stop".
 
 ## Sirens and horns: EfficientAT-mn10 against YAMNet on UrbanSound8K (#47)
 
@@ -856,6 +989,61 @@ python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-e
 python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --weights yolo26n.pt --imgsz 416
 python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --imgsz 480 \
     --weights yoloe-26n-mana.pt yoloe-26s-mana.pt   # built with demo/build_detector.py
+
+## People from Wi-Fi: ESP32 channel state, on held-out sessions (#194)
+
+Measured on 17 November 2026 with `tools/wifi_csi.py` on the Office Localization recordings
+(`datasets.md`): two ESP32-C6 boards 3 m apart in an office, about 200 packets a second. Each
+one-second window gets a label from a linear model (logistic regression on how much each of the 56
+subcarriers flickers and the shape of their mean strength), fitted on each label's first session
+and scored on sessions it never saw: the authors' second sessions and three more empty ones. For
+comparison, the RSSI alone (its mean and spread over the window), which is all a laptop or a phone
+can read, with two models: the same logistic regression, and a random forest of 300 trees, the
+more flexible one, so the gap is not down to the model.
+
+| Session | Windows | Labelled right, CSI | RSSI alone, same model | RSSI alone, random forest |
+|---|---:|---:|---:|---:|
+| Empty (session 2) | 999 | 1.00 | 1.00 | 1.00 |
+| Person in zone 1 | 997 | 0.99 | 0.71 (0.28 as zone 5) | 0.56 (0.41 as zone 2) |
+| Person in zone 2 | 997 | 0.76 (0.24 as zone 5) | 0.68 (0.11 as empty) | 0.73 (0.11 as empty) |
+| Person in zone 5 | 423 | 0.98 | 0.85 | 0.90 |
+| Empty (session 3) | 999 | 1.00 | 1.00 | 1.00 |
+| Empty (session 4) | 998 | 1.00 | 1.00 | 1.00 |
+| Empty (session 5) | 982 | 0.99 | 0.99 | 0.99 |
+
+What follows:
+
+- **Empty or not was right in 99.8 % of the windows** (RSSI alone: 98.1 % with the same model,
+  98.2 % with the forest). Most windows are empty, which flatters that pooled figure, so both
+  sides of it:
+  - CSI found the person in all 2,417 windows with one, and called 10 of the 3,978 empty windows
+    occupied, all in empty session 5.
+  - RSSI alone missed the person in 115 windows (same model) or 108 (forest), all but one in
+    zone 2, and called 7 or 9 empty windows occupied.
+  - Balanced (the mean of the two rates): 99.9 % for CSI, 97.5 % and 97.7 % for RSSI.
+- **Zone 1 is where the subcarriers clearly help:** 0.99 with CSI, against 0.71 (same model) or
+  0.56 (forest) with RSSI. In zone 2 the three are close (0.76, 0.68, 0.73) and in zone 5 nearer
+  (0.98, 0.85, 0.90), each from one session against one session, so that is not shown for them.
+  Zones 2 and 5 are confused in a quarter of zone 2's windows; where the zones are in the room is
+  not published.
+- **Movement is not presence.** The movement level (the median flicker) went over the empty room's
+  99th percentile in 77 % of zone 2's windows but only 2 % of zone 5's and 13 % of zone 1's: those
+  people were mostly still. They are found by the shape of the subcarriers, not by flicker. The
+  same threshold is passed in 1 % to 18 % of the held-out empty windows (18 % in empty session 5),
+  so the screen's "moving" also shows in an empty room.
+- Limits:
+  - One office, one placement of the boards, sessions from one month, a person per session, line
+    of sight.
+  - One test session per label: a zone's 997 windows are one recording, and neighbouring windows
+    are alike, so 0.76 against 0.68 or 0.73 in zone 2 is one session against one session.
+  - A model fitted in one room does not carry over to another; each place needs a few minutes of
+    its own recordings.
+  - Not yet tried on our own boards, and not yet an input to the decision core: the screen
+    (`/wifi`) shows the proposed use, a person sensed but not seen slows the device and never
+    stops it.
+
+```
+python tools/wifi_csi.py --data datasets/office_csi --fetch --out demo/csi_model/wifi_csi_office.npz
 ```
 
 ## A first fine-tune on SANPO, on a laptop CPU (#49)
@@ -975,6 +1163,55 @@ What follows:
 
 Run it: as above, with `model=yolo26s.pt` or `model=yolov8s.pt` in the `yolo detect train` line.
 
+### The same fine-tune on a GPU, at 640 (#49)
+
+Measured on 18 November 2026. YOLO26s and YOLO26n were fine-tuned again on a free Kaggle notebook
+(one T4), to see whether a bigger image and more epochs help. They were fine-tuned from their COCO
+weights, at image size 640, for up to 100 epochs with early stopping (patience 20), batch 16 and
+seed 0. The data was built inside the notebook with `tools/fetch_sanpo.py` and
+`tools/sanpo_to_yolo.py`:
+- the 45 stairs walks, at one frame in 20, as on the CPU;
+- 3 other training walks at one frame in 10;
+- 1,211 training images and 97 validation images in all.
+
+The CPU run had 1,166 and 145. Its 3 other walks could not be recovered, so 3 different ones were
+used. YOLO26s stopped at epoch 43 (best 30) after 38 minutes; YOLO26n stopped at epoch 33 (best
+13) after 28 minutes. Both were scored with `tools/eval_detector.py` at 640 on the same 2,331 test
+frames as above.
+
+| Model (image size) | Class | Objects | AP50 | Precision at 0.3 | Recall at 0.3 | Precision at 0.5 | Recall at 0.5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| YOLO26s fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.81 | 0.85 | 0.78 | 0.91 | 0.73 |
+| | vehicle | 1,438 | 0.74 | 0.78 | 0.70 | 0.85 | 0.64 |
+| | stairs | 37 | 0.18 | 0.18 | 0.22 | 0.42 | 0.22 |
+| | opening-door | 175 | 0.03 | 0.08 | 0.03 | 0.12 | 0.01 |
+| | pole | 1,942 | 0.14 | 0.44 | 0.12 | 0.59 | 0.06 |
+| YOLO26n fine-tuned on the GPU (640) | pedestrian | 2,993 | 0.79 | 0.85 | 0.75 | 0.91 | 0.69 |
+| | vehicle | 1,438 | 0.75 | 0.81 | 0.68 | 0.89 | 0.59 |
+| | stairs | 37 | 0.12 | 0.16 | 0.19 | 0.23 | 0.16 |
+| | opening-door | 175 | 0.02 | 0.15 | 0.02 | 0.00 | 0.00 |
+| | pole | 1,942 | 0.13 | 0.45 | 0.09 | 0.58 | 0.04 |
+
+**Stairs per walk.** YOLO26s found stairs in 8 of the 65 test frames with stairs and YOLO26n in
+7, both in 2 of the 6 walks (on the CPU: YOLO26s 9 frames, YOLO26n 7).
+
+What follows:
+
+- **A bigger image and more epochs did not help.** On the CPU at 416, YOLO26s had AP50 0.80 on
+  people, 0.74 on vehicles and 0.22 on stairs. Here it has 0.81, 0.74 and 0.18. YOLO26n moved
+  from 0.77 to 0.79 on people and from 0.72 to 0.75 on vehicles. With one seed each, both changes
+  are within what a second run could give.
+- **Stairs stay far from the target.** 0.18 against 0.22 is no real difference with 37 near
+  staircases. A quarter of them are found at 0.3, against the 0.85 target, so stairs need more
+  stairs examples: our own recordings (#89) or every frame of the stairs walks. A bigger image or
+  more epochs is not enough.
+- This run tested the image size and the epochs only. The stairs walks were still sampled at one
+  frame in 20, so training on every frame is still to be tried. The node keeps YOLO26n zero-shot.
+
+The weights, the epoch logs and the scores are in the release `models-yolo26-sanpo-gpu640`. It is
+not a MANA release. GPU training is not bit-for-bit repeatable, so a new run gives a close model,
+not the same weights.
+
 ## Where the detector fails on SANPO, with pictures (#51)
 
 The best model above, YOLO26s fine-tuned on the CPU (#49), on the same 2,331 SANPO test frames.
@@ -1062,4 +1299,47 @@ python3 tools/failure_examples.py --data datasets/sanpo-stairs-yolo --imgsz 416 
     --weights runs/detect/train/weights/best.pt --out datasets/failures
 python3 tools/eval_detector.py --data datasets/sanpo-stairs-yolo --imgsz 416 --iou 0.3 \
     --weights runs/detect/train/weights/best.pt
+```
+
+## Stairs: segmentation beats boxes (#49, #51)
+
+The section above shows the box detector stuck at about 0.22 AP50 on SANPO stairs, missing most
+near staircases at either IoU, and confusing stairs with railings, curbs and crosswalk stripes.
+Part of that is the box itself: a staircase is a repeating surface that fills the lower frame, and
+SANPO's box is drawn round the whole flight, so a box fits it badly. Published work on stair
+detection reports the same, and reaches far higher numbers by marking stairs as pixels or step
+lines, not boxes.
+
+SANPO already labels stairs as a segmentation mask (class id 15), so the same frames were scored
+that way: a small U-Net (`tools/train_stair_seg.py`, about 8 MB) was trained to mark each pixel
+stair or not, on an equal mix of stair and non-stair frames from SANPO's training walks (4,000
+each), with a seeded sixth held out by frame for validation. Same frames, same classes, only the
+output changes from a box to a per-pixel mask.
+
+| Stairs on SANPO | Precision | Recall | IoU / AP50 |
+|---|---:|---:|---:|
+| Box detector (YOLO26s, #49), near | 0.15 | 0.24 | 0.22 (AP50) |
+| Segmentation (this U-Net), stair pixels | 0.88 | 0.85 | 0.77 (IoU) |
+
+Marking the stairs as pixels raises the overlap with the label from about 0.22 to 0.77 and the
+recall from 0.24 to 0.85 on the same walks: a staircase in the path is now marked in most frames,
+where the box detector found one in only two of the six test walks. The weights are saved to
+`runs/stair_seg.pt`.
+
+Two caveats keep this honest. First, the two numbers are not the same measure: the box row is AP50
+for a detection, the segmentation row is the overlap of the predicted stair pixels with the label,
+so the 0.22-to-0.77 jump is the gain from changing the question (is there a stair region here),
+not a like-for-like AP. The point is that the question MANA actually needs answered — is there a
+stair surface in the path — is answered far better by a mask than by a box. Second, this is still
+SANPO, mostly outdoor daylight walks, and the model is RGB only. On a separate RealSense set with
+depth, adding the depth map to the same U-Net raised stair IoU by about 6.5 points over RGB alone,
+so MANA's 3D camera is expected to help here too; the SANPO export has no depth, so that is not
+measured on these walks. Stairs from our own recordings with depth (#89), scored as a per-approach
+hazard (was the staircase marked before the chair reached it) rather than a per-frame overlap, are
+the next step, and the two-source rule already requires the 3D camera alongside the detector.
+
+Run it:
+
+```
+python3 tools/train_stair_seg.py --root datasets/sanpo --epochs 30 --out runs/stair_seg.pt
 ```

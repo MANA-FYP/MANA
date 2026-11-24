@@ -10,7 +10,8 @@ as in the paper: a shift of up to 100 ms, background noise mixed in on 80% of th
 20 dB below the speech, and SpecAugment (two frequency and two time masks). SGD with momentum
 0.9, weight decay 0.001, learning rate 0.1 with one epoch of warm-up and a cosine decay, batches
 of 100. The paper trains for 200 epochs on a GPU; on this laptop's CPU an epoch of BC-ResNet-8
-takes about 35 minutes, so fewer are run and the number is reported.
+takes about 35 minutes, so fewer are run and the number is reported. --device cuda (or auto, the
+default) trains on a GPU when there is one, a free Kaggle notebook's for example.
 
 The model with the best validation accuracy is kept as <out>/model.pt, with a log per epoch.
 
@@ -125,13 +126,13 @@ def as_float(waves: np.ndarray) -> np.ndarray:
     return waves.astype(np.float32) / 32768 if waves.dtype == np.int16 else waves
 
 
-def accuracy(model, mel, waves: np.ndarray, labels: np.ndarray, batch: int = 500) -> float:
+def accuracy(model, mel, waves: np.ndarray, labels: np.ndarray, batch: int = 500, device="cpu"):
     model.eval()
     right = 0
     with torch.no_grad():
         for i in range(0, len(labels), batch):
-            x = mel(torch.from_numpy(as_float(waves[i : i + batch]))).unsqueeze(1)
-            right += int((model(x).argmax(1).numpy() == labels[i : i + batch]).sum())
+            x = mel(torch.from_numpy(as_float(waves[i : i + batch])).to(device)).unsqueeze(1)
+            right += int((model(x).argmax(1).cpu().numpy() == labels[i : i + batch]).sum())
     return right / len(labels)
 
 
@@ -143,10 +144,14 @@ def main(argv=None) -> int:
     p.add_argument("--batch", type=int, default=100)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", default="auto", help="cpu, cuda, or auto: the GPU when there is one")
     p.add_argument("--hold-out", nargs="*", default=[],
                    help="other words to leave out of training, such as backward forward follow "
                         "learn visual")  # fmt: skip
     a = p.parse_args(argv)
+    if a.device == "auto":
+        a.device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"device: {a.device}", flush=True)
     a.out.mkdir(parents=True, exist_ok=True)
     rng, torch_rng = random.Random(a.seed), torch.manual_seed(a.seed)
     del torch_rng
@@ -177,8 +182,8 @@ def main(argv=None) -> int:
     val_labels = np.concatenate([val_labels, np.full(len(vsil), SILENCE)])
     print(f"loaded in {time.time() - t0:.0f} s", flush=True)
 
-    mel = kws.mel()
-    model = kws.BCResNet(a.tau)
+    mel = kws.mel(a.device)
+    model = kws.BCResNet(a.tau).to(a.device)
     opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-3)
     loss_fn = nn.CrossEntropyLoss()
     steps_per_epoch = math.ceil((len(words) + 2 * per_class) / a.batch)
@@ -197,8 +202,8 @@ def main(argv=None) -> int:
             idx = order[i : i + a.batch]
             batch = np.stack([aug(as_float(waves[j])) if labels[j] != SILENCE
                               else as_float(waves[j]) for j in idx]).astype(np.float32)  # fmt: skip
-            x = spec_augment(mel(torch.from_numpy(batch)).unsqueeze(1), rng)
-            y = torch.from_numpy(labels[idx]).long()
+            x = spec_augment(mel(torch.from_numpy(batch).to(a.device)).unsqueeze(1), rng)
+            y = torch.from_numpy(labels[idx]).long().to(a.device)
             lr = (
                 0.1
                 * min(1.0, (step + 1) / steps_per_epoch)
@@ -213,14 +218,15 @@ def main(argv=None) -> int:
             opt.step()
             step, seen = step + 1, seen + len(idx)
             losses.append(loss.item())
-        val = accuracy(model, mel, val_waves, val_labels)
+        val = accuracy(model, mel, val_waves, val_labels, device=a.device)
         minutes = round((time.time() - t) / 60, 1)
         log.append({"epoch": epoch + 1, "loss": round(float(np.mean(losses)), 4),
                     "val_accuracy": round(val, 4), "minutes": minutes})  # fmt: skip
         print(json.dumps(log[-1]), flush=True)
         if val > best:
             best = val
-            torch.save({"tau": a.tau, "labels": kws.LABELS, "state": model.state_dict(),
+            state = {k: v.cpu() for k, v in model.state_dict().items()}  # loads anywhere
+            torch.save({"tau": a.tau, "labels": kws.LABELS, "state": state,
                         "epoch": epoch + 1, "val_accuracy": val}, a.out / "model.pt")  # fmt: skip
         (a.out / "log.json").write_text(json.dumps(log, indent=1))
     print(f"best validation accuracy {best:.4f}", flush=True)

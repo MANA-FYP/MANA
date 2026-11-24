@@ -9,4 +9,5 @@ cryptography>=3.4     # the https certificate (--https)
 # vosk>=0.3.45        # offline voice commands; also download a small English model
 # onnxruntime>=1.18   # the stairs classifier, once a trained ONNX model exists
 # transformers>=4.45 # depth from the camera image (--depth), with torch; about 100 MB model
+# torchaudio         # sirens and horns (--sounds), with torch and an EfficientAT checkout
 # opencv-python>=4.8 # any camera or a video file as the vision input (python -m demo.camera)

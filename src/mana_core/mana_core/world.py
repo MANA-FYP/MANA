@@ -50,6 +50,10 @@ class Obstacle:
     at_m: float
     label: str
     gone_s: float = math.inf  # when it moves out of the way, such as a person who steps aside
+    # which sensors report it: the camera's detector and the lidar see a person or a car; only the
+    # 3D camera sees what blocks the path by its shape (mana_perception.structure): a doorway too
+    # narrow for the device, a box under the lidar's plane, a table edge above it
+    seen_by: frozenset = frozenset({Source.CAMERA, Source.LIDAR})
 
 
 @dataclass(frozen=True)
@@ -123,11 +127,14 @@ class World:
                 continue
             if source != Source.LIDAR:
                 reports.append(self._ground(t, source, trust))
-            if source != Source.DEPTH_CAMERA:
-                seen = [o for o in self._obstacles() if 0 <= o.at_m - self.x <= RANGE_M[source]]
-                if seen:
-                    o = min(seen, key=lambda o: o.at_m)
-                    reports.append(ObstacleReport(t, trust, source, o.at_m - self.x, o.label))
+            seen = [
+                o
+                for o in self._obstacles()
+                if source in o.seen_by and 0 <= o.at_m - self.x <= RANGE_M[source]
+            ]
+            if seen:
+                o = min(seen, key=lambda o: o.at_m)
+                reports.append(ObstacleReport(t, trust, source, o.at_m - self.x, o.label))
         trust = self._trust("imu")
         if trust is not None:
             under = self._under()

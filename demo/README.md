@@ -286,6 +286,79 @@ not a turn. Without a compass it gives compass directions. If the path back to t
 longer kept (a very long walk), it gives the straight line instead: "The mark is 14 metres away,
 at 6 o'clock." The mark shows as a flag on the path.
 
+**A destination picked on the map.** On the live page, click a place on the map (a drag still
+moves the map). A green flag marks it, and the phone says "Destination set. The destination is
+30 metres away, at 12 o'clock." It says the way again after each 15 m walked, and sooner (but no
+more than once in 10 s) when the direction moves two hours round, as after a wrong turn. Within
+3 m it says "You have arrived at the destination." and clears it. Say "where is the destination"
+to hear it at any time; the X on the map clears it. It is the straight line, not a route: streets
+and walls are not known.
+
+**Starting again.** The anticlockwise-arrow button on the live map, after a confirm, clears the path,
+the steps, the marks and the destination, and the messages and decisions so far, and the phone
+says "Starting again from here." The track starts at the person's place, tied to the map at the
+next GPS fix. The sensors, the core, the link and the way the phone faces are kept, and a stop
+still waiting to be said is still said.
+
+**The indoor screen (`/indoor`).** A second screen beside `/live`, on the same server and the same
+phone: which floor, the height travelled, the newest map and the laptop's Wi-Fi.
+- **Which floor.** A web page gets no barometer (Chrome has no web API for one), so the floor comes
+  from what the page can read. A lift: the phone, held still, feels the lift speed up and slow down,
+  and the vertical acceleration integrated twice is the height; a lift ends at rest, so the speed
+  left at the end is taken out as drift (a phone tilted on the way). Stairs: the camera's detector
+  (`--weights yoloe-26s-mana.pt` names stairs) sees stairs up or down within 1.5 m, and each step
+  taken while it still sees them (up to a second after) is a riser (0.17 m); three quarters of a
+  floor's risers is a floor. A walk's first four steps reach the count together, once the walk is
+  confirmed, and still count while the stairs are in view; turning round on the stairs counts the
+  flight so far. Steps out of its sight, past a staircase or along a landing, do not
+  count. The detector misses stairs close up, where they fill the picture (the stairs row in
+  `docs/results.md`), so a climb can come out short: a missed floor shows as "less than a floor",
+  never a floor made up. Motion only measures changes, so the floor is "?" until there is a
+  reason: walking in from outside (GPS good, then lost at the door) sets the ground floor, as an
+  assumption the page states; or the supervisor sets it with one tap. Until then the floors moved
+  since the start are counted. GPS altitude is shown beside it only as a reference: a phone's GPS
+  height is often 10 m or more off indoors.
+- **The newest map.** The satellite layer is Esri World Imagery, whose current release is the
+  newest it has; the map shows the date the picture at that point was taken and by what satellite
+  (`/api/imagery`, from Esri's imagery metadata). For the FAST campus it is 28 Aug 2025, 0.46 m a
+  pixel. Tiles are kept a week, then fetched again.
+- **Wi-Fi.** The laptop's own Wi-Fi signal, read twice a second. Windows gives only the RSSI, in
+  whole dBm, refreshed rarely (it did not change once in 20 s here), which is too coarse to sense
+  people. Wi-Fi sensing needs the channel state (CSI), from hardware such as two ESP32 boards: the
+  Wi-Fi screen below.
+- Tested on synthetic lift rides (up one floor, down two), a bump, walking, a stairs flight of 19
+  steps and a few steps, and a lift taken right after a walk (`tests/test_demo_floors.py`). Not yet
+  measured on real lifts and stairs.
+
+**The Wi-Fi screen (`/wifi`): people from Wi-Fi.** Whether someone is in a room, and in which
+zone, from how their body changes the Wi-Fi signal between two ESP32 boards, with no camera.
+- The receiving ESP32 runs esp-csi's console firmware and prints one `CSI_DATA` line per packet on
+  USB, about 200 a second: the amplitude of 56 subcarriers. `demo/csi.py` cuts them into windows of
+  one second and gives each window to a small linear model (`demo/csi_model/wifi_csi_office.npz`), run
+  with numpy. The screen shows the verdict and the model's share for each label, the 56
+  subcarriers over the last 10 s, the movement against the empty room's level, and how the model
+  scored on sessions it never saw.
+- With no ESP32 yet, `--csi-replay` plays recorded sessions of two ESP32-C6 boards in an office
+  (the Office Localization set, CC BY 4.0) at their own pace: the room empty, then a person in
+  zone 1, 2 and 5, 20 s each, or one picked on the screen. They are the authors' test sessions, not
+  the ones the model was fitted on, so the screen marks each verdict right or wrong as it plays.
+  ```bash
+  python tools/wifi_csi.py --data datasets/office_csi --fetch       # the recordings, about 950 MB
+  python -m demo.server --csi-replay datasets/office_csi            # then open /wifi
+  python -m demo.server --csi-serial COM5     # or a live ESP32 (pip install pyserial)
+  ```
+  The baud rate (`--csi-baud`, 115200 by default) matters only through a USB-to-UART bridge. On the
+  ESP32-C6's own USB port it is ignored. A row is about 440 bytes, so 200 a second is about 88 KB/s.
+  115200 baud carries about 11.5 KB/s, about 26 rows a second, so through a bridge set the board
+  and `--csi-baud` to 921600 or more, or the flicker no longer matches what the model was fitted on.
+- The model holds for the room and the placement of the boards it was fitted in. A new place needs
+  its own recordings (a few minutes empty and with a person in each zone) and `tools/wifi_csi.py`
+  run on them. A person standing still is found by the shape of the subcarriers, not by movement:
+  in two of the three zones the movement stayed at the empty room's level.
+- Not yet an input to the decision core. The use proposed: a person sensed by Wi-Fi but not seen by
+  the camera (round a corner, behind a door) slows the device and is said; one source, so it never
+  stops it.
+
 **Saving a walk.** *GPX* saves the walk for any map app (latitude and longitude, so only after a
 GPS fix), with the marks as waypoints. *GeoJSON* always works: in longitude and latitude after a
 fix, otherwise in metres from the start (it says so).
@@ -354,8 +427,9 @@ The server starts without any model and says which ones are missing.
 | Object detector (COCO) | `pip install ultralytics`, then `--weights yolo26n.pt` (or `yolo26s.pt`, slower and finds more) | the 80 COCO classes: person, chair, bottle, laptop and so on; obstacles get an **estimated** distance |
 | Open-vocabulary detector | `python -m demo.build_detector` once, with internet, then `--weights yoloe-26n-mana.pt --imgsz 480` | YOLOE-26 told to look for the 42 objects listed in `demo/build_detector.py`, such as doors, stairs, poles, walking sticks and fire extinguishers. The nano model at 480 is about twice as fast on a laptop CPU as the small one (`--base yoloe-26s-seg.pt --out yoloe-26s-mana.pt`), which finds more small objects |
 | Offline voice commands | `pip install vosk`, download a small English model, `--vosk-model <folder>` | the ten command words, offline. On Speech Commands it also takes other words for commands, such as "two" for "go" (docs/results.md, #46) |
-| Offline voice commands, trained | `pip install torch torchaudio`, train with `tools/train_commands.py` (or use a trained `model.pt`), then `--kws <model.pt>` | the ten command words with BC-ResNet, which also knows "some other word" and "silence" (#46); `--kws-threshold` is the least probability acted on (0.9), and `--kws-stop-threshold` a lower one for "stop" alone, as a missed stop is the unsafe case (unset: the same) |
+| Offline voice commands, trained | `pip install torch torchaudio`, train with `tools/train_commands.py` (or use a trained `model.pt`), then `--kws <model.pt>` | the ten command words with BC-ResNet, which also knows "some other word" and "silence" (#46); `--kws-threshold` is the least probability acted on (0.9), and `--kws-stop-threshold` a lower one for "stop" alone, as a missed stop is the unsafe case (0.7, chosen on the validation list as a stream for the 100-epoch model, the release `models-kws8-gpu100`: `docs/results.md`; at 10 dB about 1 in 65 other words is then heard as "stop" and stops the device; at 0 dB it misses 25 of 411 stops (6.1%), against 9 (2.2%) for stop at any probability, and 0.3 is for the 5-epoch model; never above `--kws-threshold`) |
 | Stairs classifier | `pip install onnxruntime`, `--stairs-model <file.onnx>` | level or stairs from the camera. **A trained model is not included**: train one on StairNet with `tools/train_ground.py` (#38). |
+| Sirens and horns | `pip install torch torchvision torchaudio`, a checkout of [EfficientAT](https://github.com/fschmid56/EfficientAT) with `resources/mn10_as_mAP_471.pt`, then `--sounds <checkout>`, with `--vosk-model` for voice commands | a siren or a horn in the last 10 s of the phone's microphone, said once and shown on the live page. The phone then streams its microphone at 32 kHz, and Android Chrome cannot run its own speech recognition beside that stream, so without `--vosk-model` voice commands are off (the server says so). On UrbanSound8K: sirens F1 0.86, horns F1 0.74 (docs/results.md, #47). The thresholds (0.22, 0.08) were set on clips of 4 s or less padded with silence; on a running 10 s window of street sound they are untested, so its false alarms may differ. The kept sound is forgotten when the phone disconnects |
 | Depth from the camera | `pip install torch transformers`, then `--depth` | distances in metres from the camera image, and where stairs the detector sees are and which way they go (see above) |
 
 ## Known limits

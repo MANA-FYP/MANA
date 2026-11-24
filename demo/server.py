@@ -35,6 +35,8 @@ import io
 import json
 import math
 import sys
+import threading
+import time
 import warnings
 from array import array
 from pathlib import Path
@@ -44,10 +46,23 @@ for extra in (ROOT / "src" / "mana_core", ROOT):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
+import numpy as np  # noqa: E402
 from aiohttp import WSMsgType, web  # noqa: E402
 from mana_core.decision import Command, Ground, GroundReport, Source  # noqa: E402
 
-from demo import access, caregiver, navigation, recording, speech, tiles, vision  # noqa: E402
+from demo import (  # noqa: E402
+    access,
+    caregiver,
+    csi,
+    floors,
+    navigation,
+    recording,
+    sounds,
+    speech,
+    tiles,
+    vision,
+    wifi,
+)
 from demo import depth as dz  # noqa: E402
 from demo.middleware import Middleware  # noqa: E402
 
@@ -90,12 +105,16 @@ def build_app(
     recorder=None,
     tile_cache=None,
     key=None,
+    listener=None,
+    laptop_wifi=None,
+    wifi_sensing=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
     app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=checks)
     app["mw"] = mw or Middleware()
     app["detector"], app["classifier"], app["recognizer"] = detector, classifier, recognizer
+    app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -104,18 +123,33 @@ def build_app(
     app["depth_ground"] = depth_ground
     app["depth"] = {"seq": 0, "jpeg": b"", "seen": None, "t": None, "busy": False, "ms": None}
     app["phones"], app["dashboards"], app["caregivers"] = set(), set(), set()
-    app["live"] = {"audio_rate": 48000, "busy": False, "phone_seen": None}
+    # what changes while the server runs lives in these dicts: aiohttp deprecates setting the
+    # app's own keys once it has started
+    app["live"] = {
+        "audio_rate": 48000,
+        "busy": False,
+        "phone_seen": None,
+        "snapshot": None,  # the last tick's state, for /api/status
+        "stairs": None,  # the detector's last stairs, measured from the camera (#159)
+    }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
-    app["snapshot"] = None  # the last tick's state, for /api/status
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
+    app["floors"] = floors.FloorTracker()  # which floor, from motion and the camera's stairs
+    app["wifi"] = laptop_wifi  # the laptop's own Wi-Fi signal (demo.wifi), or None
+    # people from an ESP32's Wi-Fi channel state (demo.csi): sensing, replay, serial; or None
+    app["csi"] = wifi_sensing
     app["tiles"] = tile_cache  # street map tiles kept on the laptop (#161), or None: no map
     app["satellite"] = (  # the satellite layer, kept beside them
         None if tile_cache is None else tile_cache.layer("satellite", tiles.SATELLITE, "image/jpeg")
     )
-    app["stairs"] = None  # the detector's last stairs, measured from the camera (#159)
 
     app.router.add_get("/", index)
     app.router.add_get("/live", live_page)
+    app.router.add_get("/indoor", indoor_page)
+    app.router.add_get("/api/imagery", imagery)
+    app.router.add_get("/wifi", wifi_page)
+    app.router.add_get("/api/csi", csi_view)
+    app.router.add_post("/api/csi/play", csi_play)
     app.router.add_get("/dashboard", dashboard_page)
     app.router.add_get("/phone", phone_page)
     app.router.add_get("/caregiver", caregiver_page)
@@ -146,6 +180,111 @@ async def index(request: web.Request) -> web.Response:
 async def live_page(request: web.Request) -> web.FileResponse:
     """The screen to show: the camera, the decision and the sensors at a glance."""
     return web.FileResponse(WEB / "live.html")
+
+
+async def indoor_page(request: web.Request) -> web.FileResponse:
+    """The second screen: which floor, the height travelled, the newest map and the Wi-Fi."""
+    return web.FileResponse(WEB / "indoor.html")
+
+
+async def wifi_page(request: web.Request) -> web.FileResponse:
+    """The third screen: people sensed from Wi-Fi (an ESP32's CSI, live or recorded)."""
+    return web.FileResponse(WEB / "wifi.html")
+
+
+async def csi_view(request: web.Request) -> web.Response:
+    c = request.app["csi"]
+    if c is None:
+        return web.json_response({"on": False})
+    out = {"on": True, **c["sensing"].view(), "scores": c.get("scores")}
+    out["replay"] = None if c.get("replay") is None else c["replay"].view()
+    return web.json_response(out)
+
+
+async def csi_play(request: web.Request) -> web.Response:
+    """Which recording plays: {"label": "two"}, or {"label": null} for the tour."""
+    c = request.app["csi"]
+    if c is None or c.get("replay") is None:
+        raise web.HTTPConflict(text="no recordings: start the server with --csi-replay")
+    try:
+        c["replay"].choose((await request.json()).get("label"))
+    except (KeyError, ValueError, AttributeError, TypeError) as e:
+        raise web.HTTPBadRequest(text="label: one of the recordings, or null") from e
+    return web.json_response(c["replay"].view())
+
+
+async def csi_task(app: web.Application) -> None:
+    """Feeds the Wi-Fi sensing: recorded sessions at their own pace, or a live ESP32."""
+    c = app["csi"]
+    loop = asyncio.get_running_loop()
+    if c.get("serial"):
+        port, baud = c["serial"]
+        queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+        stop = threading.Event()  # set on the way out: the reader stops within its 1 s timeout
+
+        def put(p) -> None:
+            if not queue.full():  # behind by 10 s: drop rather than raise in the loop
+                queue.put_nowait(p)
+
+        def read() -> None:
+            parse = csi.LineParser()
+            try:
+                for line in csi.serial_lines(port, baud, stop):
+                    p = parse(line)
+                    if p is not None:
+                        loop.call_soon_threadsafe(put, p)
+                    elif why := parse.unread(time.monotonic()):
+                        print(f"wifi: the ESP32 on {port}: {why}", flush=True)
+            except Exception as e:  # unplugged, or the port is busy: said once
+                if not stop.is_set():
+                    print(f"wifi: the ESP32 on {port} stopped ({e!r})", flush=True)
+
+        c["sensing"].restart(f"ESP32 on {port}")
+        threading.Thread(target=read, name="esp32", daemon=True).start()
+        try:
+            while True:
+                c["sensing"].feed(await queue.get())
+        finally:
+            stop.set()
+    while True:
+        c["replay"].step(loop.time())
+        await asyncio.sleep(0.05)
+
+
+async def imagery(request: web.Request) -> web.Response:
+    """When the satellite picture at a point was taken (Esri), kept per ~100 m. 503 offline."""
+    try:
+        lat, lon = float(request.query["lat"]), float(request.query["lon"])
+    except (KeyError, ValueError) as e:
+        raise web.HTTPBadRequest(text="lat and lon") from e
+    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+        raise web.HTTPBadRequest(text="lat and lon")
+    kept = request.app["live"].setdefault("imagery", {})
+    key = (round(lat, 3), round(lon, 3))
+    if key not in kept:
+        import aiohttp
+
+        url = tiles.IMAGERY_INFO.format(
+            lat=lat, lon=lon, lat0=lat - 0.01, lat1=lat + 0.01, lon0=lon - 0.01, lon1=lon + 0.01
+        )
+        try:
+            async with (
+                aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s,
+                s.get(url) as r,
+            ):
+                body = await r.json(content_type=None)
+                # an error is not "no date here": not kept, so the next ask tries again
+                if r.status != 200 or not isinstance(body, dict) or "error" in body:
+                    raise ValueError(f"imagery service: {r.status}")
+                info = tiles.imagery_info(body)
+        except (aiohttp.ClientError, TimeoutError, ValueError):
+            raise web.HTTPServiceUnavailable(text="no answer from the imagery service") from None
+        if len(kept) >= 1000:  # one per ~100 m cell visited: a walk never gets near
+            kept.clear()
+        kept[key] = info
+    if kept[key] is None:
+        raise web.HTTPNotFound(text="no date for the imagery here")
+    return web.json_response(kept[key])
 
 
 async def dashboard_page(request: web.Request) -> web.FileResponse:
@@ -184,6 +323,8 @@ async def ws_phone(request: web.Request) -> web.WebSocketResponse:
         app["phones"].discard(ws)
         if not app["phones"]:  # no round trip is measured now: not shown as if it were live
             app["mw"].on_phone_gone()
+            if app["listener"] is not None:  # nor its last seconds of sound heard again
+                app["listener"].clear()
     return ws
 
 
@@ -209,11 +350,17 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
             phone_t,
             None if rot is None else float(rot),
         )
+        app["floors"].on_motion(
+            now if phone_t is None else phone_t, float(d["ax"]), float(d["ay"]), float(d["az"]), now
+        )
     elif kind == "gps":
         acc, lat, lon, speed, heading = (
             number(d.get(k)) for k in ("accuracy", "lat", "lon", "speed", "heading")
         )
         mw.on_gps(acc, now, lat, lon, speed, heading)
+        app["floors"].on_gps_altitude(
+            now, number(d.get("altitude")), number(d.get("altitude_accuracy"))
+        )
     elif kind == "orientation":
         mw.on_orientation(*(number(d.get(k)) for k in ("alpha", "beta", "gamma", "compass")))
     elif kind == "word":
@@ -261,10 +408,34 @@ async def on_binary(app: web.Application, data: bytes) -> None:
         samples = array("f")
         samples.frombytes(payload[: len(payload) // 4 * 4])
         mw.on_microphone(now)
+        hear(app, samples, now)
         if app["recognizer"] is not None:
             pcm = speech.to_pcm16_16k(list(samples), app["live"]["audio_rate"])
             for word, confidence in app["recognizer"].feed(pcm):
                 mw.on_word(word, confidence, now)
+
+
+def hear(app: web.Application, samples, now: float) -> None:
+    """Keep the sound, and once a second score the last 10 s for sirens and horns, off the loop."""
+    listener = app["listener"]
+    if listener is None:
+        return
+    listener.feed(np.frombuffer(samples, dtype=np.float32), app["live"]["audio_rate"])
+    if listener.due(now) and not app["live"].get("hearing"):
+        app["live"]["hearing"] = True
+        asyncio.get_running_loop().create_task(hear_task(app, now))
+
+
+async def hear_task(app: web.Application, now: float) -> None:
+    try:
+        heard = await asyncio.get_running_loop().run_in_executor(None, app["listener"].hear, now)
+        app["mw"].on_sounds(heard)
+    except Exception as e:  # a broken model: said once, not as an unhandled task every second
+        if not app["live"].get("hear_failed"):
+            app["live"]["hear_failed"] = True
+            print(f"sounds: the model failed ({e!r}); sirens and horns are not heard", flush=True)
+    finally:
+        app["live"]["hearing"] = False
 
 
 async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
@@ -384,8 +555,8 @@ def the_stairs(report, ahead_m: float, now: float) -> bool:
     from where they start to STAIRS_RISE_M past it. Not an obstacle, so the stairs rule handles
     them; something nearer than the stairs, or further past them, still is. Stairs without a
     distance (no tilt) cannot be placed, and the obstacle stays. Both distances are from the
-    camera: the report is the one the server made (app["stairs"]), not the core's copy, which
-    counts from the device's front (Waqas, #160)."""
+    camera: the report is the one the server made (app["live"]["stairs"]), not the core's copy,
+    which counts from the device's front (Waqas, #160)."""
     return (
         report is not None
         and report.ground == Ground.STAIRS_UP
@@ -409,7 +580,9 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
     stamp = mw.clock()
-    app["stairs"] = GroundReport(stamp, box.confidence, Source.DETECTOR, Ground(ground), distance)
+    app["live"]["stairs"] = GroundReport(
+        stamp, box.confidence, Source.DETECTOR, Ground(ground), distance
+    )
     mw.on_ground(Source.DETECTOR, Ground(ground), box.confidence, distance, stamp)
 
 
@@ -461,7 +634,7 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     r = seen.reading
     if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
-    stairs = seen.ahead_m is not None and the_stairs(app["stairs"], seen.ahead_m, now)
+    stairs = seen.ahead_m is not None and the_stairs(app["live"]["stairs"], seen.ahead_m, now)
     if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     d = app["depth"]
@@ -491,6 +664,20 @@ async def depth_jpg(request: web.Request) -> web.Response:
 # ---- the dashboard and the test evidence
 
 
+def metres(x, y, within_m: float = 20_000.0) -> tuple[float, float] | None:
+    """A point picked on the map, metres east and north of the start; None unless both are
+    finite numbers within reach."""
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (x, y)):
+        return None
+    try:  # a JSON integer can be too large for a float (10**400): refused, not raised (#188)
+        x, y = float(x), float(y)
+    except OverflowError:
+        return None
+    if not (math.isfinite(x) and math.isfinite(y)) or math.hypot(x, y) > within_m:
+        return None
+    return x, y
+
+
 async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
     app = request.app
     ws = web.WebSocketResponse()
@@ -513,6 +700,24 @@ async def ws_dashboard(request: web.Request) -> web.WebSocketResponse:
                 app["mw"].mark_place()
             elif d.get("type") == "place" and d.get("do") == "way":
                 app["mw"].way_back()
+            elif d.get("type") == "place" and d.get("do") == "destination":
+                if (where := metres(d.get("x"), d.get("y"))) is not None:
+                    app["mw"].set_destination(*where)
+            elif d.get("type") == "place" and d.get("do") == "clear":
+                app["mw"].clear_destination()
+            elif d.get("type") == "place" and d.get("do") == "restart":
+                app["mw"].start_again()
+                old = app["floors"]  # the floor stays; its history and height trace go
+                app["floors"] = floors.FloorTracker(floor=old.floor, floor_h=old.floor_h)
+            elif (
+                d.get("type") == "floor"
+                and isinstance(d.get("set"), int)
+                and not isinstance(d["set"], bool)  # JSON true is an int to Python
+                and -5 <= d["set"] <= 60
+            ):
+                app["floors"].set_floor(app["mw"].clock(), d["set"])
+            elif d.get("type") == "floor" and (h := number(d.get("height"))) and 2.4 <= h <= 6.0:
+                app["floors"].floor_h = h
     finally:
         app["dashboards"].discard(ws)
     return ws
@@ -544,9 +749,10 @@ async def ws_caregiver(request: web.Request) -> web.WebSocketResponse:
 async def status(request: web.Request) -> web.Response:
     """The caregiver's status once, as JSON, from the last tick (it does not tick the core)."""
     app = request.app
-    if app["snapshot"] is None:
+    snap = app["live"]["snapshot"]
+    if snap is None:
         raise web.HTTPServiceUnavailable(text="starting up")
-    return web.json_response(caregiver_view(app, app["snapshot"]))
+    return web.json_response(caregiver_view(app, snap))
 
 
 async def frame_jpg(request: web.Request) -> web.Response:
@@ -583,14 +789,41 @@ def models_status(app: web.Application) -> dict:
         "classifier": app["classifier"] is not None,
         "speech": app["recognizer"] is not None,
         "depth": app["depth_model"] is not None,
+        "sounds": app["listener"] is not None,
     }
+
+
+def floor_step(app: web.Application, snap: dict) -> dict:
+    """Feed the floor tracker what the tick knows: the steps, and the stairs the camera saw (each
+    report once, with its distance: the tracker counts only stairs right in front); then its view
+    for the pages."""
+    tr, mw = app["floors"], app["mw"]
+    now = mw.clock()
+    tr.on_steps(now, mw.nav.track.steps)
+    tr.on_position_source(now, snap["position"]["track"]["source"])
+    seen = app["live"]["stairs"]
+    if seen is not None and seen.stamp != app["live"].get("stairs_fed"):
+        app["live"]["stairs_fed"] = seen.stamp
+        way = {Ground.STAIRS_UP: 1, Ground.STAIRS_DOWN: -1}.get(seen.ground)
+        if way:
+            tr.on_stairs(now, way, seen.distance_m)
+    tr.tick(now)
+    return tr.view(now)
 
 
 async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
     snap["models"] = models_status(app)
-    app["snapshot"] = snap
+    snap["floors"] = floor_step(app, snap)
+    snap["phone_online"] = bool(app["phones"])
+    wifi_now = app["wifi"]
+    if wifi_now is not None:
+        if mw.clock() - app["live"].get("wifi_read", -9.0) >= 0.5:  # two reads a second
+            app["live"]["wifi_read"] = mw.clock()
+            wifi_now.sample(mw.clock())
+        snap["wifi_laptop"] = wifi_now.view()
+    app["live"]["snapshot"] = snap
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
     snap["depth"] = app["depth"].get("view")
@@ -619,9 +852,14 @@ async def loop(app: web.Application) -> None:
 
 async def start_loop(app: web.Application) -> None:
     app["loop"] = asyncio.create_task(loop(app))
+    if app["csi"] is not None:
+        app["live"]["csi_task"] = asyncio.create_task(csi_task(app))
 
 
 async def stop_loop(app: web.Application) -> None:
+    task = app["live"].get("csi_task")
+    if task is not None:
+        task.cancel()
     app["loop"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app["loop"]
@@ -630,9 +868,42 @@ async def stop_loop(app: web.Application) -> None:
             await cache.close()
     if app["recorder"] is not None:
         app["recorder"].close()
+    if app["wifi"] is not None:
+        app["wifi"].close()
 
 
 # ---- command line
+
+
+def wifi_sensing_from(a) -> dict | None:
+    """The Wi-Fi sensing set up from the command line: None without --csi-replay or --csi-serial."""
+    if not (a.csi_replay or a.csi_serial):
+        return None
+    model_path = Path(a.csi_model)
+    model = csi.ZoneModel.load(model_path) if model_path.exists() else None
+    scores_path = model_path.with_suffix(".json")
+    scores = json.loads(scores_path.read_text(encoding="utf-8")) if scores_path.exists() else None
+    sensing = csi.Sensing(model)
+    out = {"sensing": sensing, "scores": scores, "replay": None, "serial": None}
+    if a.csi_serial:
+        try:
+            import serial  # noqa: F401
+        except ImportError:
+            raise SystemExit("--csi-serial needs pyserial: pip install pyserial") from None
+        out["serial"] = (a.csi_serial, a.csi_baud)
+    else:  # the held-out sessions: the model never saw them
+        folder = Path(a.csi_replay)
+        recs = {k: folder / f"{k}_2.csv" for k in ("empty", "one", "two", "five")}
+        recs = {k: v for k, v in recs.items() if v.exists()}
+        if not recs:
+            raise SystemExit(f"--csi-replay: no *_2.csv recordings in {folder}")
+        out["replay"] = csi.Replay(recs, sensing)
+    print(
+        f"wifi sensing: {'ESP32 on ' + a.csi_serial if a.csi_serial else 'recordings'}, "
+        f"model {'loaded' if model else 'not found: ' + str(model_path)}",
+        flush=True,
+    )
+    return out
 
 
 def main(argv=None) -> None:
@@ -647,9 +918,13 @@ def main(argv=None) -> None:
                    help="BC-ResNet checkpoint, for offline command words")  # fmt: skip
     p.add_argument("--kws-threshold", type=float, default=0.9,
                    help="the least probability of a command word to act on")  # fmt: skip
-    p.add_argument("--kws-stop-threshold", type=float,
-                   help="the least probability of stop (default: --kws-threshold)")  # fmt: skip
+    p.add_argument("--kws-stop-threshold", type=float, default=0.7,
+                   help="the least probability of stop, lower: a missed stop is the unsafe "
+                        "case (0.7 for the 100-epoch model: docs/results.md); the cost: at "
+                        "10 dB about 1 in 65 other words is heard as stop")  # fmt: skip
     p.add_argument("--stairs-model", help="ONNX file of the stairs classifier")
+    p.add_argument("--sounds", metavar="EFFICIENTAT",
+                   help="EfficientAT checkout, to hear sirens and horns")  # fmt: skip
     p.add_argument("--depth", nargs="?", const=dz.MODEL, metavar="MODEL",
                    help="depth from the camera image (Depth Anything V2 by default)")  # fmt: skip
     p.add_argument("--depth-size", type=int, default=266, help="depth model input; 518 is finer")
@@ -669,6 +944,18 @@ def main(argv=None) -> None:
                    help="keep what the phone sends, to play with demo.replay")  # fmt: skip
     p.add_argument("--on-foot", action="store_true",
                    help="the phone is carried by a person walking, not on the device")  # fmt: skip
+    p.add_argument(
+        "--csi-replay",
+        metavar="FOLDER",
+        help="Wi-Fi sensing from recorded ESP32 CSI (tools/wifi_csi.py --fetch)",
+    )
+    p.add_argument("--csi-serial", metavar="PORT", help="Wi-Fi sensing from a live ESP32 (esp-csi)")
+    p.add_argument("--csi-baud", type=int, default=115200)
+    p.add_argument(
+        "--csi-model",
+        default=str(Path(__file__).parent / "csi_model" / "wifi_csi_office.npz"),
+        help="the model from tools/wifi_csi.py; it holds for the room it was fitted in",
+    )
     p.add_argument("--directions", action="store_true",
                    help="also say what is ahead, for a smart cane or glasses host")  # fmt: skip
     a = p.parse_args(argv)
@@ -685,6 +972,13 @@ def main(argv=None) -> None:
 
         recognizer = kws.Spotter.load(a.kws, a.kws_threshold, a.kws_stop_threshold)
     depth = dz.DepthModel.load(a.depth, a.depth_size) if a.depth else None
+    listener = sounds.Listener(sounds.load(a.sounds)) if a.sounds else None
+    if listener is not None and recognizer is None:
+        print(
+            "sounds: the phone now streams its microphone for sirens and horns, so its own voice "
+            "recognition is off; add --vosk-model for voice commands",
+            flush=True,
+        )
     mount = dz.Mount(a.camera_height, a.camera_fov)
     key = access.load_or_make()  # the server can drive the device: no answer without it
     app = build_app(
@@ -698,6 +992,9 @@ def main(argv=None) -> None:
         recorder=recorder,
         tile_cache=tiles.TileCache(a.tile_cache),
         key=key,
+        listener=listener,
+        laptop_wifi=wifi.LaptopWifi(),
+        wifi_sensing=wifi_sensing_from(a),
     )
     if a.record:
         print(f"recording the phone into {a.record}")
