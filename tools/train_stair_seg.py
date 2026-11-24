@@ -112,14 +112,29 @@ def dim(rgb: np.ndarray, rng: np.random.Generator, light=None, gamma=None, noise
 
 
 DARK = {"light": 0.3, "gamma": 2.0, "noise": 0.03}  # the fixed dark copy of the validation frames
+CLIP_M = 20.0  # depth is clipped to this and scaled to 0..1 as a fourth channel
+
+
+def depth_of(frame: Path, folder: str) -> Path:
+    """Where a frame's depth is kept: <camera>/<folder>/<frame>.npy, in metres."""
+    return frame.parent.parent / folder / (frame.stem + ".npy")
+
+
+def depth_channel(path: Path) -> np.ndarray:
+    d = np.nan_to_num(np.load(path).astype(np.float32), nan=0.0, posinf=CLIP_M, neginf=0.0)
+    d = np.clip(d, 0.0, CLIP_M) / CLIP_M
+    img = Image.fromarray((d * 255).astype(np.uint8)).resize((IMG, IMG))
+    return np.asarray(img, dtype=np.float32)[None] / 255.0
 
 
 class StairSeg(Dataset):
     """Frames and stair masks. low_light: a random dim version of each training frame half the
-    time. dark: every frame darkened the same way (DARK, seeded by its index), to score with."""
+    time. dark: every frame darkened the same way (DARK, seeded by its index), to score with.
+    depth: the folder beside video_frames that holds each frame's depth, as a fourth channel
+    (the darkening touches only the colour: a depth camera does not need light)."""
 
-    def __init__(self, pairs: list[tuple[Path, Path]], low_light=False, dark=False):
-        self.pairs, self.low_light, self.dark = pairs, low_light, dark
+    def __init__(self, pairs: list[tuple[Path, Path]], low_light=False, dark=False, depth=None):
+        self.pairs, self.low_light, self.dark, self.depth = pairs, low_light, dark, depth
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -133,8 +148,10 @@ class StairSeg(Dataset):
             rgb = dim(rgb, np.random.default_rng(i), **DARK)
         elif self.low_light and np.random.random() < 0.5:
             rgb = dim(rgb, np.random.default_rng())
-        x = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32))
-        return x, torch.from_numpy(seg)[None]
+        x = rgb.transpose(2, 0, 1).astype(np.float32)
+        if self.depth:
+            x = np.concatenate([x, depth_channel(depth_of(fp, self.depth))])
+        return torch.from_numpy(x), torch.from_numpy(seg)[None]
 
 
 def score(model: nn.Module, dl: DataLoader, dev: str) -> tuple[float, float, float]:
@@ -172,7 +189,20 @@ def main(argv: list[str] | None = None) -> int:
         metavar="WEIGHTS",
         help="only score these weights on the validation frames, plain and dark",
     )
+    ap.add_argument(
+        "--depth",
+        metavar="FOLDER",
+        help="add each frame's depth as a fourth channel, from <camera>/FOLDER/<frame>.npy "
+        "(SANPO's stereo depth as tools/fetch_sanpo_depth.py saves it: depth_npy)",
+    )
+    ap.add_argument(
+        "--only-with",
+        metavar="FOLDER",
+        help="use only frames that have depth in FOLDER (so an RGB run and a depth run are on "
+        "the same frames); --depth implies its own folder",
+    )
     a = ap.parse_args(argv)
+    only = a.only_with or a.depth
     torch.manual_seed(0)
     np.random.seed(0)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -186,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     stair: list[tuple[Path, Path]] = []
     nonstair: list[tuple[Path, Path]] = []
     for fp, mp in allp:
+        if only and not depth_of(fp, only).exists():
+            continue
         (stair if has_stairs(mp) else nonstair).append((fp, mp))
         if len(stair) >= a.cap and len(nonstair) >= a.cap:
             break
@@ -195,16 +227,16 @@ def main(argv: list[str] | None = None) -> int:
     va, tr = data[:nval], data[nval:]
     print(f"stair {len(stair)}  balanced {len(data)}  train {len(tr)} val {len(va)}", flush=True)
 
-    vl = DataLoader(StairSeg(va), batch_size=16, num_workers=4)
-    dark = DataLoader(StairSeg(va, dark=True), batch_size=16, num_workers=4)
-    model = UNet(3).to(dev)
+    vl = DataLoader(StairSeg(va, depth=a.depth), batch_size=16, num_workers=4)
+    dark = DataLoader(StairSeg(va, dark=True, depth=a.depth), batch_size=16, num_workers=4)
+    model = UNet(4 if a.depth else 3).to(dev)
     if a.eval:
         model.load_state_dict(torch.load(a.eval, map_location=dev))
         for name, dl in (("plain", vl), ("dark", dark)):
             p, r, i = score(model, dl, dev)
             print(f"{a.eval.name} {name}: precision {p:.3f} recall {r:.3f} IoU {i:.3f}")
         return 0
-    train = StairSeg(tr, low_light=a.low_light)
+    train = StairSeg(tr, low_light=a.low_light, depth=a.depth)
     tl = DataLoader(train, batch_size=16, shuffle=True, num_workers=8, drop_last=True)
     opt = torch.optim.Adam(model.parameters(), 1e-3)
     a.out.parent.mkdir(parents=True, exist_ok=True)
