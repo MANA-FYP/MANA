@@ -655,3 +655,15 @@ def test_the_depth_models_input_goes_to_the_models_device_and_its_output_comes_b
     model = dz.DepthModel(lambda **kw: Inputs(), Model(), 4)
     assert model.estimate(frame.getvalue()).shape == (4, 4)
     assert moved == ["cpu"]
+
+
+def test_a_gpu_asked_for_where_torch_has_none_falls_back_to_the_cpu(monkeypatch, capsys):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setenv("MANA_DEVICE", "cuda")
+    assert dz.device() == "cpu"
+    assert "no GPU here" in capsys.readouterr().out
+    monkeypatch.setenv("MANA_DEVICE", "cuda:1")
+    assert dz.device() == "cpu"
+    monkeypatch.setenv("MANA_DEVICE", "cpu")
+    assert dz.device() == "cpu"
