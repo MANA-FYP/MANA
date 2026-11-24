@@ -23,6 +23,10 @@ NAMES = [
     # things people carry or wear
     "bottle", "cup", "laptop", "keyboard", "mouse", "cell phone", "tablet", "book", "backpack",
     "handbag", "suitcase", "umbrella", "glasses", "hat",
+    # left on the floor, in the way: a user test missed a floor wiper and plastic, and none of these
+    # is among the 4,585 names of YOLOE's prompt-free model (mop, squeegee, bucket, plastic bag)
+    "mop", "broom", "bucket", "squeegee", "wiper", "plastic bag", "cable", "wet floor sign",
+    "ladder", "cart",
 ]  # fmt: skip
 
 

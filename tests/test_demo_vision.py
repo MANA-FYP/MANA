@@ -126,10 +126,10 @@ def test_furniture_gets_a_distance_but_a_door_does_not():
     assert [o.label for o in to_obstacles([couch, door], 640, 480)] == ["couch"]
 
 
-def test_the_open_vocabulary_list_has_42_names_and_no_repeats():
+def test_the_open_vocabulary_list_has_52_names_and_no_repeats():
     from demo.build_detector import NAMES
 
-    assert len(NAMES) == 42 and len(set(NAMES)) == 42
+    assert len(NAMES) == 52 and len(set(NAMES)) == 52
 
 
 def test_build_detector_saves_the_model_told_the_names(monkeypatch, tmp_path, capsys):
@@ -154,5 +154,61 @@ def test_build_detector_saves_the_model_told_the_names(monkeypatch, tmp_path, ca
     saved = []
     monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLOE=FakeYOLOE))
     build_detector.main(["--out", str(tmp_path / "m.pt")])
-    assert saved == [("yoloe-26n-seg.pt", build_detector.NAMES, "pe:42", str(tmp_path / "m.pt"))]
-    assert "42 object names" in capsys.readouterr().out
+    assert saved == [("yoloe-26n-seg.pt", build_detector.NAMES, "pe:52", str(tmp_path / "m.pt"))]
+    assert "52 object names" in capsys.readouterr().out
+
+
+def test_the_stairs_segmenter_is_none_when_the_weights_are_missing():
+    assert vision.StairSegmenter.load("no/such/weights.pt") is None
+
+
+def stairs_jpeg():
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (480, 360), (120, 120, 120)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def fake_segmenter(rows):
+    """A segmenter whose model calls the given rows of its 256 x 256 output stairs."""
+    torch = pytest.importorskip("torch")
+
+    class Model(torch.nn.Module):
+        def forward(self, x):
+            out = torch.full((1, 1, 256, 256), -10.0)
+            out[:, :, rows[0] : rows[1], 40:216] = 10.0
+            return out
+
+    return vision.StairSegmenter(Model(), "cpu")
+
+
+def test_stairs_in_part_of_the_picture_are_stairs_with_a_box_where_they_are():
+    seg = fake_segmenter((128, 256))  # the lower half: stairs half in view
+    label, conf = seg.classify(stairs_jpeg())
+    assert label == "stairs" and conf > 0.99
+    assert stair_ground(label) == "stairs"
+    box = seg.region(480, 360)
+    assert box.label == "stairs"
+    assert box.y1 == pytest.approx(180, abs=5) and box.y2 == pytest.approx(360, abs=5)
+    assert 40 * 480 / 256 <= box.x1 <= 48 * 480 / 256  # trimmed to the 2nd percentile
+
+
+def test_a_few_stray_pixels_are_level_ground_and_no_box():
+    seg = fake_segmenter((250, 252))  # under 2 % of the picture
+    label, _ = seg.classify(stairs_jpeg())
+    assert label == "level"
+    assert seg.region(480, 360) is None
+
+
+def test_the_trained_unet_loads_and_segments(tmp_path):
+    torch = pytest.importorskip("torch")
+    from tools.train_stair_seg import UNet
+
+    path = tmp_path / "seg.pt"
+    torch.save(UNet(3).state_dict(), path)
+    seg = vision.StairSegmenter.load(str(path))
+    assert seg is not None
+    assert seg.segment(stairs_jpeg()).shape == (256, 256)
