@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MANA Indoor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+  <link rel="stylesheet" href="/static/indoor.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><b>MANA</b><span class="sub">Indoor navigation</span></div>
+    <div class="status">
+      <span class="dot" id="linkDot"></span><span id="linkText">Waiting for the phone</span>
+      <span class="sep"></span><span class="mode" id="modeChip">Still</span>
+    </div>
+    <nav class="views"><a href="/live">Live view</a><a class="on" href="/indoor">Indoor</a></nav>
+  </header>
+
+  <main class="grid">
+    <!-- the floor: number, building, controls -->
+    <section class="panel floor">
+      <div class="ptitle"><span class="ic" data-icon="buildings"></span>Floor</div>
+      <div class="bigfloor"><span class="num" id="floorNum">?</span><div class="why"><b id="floorWhy">Not known yet</b><span id="floorSub">Set it once, or walk in from outside</span></div></div>
+      <svg class="building" id="building" viewBox="0 0 320 420" aria-label="The building, floor by floor"></svg>
+      <div class="controls">
+        <button id="down" title="One floor down">&minus;</button>
+        <button class="set" id="setFloor" title="This is the floor I am on">Set floor</button>
+        <button id="up" title="One floor up">+</button>
+      </div>
+      <label class="fh">Floor height
+        <select id="floorH"><option>3.0</option><option selected>3.2</option><option>3.5</option><option>4.0</option></select> m</label>
+    </section>
+
+    <!-- the map and the height -->
+    <section class="panel map">
+      <div class="ptitle"><span class="ic" data-icon="map"></span>Where<span class="spacer"></span>
+        <div class="seg" id="layers"><button data-layer="satellite" class="on">Satellite</button><button data-layer="streets">Streets</button></div>
+      </div>
+      <div class="mapbox">
+        <canvas id="mapCv"></canvas>
+        <div class="imagery" id="imagery" hidden></div>
+        <div class="maphint" id="mapHint">No GPS fix yet</div>
+      </div>
+    </section>
+
+    <section class="panel height">
+      <div class="ptitle"><span class="ic" data-icon="trend"></span>Height from the start<span class="spacer"></span>
+        <span class="legend"><i class="l1"></i>measured height <i class="l2"></i>vertical acceleration</span></div>
+      <canvas id="hCv"></canvas>
+      <div class="hfoot"><span id="hNow">0.0 m</span><span id="gpsAlt">GPS altitude: none</span></div>
+    </section>
+
+    <!-- camera, events, Wi-Fi -->
+    <section class="panel cam">
+      <div class="ptitle"><span class="ic" data-icon="camera"></span>Camera<span class="spacer"></span><span class="tag" id="stairsTag" hidden></span></div>
+      <div class="cambox"><canvas id="camCv"></canvas><div class="camwait" id="camWait">Waiting for the phone camera</div></div>
+    </section>
+
+    <section class="panel events">
+      <div class="ptitle"><span class="ic" data-icon="list"></span>Floor changes</div>
+      <ol id="events"><li class="empty">Stairs climbed, lift rides and settings appear here</li></ol>
+    </section>
+
+    <section class="panel wifi">
+      <div class="ptitle"><span class="ic" data-icon="wifi"></span>Wi-Fi signal (this laptop)<span class="spacer"></span><b id="dbm">&ndash;</b></div>
+      <canvas id="wCv"></canvas>
+      <p class="wnote" id="wNote">Reading the laptop's Wi-Fi&hellip;</p>
+    </section>
+  </main>
+
+  <script src="/static/indoor.js"></script>
+</body>
+</html>

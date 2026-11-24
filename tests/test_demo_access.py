@@ -106,3 +106,19 @@ def test_with_no_key_the_app_answers_as_before():  # build_app() in the other te
             await c.close()
 
     asyncio.run(go())
+
+
+def test_every_screen_takes_the_key_from_its_address_and_opens_its_socket():
+    async def go():
+        c = await client_of()
+        try:
+            for page in ("/live", "/indoor"):
+                r = await c.get(f"{page}?k={KEY}", allow_redirects=False)
+                assert r.status == 302 and r.headers["Location"] == page
+                assert (await c.get(page)).status == 200
+            ws = await c.ws_connect("/ws/dashboard")  # what both screens read
+            await ws.close()
+        finally:
+            await c.close()
+
+    asyncio.run(go())
