@@ -106,3 +106,16 @@ def test_a_sanpo_depth_file_decodes_to_metres():
     depth = np.arange(6, dtype=np.float16).reshape(2, 3)
     raw = gzip.compress(np.concatenate([np.array([2, 3], np.float16), depth.ravel()]).tobytes())
     assert np.array_equal(decode(raw), depth)
+
+
+def test_frames_with_stereo_depth_and_none_estimated_are_the_ones_to_estimate(tmp_path):
+    from tools.estimate_sanpo_depth import todo
+
+    root = with_depth(sanpo_tree(tmp_path), every=2)  # 6 frames with stereo depth
+    cam = root / "train" / "s1" / "camera_chest"
+    (cam / "depth_dav2").mkdir()
+    np.save(cam / "depth_dav2" / "000000.npy", np.zeros((2, 2), np.float16))  # one done already
+    jobs = todo(root)
+    assert len(jobs) == 5
+    frame, out = jobs[0]
+    assert frame.name == "000002.png" and out == cam / "depth_dav2" / "000002.npy"
