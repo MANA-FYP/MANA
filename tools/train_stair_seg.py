@@ -20,6 +20,7 @@ sessions, holding out a seeded fraction by frame for validation, and reports sta
 precision, recall and IoU. It needs the SANPO frames and masks on disk (tools/fetch_sanpo.py),
 laid out as <root>/<split>/<session>/<camera>/{video_frames,segmentation_masks}/*.png.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,13 +35,17 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
 STAIR_ID = 15  # SANPO 'stairs' class, stored in the mask's red channel (see sanpo_to_yolo.py)
-IMG = 256      # frames are resized to this square for training
+IMG = 256  # frames are resized to this square for training
 
 
 def conv(i: int, o: int) -> nn.Sequential:
     return nn.Sequential(
-        nn.Conv2d(i, o, 3, padding=1), nn.BatchNorm2d(o), nn.ReLU(inplace=True),
-        nn.Conv2d(o, o, 3, padding=1), nn.BatchNorm2d(o), nn.ReLU(inplace=True),
+        nn.Conv2d(i, o, 3, padding=1),
+        nn.BatchNorm2d(o),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(o, o, 3, padding=1),
+        nn.BatchNorm2d(o),
+        nn.ReLU(inplace=True),
     )
 
 
@@ -128,7 +133,8 @@ def score(model: nn.Module, dl: DataLoader, dev: str) -> tuple[float, float, flo
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description=__doc__.split("\n\n")[0], formatter_class=argparse.RawTextHelpFormatter)
+        description=__doc__.split("\n\n")[0], formatter_class=argparse.RawTextHelpFormatter
+    )
     ap.add_argument("--root", type=Path, default=Path("datasets/sanpo"))
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--cap", type=int, default=4000, help="max stair frames (+ equal non-stair)")
@@ -174,10 +180,15 @@ def main(argv: list[str] | None = None) -> int:
         if i > best[2]:
             best = (p, r, i)
             torch.save(model.state_dict(), a.out)
-        print(f"ep{ep + 1} loss {loss.item():.3f} val P {p:.3f} R {r:.3f} IoU {i:.3f}"
-              f" (best IoU {best[2]:.3f})", flush=True)
-    print(f"best stair-pixel precision {best[0]:.3f} recall {best[1]:.3f} IoU {best[2]:.3f};"
-          f" saved {a.out}")
+        print(
+            f"ep{ep + 1} loss {loss.item():.3f} val P {p:.3f} R {r:.3f} IoU {i:.3f}"
+            f" (best IoU {best[2]:.3f})",
+            flush=True,
+        )
+    print(
+        f"best stair-pixel precision {best[0]:.3f} recall {best[1]:.3f} IoU {best[2]:.3f};"
+        f" saved {a.out}"
+    )
     return 0
 
 
