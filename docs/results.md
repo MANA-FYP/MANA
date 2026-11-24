@@ -944,6 +944,61 @@ python3 tools/sanpo_to_yolo.py --root datasets/sanpo-eval --out datasets/sanpo-e
 python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --weights yolo26n.pt --imgsz 416
 python3 tools/eval_detector.py --data datasets/sanpo-eval-yolo --imgsz 480 \
     --weights yoloe-26n-mana.pt yoloe-26s-mana.pt   # built with demo/build_detector.py
+
+## People from Wi-Fi: ESP32 channel state, on held-out sessions (#194)
+
+Measured on 17 November 2026 with `tools/wifi_csi.py` on the Office Localization recordings
+(`datasets.md`): two ESP32-C6 boards 3 m apart in an office, about 200 packets a second. Each
+one-second window gets a label from a linear model (logistic regression on how much each of the 56
+subcarriers flickers and the shape of their mean strength), fitted on each label's first session
+and scored on sessions it never saw: the authors' second sessions and three more empty ones. For
+comparison, the RSSI alone (its mean and spread over the window), which is all a laptop or a phone
+can read, with two models: the same logistic regression, and a random forest of 300 trees, the
+more flexible one, so the gap is not down to the model.
+
+| Session | Windows | Labelled right, CSI | RSSI alone, same model | RSSI alone, random forest |
+|---|---:|---:|---:|---:|
+| Empty (session 2) | 999 | 1.00 | 1.00 | 1.00 |
+| Person in zone 1 | 997 | 0.99 | 0.71 (0.28 as zone 5) | 0.56 (0.41 as zone 2) |
+| Person in zone 2 | 997 | 0.76 (0.24 as zone 5) | 0.68 (0.11 as empty) | 0.73 (0.11 as empty) |
+| Person in zone 5 | 423 | 0.98 | 0.85 | 0.90 |
+| Empty (session 3) | 999 | 1.00 | 1.00 | 1.00 |
+| Empty (session 4) | 998 | 1.00 | 1.00 | 1.00 |
+| Empty (session 5) | 982 | 0.99 | 0.99 | 0.99 |
+
+What follows:
+
+- **Empty or not was right in 99.8 % of the windows** (RSSI alone: 98.1 % with the same model,
+  98.2 % with the forest). Most windows are empty, which flatters that pooled figure, so both
+  sides of it:
+  - CSI found the person in all 2,417 windows with one, and called 10 of the 3,978 empty windows
+    occupied, all in empty session 5.
+  - RSSI alone missed the person in 115 windows (same model) or 108 (forest), all but one in
+    zone 2, and called 7 or 9 empty windows occupied.
+  - Balanced (the mean of the two rates): 99.9 % for CSI, 97.5 % and 97.7 % for RSSI.
+- **Zone 1 is where the subcarriers clearly help:** 0.99 with CSI, against 0.71 (same model) or
+  0.56 (forest) with RSSI. In zone 2 the three are close (0.76, 0.68, 0.73) and in zone 5 nearer
+  (0.98, 0.85, 0.90), each from one session against one session, so that is not shown for them.
+  Zones 2 and 5 are confused in a quarter of zone 2's windows; where the zones are in the room is
+  not published.
+- **Movement is not presence.** The movement level (the median flicker) went over the empty room's
+  99th percentile in 77 % of zone 2's windows but only 2 % of zone 5's and 13 % of zone 1's: those
+  people were mostly still. They are found by the shape of the subcarriers, not by flicker. The
+  same threshold is passed in 1 % to 18 % of the held-out empty windows (18 % in empty session 5),
+  so the screen's "moving" also shows in an empty room.
+- Limits:
+  - One office, one placement of the boards, sessions from one month, a person per session, line
+    of sight.
+  - One test session per label: a zone's 997 windows are one recording, and neighbouring windows
+    are alike, so 0.76 against 0.68 or 0.73 in zone 2 is one session against one session.
+  - A model fitted in one room does not carry over to another; each place needs a few minutes of
+    its own recordings.
+  - Not yet tried on our own boards, and not yet an input to the decision core: the screen
+    (`/wifi`) shows the proposed use, a person sensed but not seen slows the device and never
+    stops it.
+
+```
+python tools/wifi_csi.py --data datasets/office_csi --fetch --out demo/csi_model/wifi_csi_office.npz
 ```
 
 ## A first fine-tune on SANPO, on a laptop CPU (#49)

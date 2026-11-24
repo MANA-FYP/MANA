@@ -18,6 +18,7 @@ A dataset that is already on disk is skipped, and a stopped download picks up wh
 | [COCO 2017 val](#coco) | Check of the pretrained COCO detector (YOLO26n) | Annotations CC BY 4.0; images under their Flickr licences | 1.1 GB, 5,000 images | Automatic |
 | [Speech Commands v2](#speech-commands-v2) | BC-ResNet-8 command words (#46) | CC BY 4.0 | 2.4 GB, 105,829 clips | Automatic |
 | [UrbanSound8K](#urbansound8k) | EfficientAT-mn10 siren and horn detection (#47) | CC BY-NC 4.0 (non-commercial) | 6.0 GB, 8,732 clips | Automatic |
+| [Office Localization](#office-localization-wi-fi-csi) | Wi-Fi sensing: people and their zone from ESP32 CSI (#194) | CC BY 4.0 | About 950 MB, 11 sessions | `tools/wifi_csi.py --fetch` |
 
 EfficientAT-mn10 starts from the authors' weights, which are already trained on AudioSet, so we do not download AudioSet. We only test on UrbanSound8K: both models are used as they come, with no fine-tuning (#183), and its licence (CC BY-NC 4.0) keeps it to non-commercial use.
 
@@ -95,6 +96,13 @@ EfficientAT-mn10 starts from the authors' weights, which are already trained on 
 - **Licence:** CC BY-NC 4.0, as listed on the Zenodo record: free for research and teaching, **not for commercial use**. A model fine-tuned on it inherits that limit, which is fine for this project but must be noted if MANA is ever sold.
 - **Contents:** 8,732 labelled clips of up to 4 seconds in 10 classes (6.0 GB). MANA uses `siren` and `car_horn` against the other eight.
 - **Split:** the 10 official folds. The authors ask that results are reported with 10-fold cross-validation on these folds and never with a random split (clips from the same recording sit in the same fold). We report the mean over the 10 folds.
+
+## Office Localization (Wi-Fi CSI)
+
+- **Source:** Gad, Batool, Fouda, Verma and Fadlullah, *WiFi Sensing-Based Human Activity Recognition For Smart Home Applications Using Commodity Access Points*, IEEE, 2026; [Hugging Face: gadgadgad/OfficeLocalization](https://huggingface.co/datasets/gadgadgad/OfficeLocalization).
+- **Licence:** CC BY 4.0: free to use, with credit.
+- **Contents:** two ESP32-C6 boards 3 m apart in an office (one sending, one receiving), 802.11n at 20 MHz, about 200 packets a second, each one esp-csi `CSI_DATA` row: RSSI and 64 subcarriers as I/Q pairs. Sessions of 7 to 17 minutes with the room empty (5 sessions) or a person in zone 1, 2 or 5 (2 each); about 950 MB. Where the zones are in the room is not published.
+- **Split:** the authors' own, by session: `*_1` to fit, `*_2` to test. MANA also uses `empty_3` to `empty_5` as test sessions, to count false alarms. `tools/wifi_csi.py --fetch` downloads it to `datasets/office_csi/` (not in git); the fitted model, a few kilobytes, is in `demo/csi_model/`.
 
 ## Our own phone recordings
 
