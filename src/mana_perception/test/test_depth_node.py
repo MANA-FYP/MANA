@@ -161,3 +161,36 @@ def test_the_chairs_roll_comes_with_its_pitch(ros):
     node.on_motion(MotionReport(trust=0.1, pitch_rad=-0.4, roll_rad=0.035))
     assert node.roll_now(node.get_clock().now()) == 0.0
     node.destroy_node()
+
+
+def test_each_frame_tells_the_core_which_way_is_free(ros):
+    """A WayReport per frame: the three corridors as wide as the chair, a box ahead at 1.2 m."""
+    from mana_msgs.msg import WayReport
+
+    node, probe = DepthNode(), rclpy.create_node("probe")
+    ways = []
+    probe.create_subscription(WayReport, "way", ways.append, 10)
+    info_pub = probe.create_publisher(CameraInfo, "depth/camera_info", 10)
+    image_pub = probe.create_publisher(Image, "depth/image", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    executor.add_node(probe)
+    info = CameraInfo(width=syn.COLS, height=syn.ROWS)
+    info.k = [CAM.fx, 0.0, CAM.cx, 0.0, CAM.fy, CAM.cy, 0.0, 0.0, 1.0]
+    metres = syn.render_boxes([(1.2, 1.5, -0.3, 0.3, 0.0, 0.5)])
+    image = Image(height=syn.ROWS, width=syn.COLS, encoding="32FC1", is_bigendian=0)
+    image.step = syn.COLS * 4
+    image.data = np.where(np.isfinite(metres), metres, np.nan).astype("<f4").tobytes()
+    end = time.monotonic() + 5.0
+    while not ways and time.monotonic() < end:
+        info_pub.publish(info)
+        image_pub.publish(image)
+        executor.spin_once(timeout_sec=0.05)
+    for n in (node, probe):
+        n.destroy_node()
+
+    assert ways, "no way report was published"
+    w = ways[0]
+    assert abs(w.ahead_m - 1.2) < 0.1 and w.trust == pytest.approx(0.9)
+    assert w.left_m == float("inf") and w.right_m == float("inf")
+    assert w.header.stamp.sec > 0

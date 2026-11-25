@@ -39,7 +39,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport
+from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport, WayReport
 from mana_perception import depth as dp
 from mana_perception import structure
 
@@ -68,6 +68,7 @@ class DepthNode(Node):
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
         self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
+        self.way = self.create_publisher(WayReport, "way", 10)  # which way is open
 
     def on_info(self, m: CameraInfo) -> None:
         fx, fy, cx, cy = m.k[0], m.k[4], m.k[2], m.k[5]
@@ -133,7 +134,12 @@ class DepthNode(Node):
         # a frame stamped 0 (1970) would make the core drop every report as stale
         msg.header.stamp = m.header.stamp if stamped else now.to_msg()
         self.ground.publish(msg)
-        found = structure.find(image, self.cam, self.structure, pitch, self.roll_now(now))
+        roll = self.roll_now(now)
+        left, ahead, right = structure.way(image, self.cam, self.structure, pitch, roll)
+        way = WayReport(trust=self.trust, left_m=left, ahead_m=ahead, right_m=right)
+        way.header = msg.header
+        self.way.publish(way)
+        found = structure.find(image, self.cam, self.structure, pitch, roll)
         if found is not None:
             block = ObstacleReport(
                 trust=self.trust,

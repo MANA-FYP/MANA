@@ -711,3 +711,23 @@ def test_a_door_sign_waiting_is_said_after_the_stop_at_that_door_not_dropped():
     q.push(say("Stop. Obstacle ahead, stopping.", URGENT, 0.6), 0.6)
     said = [m.text for t in range(6, 120) if (m := q.release(t / 10))]
     assert said == ["Stop. Obstacle ahead, stopping.", "Door ahead. Pull to open."]
+
+
+def test_which_way_is_open_is_told_on_two_frames_in_a_row_and_not_repeated():
+    from mana_core.messages import NOTICE, WayTeller, way_open
+
+    inf, nan = math.inf, math.nan
+    assert way_open(inf, 1.0, 1.0) == "Way ahead blocked. Open to your left."
+    assert way_open(nan, 1.0, inf) == "Way ahead blocked. Open to your right."  # not seen: not open
+    assert way_open(inf, nan, inf) is None  # the way ahead not seen: nothing to say
+    assert way_open(inf, inf, 0.5) is None  # the way ahead is clear
+    w = WayTeller()
+    assert w.on_frame(inf, 1.0, 1.0, 0.0) is None  # once is not enough
+    said = w.on_frame(inf, 1.0, 1.0, 0.2)
+    assert said.text == "Way ahead blocked. Open to your left." and said.kind == NOTICE
+    assert said.priority == Priority.WARNING and said.speak
+    assert w.on_frame(inf, 1.0, 1.0, 5.0) is None  # the same, within 10 s
+    assert w.on_frame(1.0, 1.0, inf, 5.2) is None
+    assert w.on_frame(1.0, 1.0, inf, 5.4).text == "Way ahead blocked. Open to your right."
+    assert w.on_frame(inf, 1.0, 1.0, 12.0) is None  # changed back: two in a row again
+    assert w.on_frame(inf, 1.0, 1.0, 12.2).text == "Way ahead blocked. Open to your left."

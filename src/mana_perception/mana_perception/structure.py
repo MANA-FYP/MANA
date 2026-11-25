@@ -132,6 +132,44 @@ def points(depth: np.ndarray, cam: Camera, mount: Camera | None = None, roll_rad
     return ahead[ok], np.broadcast_to(left, z.shape)[ok], height[ok], own[ok]
 
 
+def way_points(depth: np.ndarray, cam: Camera, chair_pitch_rad=0.0, chair_roll_rad=0.0):
+    """points() for find and way, with the device's own pitch and roll."""
+    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
+    return points(depth, seen_by, cam, chair_roll_rad)
+
+
+def way(
+    depth: np.ndarray,
+    cam: Camera,
+    settings: Settings = DEFAULTS,
+    chair_pitch_rad: float = 0.0,
+    chair_roll_rad: float = 0.0,
+    open_m: float = 2.5,
+) -> tuple[float, float, float]:
+    """How far the way is free to the left, ahead and to the right: three corridors as wide as the
+    device, side by side. Each is the distance to the nearest thing blocking it, inf when nothing
+    does, or NaN when less than half of it is seen out to open_m (beside the device, near, is out
+    of the camera's view: a side not seen is not called open)."""
+    st = settings
+    pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
+    ahead, left = pts[0], pts[1]
+    width = st.device_width_m + 2.0 * st.margin_m
+    near = max(st.min_range_m, st.body_m)
+    bins = max(1, math.ceil((open_m - near) / st.bin_m))
+    out = []
+    for offset in (width, 0.0, -width):
+        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
+        filled = np.bincount(
+            np.floor((ahead[lane] - near) / st.bin_m).astype(int), minlength=bins
+        )
+        if (filled >= st.min_points).sum() < bins / 2.0:
+            out.append(NAN)
+            continue
+        found = find(depth, cam, st, chair_pitch_rad, chair_roll_rad, offset, pts)
+        out.append(math.inf if found is None else found.distance_m)
+    return out[0], out[1], out[2]
+
+
 def min_height(distance_m: float, settings: Settings = DEFAULTS) -> float:
     """The lowest object reported at this distance: above the depth noise there."""
     return max(settings.min_height_m, settings.noise_per_m2 * distance_m**2)
@@ -143,14 +181,20 @@ def find(
     settings: Settings = DEFAULTS,
     chair_pitch_rad: float = 0.0,
     chair_roll_rad: float = 0.0,
+    offset_m: float = 0.0,
+    pts: tuple | None = None,
 ) -> Obstacle | None:
     """The nearest thing blocking the device's corridor in one depth image, or None. cam is the
     camera as mounted; chair_pitch_rad and chair_roll_rad the device's own pitch and roll (REP 103:
-    nose down, left side up are positive), as depth.read_ground takes the pitch."""
+    nose down, left side up are positive), as depth.read_ground takes the pitch. offset_m moves the
+    corridor to the left (positive) or right, as wide as the device: a way it could turn to. pts:
+    the image's points already worked out (points()), to read several corridors from one image."""
     st = settings
     half = st.device_width_m / 2.0 + st.margin_m
-    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
-    ahead, left, height, own = points(depth, seen_by, cam, chair_roll_rad)
+    if pts is None:
+        pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
+    ahead, left, height, own = pts
+    left = left - offset_m
     keep = (np.abs(left) <= half) & (ahead >= st.min_range_m) & (ahead < st.max_range_m)
     keep &= own >= st.body_m
     ahead, left, height = ahead[keep], left[keep], height[keep]
