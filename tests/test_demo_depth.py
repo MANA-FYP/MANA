@@ -669,6 +669,28 @@ def test_a_gpu_asked_for_where_torch_has_none_falls_back_to_the_cpu(monkeypatch,
     assert dz.device() == "cpu"
 
 
+def test_a_report_from_a_frame_taken_too_long_ago_is_dropped_by_the_core():
+    """Reports are stamped when their frame was taken, not when the model finished with it, so a
+    slow model or link makes them late, and the core drops them (readiness review)."""
+    pytest.importorskip("aiohttp")
+    from mana_core.decision import Source
+    from test_demo_server import jpeg
+
+    from demo import server
+
+    app = server.build_app(depth=RenderedDepth(wall(0.6)), mount=MOUNT)
+    mw = app["mw"]
+    mw.gravity = (0.0, 9.81 * math.cos(PITCH), 9.81 * math.sin(PITCH))
+    for _ in range(3):  # level floor first: the scale is learned
+        server.depth_step(app, jpeg())
+    now = mw.clock()
+    server.depth_step(app, jpeg(), now - 1.0)  # a wall 0.6 m ahead, in a frame taken 1 s ago
+    assert mw.core.obstacles[Source.CAMERA].stamp == pytest.approx(now - 1.0)
+    assert not mw.core.tick(now).stop  # too old to act on: the core's max_age_s is 0.5 s
+    server.depth_step(app, jpeg(), mw.clock())  # the same wall, just taken
+    assert mw.core.tick(mw.clock()).stop
+
+
 # ---- which way is open: the left, the middle and the right of the picture (readiness review)
 
 

@@ -439,6 +439,7 @@ async def on_text(app: web.Application, ws: web.WebSocketResponse, text: str) ->
         ms = number(d.get("ms"))  # as the phone says it: never below 0, never not a number
         if ms is not None:
             mw.on_heartbeat(max(0.0, ms), now)
+            app["live"]["rtt_ms"] = max(0.0, ms)  # half of it: how long ago a frame was taken
     elif kind == "sensor":
         mw.on_sensor_switch(str(d.get("id", "")), bool(d.get("on")), now)
     elif kind == "mic":
@@ -463,7 +464,11 @@ async def on_binary(app: web.Application, data: bytes) -> None:
     tag, payload = data[0], data[1:]
     now = mw.clock()
     if tag == 1:
-        await on_frame(app, payload, now)
+        # every report from this frame is stamped when it was taken, about half the round trip
+        # before it came, not when a model finished with it: then the core's max_age_s also
+        # counts the network and the models, and a late report is dropped (readiness review)
+        taken = now - (app["live"].get("rtt_ms") or 0.0) / 2000.0
+        await on_frame(app, payload, taken)
     elif tag == 2:
         samples = array("f")
         samples.frombytes(payload[: len(payload) // 4 * 4])
@@ -515,7 +520,7 @@ async def on_frame(app: web.Application, jpeg: bytes, now: float) -> None:
     frame.update(seq=frame["seq"] + 1, jpeg=jpeg)
     if app["depth_model"] is not None and not app["depth"]["busy"]:
         app["depth"]["busy"] = True  # its own worker: the detector does not wait for it
-        asyncio.get_running_loop().create_task(depth_task(app, jpeg))
+        asyncio.get_running_loop().create_task(depth_task(app, jpeg, now))
     if app["live"]["busy"] or (app["detector"] is None and app["classifier"] is None):
         return
     app["live"]["busy"] = True
@@ -552,9 +557,9 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
             nearest.setdefault(ob.label, ob.distance_m)
         # farthest first: the core keeps the newest report of the detector, so the nearest
         # obstacle must be the last one it hears
-        for ob in reversed(found):
-            mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, mw.clock())
-        mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], mw.clock())
+        for ob in reversed(found):  # stamped when the frame was taken (on_frame), as below
+            mw.on_obstacle(ob.label, ob.distance_m, ob.confidence, ob.bearing_rad, now)
+        mw.on_detections([(d.label, nearest.get(d.label)) for d in detections], now)
         stairs_seen(app, detections, w, h, now)
         door_sign(app, jpeg, detections, now)
         frame["boxes"] = [
@@ -591,7 +596,7 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
                 frame.update(w=w, h=h)
             box = region(w, h)
         if box is None:
-            mw.on_ground(Source.CLASSIFIER, ground, conf, now=mw.clock())
+            mw.on_ground(Source.CLASSIFIER, ground, conf, now=now)
         else:
             # where and which way, as for the detector's stairs box: the floor under its bottom
             # edge, and the depth's height of its middle
@@ -599,7 +604,7 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
             d = app["depth"]
             seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
             code, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
-            mw.on_ground(Source.CLASSIFIER, Ground(code), conf, distance, mw.clock())
+            mw.on_ground(Source.CLASSIFIER, Ground(code), conf, distance, now)
             frame["boxes"] = [b for b in frame.get("boxes", []) if b["label"] != SEGMENTED] + [
                 {"label": SEGMENTED, "confidence": round(conf, 2), "x1": box.x1, "y1": box.y1,
                  "x2": box.x2, "y2": box.y2,
@@ -772,7 +777,7 @@ def stairs_seen(app: web.Application, detections, w: int, h: int, now: float) ->
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
     ground, distance = dz.stairs_ground(box, w, h, app["mount"], pitch, seen)
-    stamp = mw.clock()
+    stamp = now  # when the frame was taken
     app["live"]["stairs"] = GroundReport(
         stamp, box.confidence, Source.DETECTOR, Ground(ground), distance
     )
@@ -842,25 +847,26 @@ def obstacles(
     return sorted(found, key=lambda o: o.distance_m)
 
 
-async def depth_task(app: web.Application, jpeg: bytes) -> None:
+async def depth_task(app: web.Application, jpeg: bytes, taken: float | None = None) -> None:
     try:
-        await asyncio.get_running_loop().run_in_executor(None, depth_step, app, jpeg)
+        await asyncio.get_running_loop().run_in_executor(None, depth_step, app, jpeg, taken)
     except Exception as e:  # a bad frame or the model failing must not stop the server
         print(f"depth: {e}", file=sys.stderr)
     finally:
         app["depth"]["busy"] = False
 
 
-def depth_step(app: web.Application, jpeg: bytes) -> None:
+def depth_step(app: web.Application, jpeg: bytes, taken: float | None = None) -> None:
     """Depth for one frame (in a worker thread): the ground and the nearest thing in the path go to
-    the middleware as the camera's own reports."""
+    the middleware as the camera's own reports, stamped when the frame was taken (taken; now when
+    not given): a slow model's reports then come late and are dropped by the core, not believed."""
     mw: Middleware = app["mw"]
     started = mw.clock()
     image = app["depth_model"].estimate(jpeg)
     pitch = None if mw.gravity is None else dz.camera_pitch(*mw.gravity)
     seen = app["depth_reader"].read(image, pitch, mw.nav.track.steps)
-    now = mw.clock()
-    mw.latency["depth_ms"] = round((now - started) * 1000, 1)
+    mw.latency["depth_ms"] = round((mw.clock() - started) * 1000, 1)
+    now = mw.clock() if taken is None else taken
     r = seen.reading
     if app["depth_ground"] and r is not None and r.ground != Ground.UNKNOWN:
         mw.on_ground(Source.CAMERA, Ground(r.ground), 0.8, r.distance_m, now, r.step_height_m)
