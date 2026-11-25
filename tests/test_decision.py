@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from mana_core.decision import (
     ASK_DOWN,
+    NO_DEPTH,
     STEP_STOP,
     WAITING,
     Command,
@@ -1274,3 +1275,46 @@ def test_a_more_telling_reason_to_slow_down_comes_first():
 def test_a_host_with_one_ground_sensor_or_none_set_does_not_wait():
     assert started(ground(DEPTH, Ground.FLAT), sensors=1).decision.speed_limit == 1.0
     assert core(ground(DEPTH, Ground.FLAT)).decision.speed_limit == 1.0  # ground_sensors 0
+
+
+# ---- the 3D camera, the one sensor that sees a drop: gone, the chair slows (readiness review)
+
+
+def with_depth(*reports, automatic=True):
+    c = DecisionCore(mount=Mount(ground_sensors=2, depth_required=True))
+    c.on_ground(ground(DEPTH, Ground.FLAT, age=3.0))  # it was up three seconds ago
+    if not automatic:
+        c.on_command(Command.MANUAL, 1.0)
+    for r in reports:
+        c.on_ground(r)
+    c.on_motion(level())
+    c.tick(NOW)
+    return c.decision
+
+
+def test_with_the_3d_camera_gone_the_cameras_level_ground_does_not_give_full_speed():
+    d = with_depth(ground(CAM, Ground.FLAT))
+    assert (d.speed_limit, d.stop, d.reason) == (LIM.slow, False, NO_DEPTH)
+
+
+def test_a_depth_hole_read_as_unknown_at_no_trust_slows_down_too():
+    d = with_depth(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.UNKNOWN, trust=0.0))
+    assert (d.speed_limit, d.reason) == (LIM.slow, NO_DEPTH)
+
+
+def test_with_the_3d_camera_back_it_drives_on():
+    d = with_depth(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert (d.speed_limit, d.reason) == (1.0, "Level ground")
+
+
+def test_in_manual_mode_without_the_3d_camera_the_users_speed_is_capped():
+    d = with_depth(ground(CAM, Ground.FLAT), automatic=False)
+    assert (d.speed_limit, d.reason) == (LIM.slow, NO_DEPTH)
+
+
+def test_a_host_without_a_3d_camera_set_is_not_slowed_for_it():
+    c = DecisionCore()  # the scripted world and the phone: depth_required False
+    c.on_ground(ground(DEPTH, Ground.FLAT, age=3.0))
+    c.on_ground(ground(CAM, Ground.FLAT))
+    c.on_motion(level())
+    assert c.tick(NOW).speed_limit == 1.0

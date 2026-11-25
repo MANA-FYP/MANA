@@ -87,6 +87,9 @@ class Priority(IntEnum):
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
 NO_GROUND = "Ground sensors not available, slowing down"
+# the 3D camera is the one sensor that sees a drop: without it the rest cannot tell level ground
+# from an edge (the camera's classifier has no drops, the lidar's plane is above the ground)
+NO_DEPTH = "Cannot see the ground ahead, slowing down"
 WAITING = "Waiting for the ground sensors"  # then which are up, as _waiting_reason says
 SENSOR_NAMES = {
     Source.CAMERA: "the camera",
@@ -207,6 +210,11 @@ class Mount:
     # once, the core slows down, so that the first one up alone cannot set full speed (#151).
     # 0: no wait, as in the scripted world and on the phone.
     ground_sensors: int = 0
+    # the host has a 3D camera, the only sensor that sees a drop: with no fresh, trusted ground
+    # report from it (glare, a depth hole read as unknown, the camera gone), the core slows down,
+    # in manual mode too, rather than drive on the camera's level ground alone (readiness review,
+    # 25 November). False: no such wait, as in the scripted world and on the phone.
+    depth_required: bool = False
 
     def travel_m(self, speed_limit: float) -> float:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
@@ -619,6 +627,15 @@ class DecisionCore:
         detector are the camera, as in _confirmed_step."""
         return len(self._ground_sensors_up()) < self.mount.ground_sensors
 
+    def _depth_missing(self) -> bool:
+        """The host has a 3D camera (Mount.depth_required) but no usable ground report from it now,
+        once it has reported at all (before that, "waiting" says which sensors are up)."""
+        return (
+            self.mount.depth_required
+            and Source.DEPTH_CAMERA in self.ground
+            and not any(r.source == Source.DEPTH_CAMERA for r in self._grounds())
+        )
+
     def _ground_sensors_up(self) -> set:
         return {SENSOR_OF.get(source, source) for source in self.ground}
 
@@ -678,13 +695,15 @@ class DecisionCore:
         self._set(self.mode, True, 0.0, reason, Priority.URGENT)
 
     def _manual(self):
-        """The user drives, on the undercarriage they chose. With no ground sensor at all MANA
-        cannot see a drop, so it slows down as in automatic mode (#85)."""
-        if self._grounds():
+        """The user drives, on the undercarriage they chose. With no ground sensor at all, or no
+        3D camera now on a host that has one, MANA cannot see a drop, so it slows down as in
+        automatic mode (#85)."""
+        if self._grounds() and not self._depth_missing():
             self._set(self.user_mode, False, self.user_speed, "Manual mode", Priority.INFO)
         else:
             speed = min(self.user_speed, self.limits.slow)
-            self._set(self.user_mode, False, speed, NO_GROUND, Priority.WARNING)
+            reason = NO_DEPTH if self._grounds() else NO_GROUND
+            self._set(self.user_mode, False, speed, reason, Priority.WARNING)
 
     def _tracks(self):
         if self.down_ok and self._held("stairs down"):  # as the "going down" branch decides
@@ -794,6 +813,11 @@ class DecisionCore:
                     lambda: self._set(
                         Mode.WHEELS, False, lim.slow, self._waiting_reason(), Priority.WARNING
                     ),
+                ),
+                branch(  # up before, gone now: nothing else here can see a drop
+                    "no depth",
+                    self._depth_missing,
+                    lambda: self._set(Mode.WHEELS, False, lim.slow, NO_DEPTH, Priority.WARNING),
                 ),
                 branch(
                     "no alert link",
