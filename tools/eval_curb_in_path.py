@@ -1,6 +1,7 @@
 """Curb ahead (or, with --class-id 1 2, road or curb: the walkway has ended), per frame, on SANPO
-walks the model never trained on: how often it finds one in the walking path within 3 m, and how often it calls one on frames with no curb in the path,
-the false alarms a person walking would hear.
+walks the model never trained on: how often it finds one in the walking path within 3 m, and how
+often it calls one on frames with no curb in the path, the false alarms a person walking would
+hear.
 
     python3 tools/eval_curb_in_path.py --root datasets/sanpo runs/curb_pre_0.pt [more weights]
 
