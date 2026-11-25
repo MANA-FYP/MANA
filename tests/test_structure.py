@@ -270,3 +270,25 @@ def test_a_corridor_not_seen_is_not_called_open():
     image = syn.render_boxes([], narrow)
     left, ahead, right = st.way(image, narrow, CHAIR)
     assert math.isnan(left) and math.isnan(right) and ahead == math.inf
+
+
+def side_drop(cam=syn.CAMERA, edge_left=0.45, depth_m=1.0):
+    """A level floor whose left part, from edge_left to the left, is depth_m lower: a platform or
+    stairwell edge running beside the path."""
+    v = np.arange(syn.ROWS, dtype=np.float64)[:, None]
+    u = np.arange(syn.COLS, dtype=np.float64)[None, :]
+    yn, xn = (v - cam.cy) / cam.fy, (u - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    b, d = np.broadcast_to(-xn, (syn.ROWS, syn.COLS)), np.broadcast_to(yn * c + s, (syn.ROWS, syn.COLS))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = np.where(d > 0, cam.height_m / d, np.inf)
+        t = np.where(t * b > edge_left, (cam.height_m + depth_m) / d, t)
+    return np.where(t < 8.0, t, np.inf)
+
+
+def test_a_drop_beside_the_path_is_never_called_open():
+    """Telling the user "Open to your left" towards a platform edge would walk them off it."""
+    for image in [side_drop()] + [stereo_noise(side_drop(), np.random.default_rng(k)) for k in range(3)]:
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert math.isfinite(left) and left < 2.5, left
+        assert ahead == math.inf and right == math.inf, (ahead, right)

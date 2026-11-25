@@ -74,6 +74,7 @@ class Settings:
     angled_bins: int = 2  # a riser met at an angle may take this many more bins to cross the
     # path: 0.9 m wide at 12 degrees off the stairs' axis
     overhang_min_m: float = 0.685  # an object whose lowest edge is above this is an overhang
+    drop_m: float = 0.15  # way(): floor this far below the device's own is a drop beside it
 
 
 DEFAULTS = Settings()
@@ -149,10 +150,12 @@ def way(
     """How far the way is free to the left, ahead and to the right: three corridors as wide as the
     device, side by side. Each is the distance to the nearest thing blocking it, inf when nothing
     does, or NaN when nothing blocks it but less than half of its floor out to open_m has a reading
-    (beside the device, near, is out of the camera's view: a side not seen is not called open)."""
+    (beside the device, near, is out of the camera's view: a side not seen is not called open). A
+    corridor whose floor drops drop_m or more below the device's (a platform edge, a stairwell
+    beside the path) is blocked where the lower floor is seen: never called open."""
     st = settings
     pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
-    ahead, left = pts[0], pts[1]
+    ahead, left, height = pts[0], pts[1], pts[2]
     width = st.device_width_m + 2.0 * st.margin_m
     near = max(st.min_range_m, st.body_m)
     bins = max(1, math.ceil((open_m - near) / st.bin_m))
@@ -164,6 +167,11 @@ def way(
             out.append(found.distance_m)
             continue
         lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
+        below = lane & (height < -st.drop_m)
+        if below.sum() >= st.min_points * cells:  # the floor drops away in this corridor
+            out.append(float(np.percentile(ahead[below], 5)))
+            continue
+        lane &= np.abs(height) <= st.riser_max_m  # floor at about the device's own level
         row = np.minimum(np.floor((ahead[lane] - near) / st.bin_m).astype(int), bins - 1)
         col = np.clip(np.floor((left[lane] - offset + width / 2.0) / st.cell_m), 0, cells - 1)
         filled = np.unique(row * cells + col.astype(int)).size  # floor patches with a reading
