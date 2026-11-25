@@ -135,6 +135,7 @@ def test_validation_can_hold_out_whole_walks(tmp_path, capsys):
 
 
 def test_the_pretrained_model_gives_one_logit_per_pixel():
+    pytest.importorskip("torchvision")  # in the test, not the module: torch alone is enough above
     model = tss.Pretrained(pretrained=False).eval()
     with torch.no_grad():
         assert model(torch.rand(2, 3, 64, 64)).shape == (2, 1, 64, 64)
