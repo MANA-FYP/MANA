@@ -31,7 +31,7 @@ from mana_core.decision import (
     Priority,
     Source,
 )
-from mana_core.messages import Message, MessageQueue, direction
+from mana_core.messages import DECISION, NOTICE, Message, MessageQueue, direction
 
 from demo.floors import label as floor_label
 from demo.navigation import COMPASS, Fix, Navigator, route_text, way_text
@@ -585,7 +585,10 @@ class Middleware:
         )
         if kind != "detection" and say:  # a detection is shown as a box, not said
             level = priority if priority is not None else KIND_PRIORITY.get(kind, Priority.WARNING)
-            self.queue.push(Message(text, level, True, now), now)
+            # only the core's decision is one; a door's sign or a siren is a notice, so a newer
+            # decision does not drop it unsaid, and it does not drop a waiting warning
+            what = DECISION if kind == "decision" else NOTICE
+            self.queue.push(Message(text, level, True, now, what), now)
 
     def _sentence(self, d, fired: str, now: float) -> tuple[str, bool]:
         """The decision as one sentence, and whether the stop came from the user."""
