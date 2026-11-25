@@ -388,10 +388,6 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
-# on foot, a drop's stop comes this much earlier: a walking pace of 1.0 m/s for 1.3 s to hear
-# "Stop" and react, and 0.8 m to stand still (Mount.walker_reach_m, docs/results.md)
-WALKER_REACH_M = 2.1
-
 # which way is open (readiness review: "if only right is open, tell me to go right"): the way
 # ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
 # nothing stands in it within WAY_OPEN_M; the same answer two depth frames in a row is said
@@ -477,6 +473,10 @@ SOLO_TEXT = {
     "the ground. It slows down to stay safe.",
 }
 NO_SENSOR_TEXT = "No sensor is on. MANA cannot make a decision, so it slows down to stay safe."
+# on foot, a drop's stop comes this much earlier: a walking pace of 1.0 m/s for 1.3 s to hear
+# "Stop" and react, and 0.8 m to stand still (Mount.walker_reach_m, docs/results.md)
+WALKER_REACH_M = 2.1
+
 SHOWN_DISTANCE_M = 8.0  # camera distances beyond this are too rough to write down
 
 

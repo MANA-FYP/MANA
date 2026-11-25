@@ -218,6 +218,17 @@ def test_when_every_source_goes_stale_the_chair_slows_down():
 # ---- position source
 
 
+def test_on_foot_the_core_gets_the_walkers_stop_allowance_and_on_the_device_none():
+    from demo.middleware import WALKER_REACH_M
+
+    m = Middleware(on_foot=True)
+    assert m.core.mount.walker_reach_m == WALKER_REACH_M
+    m.set_on_foot(False, now=1.0)
+    assert m.core.mount.walker_reach_m == 0.0
+    m.set_on_foot(True, now=2.0)
+    assert m.core.mount.walker_reach_m == WALKER_REACH_M
+
+
 def test_the_position_source_leaves_gps_after_three_bad_seconds():
     p = PositionSource()
     assert p.update(20.0, 0.0) == "gps"
@@ -896,14 +907,3 @@ def test_a_walker_is_stopped_for_stairs_down_with_no_distance_and_the_chair_is_n
     walker.set_on_foot(True, 2.0)
     walker.on_ground(Source.CAMERA, Ground.STAIRS_DOWN, 0.9, float("nan"), 3.0)
     assert walker.core.tick(3.0).stop
-
-
-def test_on_foot_the_core_gets_the_walkers_stop_allowance_and_on_the_device_none():
-    from demo.middleware import WALKER_REACH_M
-
-    m = Middleware(on_foot=True)
-    assert m.core.mount.walker_reach_m == WALKER_REACH_M
-    m.set_on_foot(False, now=1.0)
-    assert m.core.mount.walker_reach_m == 0.0
-    m.set_on_foot(True, now=2.0)
-    assert m.core.mount.walker_reach_m == WALKER_REACH_M

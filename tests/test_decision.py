@@ -585,6 +585,23 @@ def test_slowed_down_the_same_drop_does_not_stop_it_yet():
     assert braked((1.9, NOW), (1.0, NOW + 0.1), (0.6, NOW + 0.2)).decision.stop  # 0.5 + 0.17 m
 
 
+def test_a_walker_is_stopped_for_a_drop_early_enough_to_stand_still_before_it():
+    """A person walking is not slowed by a speed limit: a drop 2 m off stops them, as they need
+    about 2.1 m from the frame to standing still (Mount.walker_reach_m). An obstacle does not get
+    the allowance: a cane meets it first."""
+    walker = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
+    walker.on_ground(ground(CAM, Ground.DROP, 2.0))
+    walker.on_motion(level())
+    d = walker.tick(NOW)
+    assert d.stop and d.reason == "Drop ahead, stopping"
+    chair = core(ground(CAM, Ground.DROP, 2.0), ground(DEPTH, Ground.FLAT))
+    assert not chair.decision.stop  # no allowance: its own limit slows it first
+    far = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
+    far.on_ground(ground(CAM, Ground.DROP, 3.0))
+    far.on_motion(level())
+    assert not far.tick(NOW).stop
+
+
 def test_once_stopped_the_travel_of_the_last_speed_still_counts():
     # standing still, the speed limit is 0: the stop must not release because the travel at 0 is 0
     c = braked((1.0, NOW), (1.1, NOW + 0.1), (1.2, NOW + 0.2))
@@ -1389,20 +1406,3 @@ def test_a_lidar_obstacle_nearer_than_the_step_still_stops_and_without_stairs_to
     assert near.decision.reason == "Obstacle ahead, stopping"  # 1.4 m: well before the stairs
     flat = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(1.4))
     assert flat.decision.reason == "Obstacle ahead, stopping"
-
-
-def test_a_walker_is_stopped_for_a_drop_early_enough_to_stand_still_before_it():
-    """A person walking is not slowed by a speed limit: a drop 2 m off stops them, as they need
-    about 2.1 m from the frame to standing still (Mount.walker_reach_m). An obstacle does not get
-    the allowance: a cane meets it first."""
-    walker = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
-    walker.on_ground(ground(CAM, Ground.DROP, 2.0))
-    walker.on_motion(level())
-    d = walker.tick(NOW)
-    assert d.stop and d.reason == "Drop ahead, stopping"
-    chair = core(ground(CAM, Ground.DROP, 2.0), ground(DEPTH, Ground.FLAT))
-    assert not chair.decision.stop  # no allowance: its own limit slows it first
-    far = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
-    far.on_ground(ground(CAM, Ground.DROP, 3.0))
-    far.on_motion(level())
-    assert not far.tick(NOW).stop
