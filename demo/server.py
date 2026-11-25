@@ -861,6 +861,9 @@ def depth_step(app: web.Application, jpeg: bytes) -> None:
     stairs = seen.ahead_m is not None and the_stairs(app["live"]["stairs"], seen.ahead_m, now)
     if seen.ahead_m is not None and not stairs:
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
+    if seen.cam is not None and not stairs:  # which way is open, when the way ahead is blocked
+        left, _, right = dz.ahead_by_side(seen.depth, seen.cam)
+        mw.on_way(left, seen.ahead_m, right, now)
     d = app["depth"]
     d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now, raw=image)
     d["view"] = {
