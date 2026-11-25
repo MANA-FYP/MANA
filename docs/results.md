@@ -1335,8 +1335,25 @@ So on walks it has not seen, segmentation finds stairs somewhat more often than 
 (recall 0.36 against 0.24 near) and is far more precise, but it is not the threefold gain the
 validation frames showed: the model mostly learned its training walks. Scoring on held-out walks
 (`--split test`) and choosing the saved epoch on held-out walks (`--val-walks`) are now in the
-tool; a pretrained encoder (`--arch pretrained`) and augmentation (`--augment`) are being tried
-on the same test walks.
+tool.
+
+**A pretrained encoder and augmentation, on the same test walks.** Each model below chose its
+saved epoch on whole walks held out from training (`--val-walks`), never on the test walks:
+
+| Stairs on SANPO's test walks, stair-pixel IoU | Runs | Good light | Dark copy |
+|---|---|---:|---:|
+| Colour U-Net, epoch chosen on held-out frames (above) | 4 | 0.34 (0.30 to 0.39) | 0 |
+| Colour U-Net, epoch chosen on held-out walks | 1 | 0.17 | 0 |
+| Pretrained (`--arch pretrained`) | 3 | 0.40 (0.555, 0.327, 0.326) | 0 |
+| U-Net, augmented (`--augment`) | 1 | 0.43 | 0 |
+| Pretrained, augmented | 1 | 0.44 | 0 |
+| Pretrained, also trained on dim frames (`--low-light`) | 1 | 0.40 | 0.24 |
+
+The pretrained model's first run reached 0.555, its next two 0.33: the spread between runs is as
+large as any gain, so neither a pretrained encoder nor augmentation is shown to find stairs
+better on unseen walks, and the live demo keeps its models (the colour U-Net and the one also
+trained on dim frames, 0.348 in the dark copy against 0.24 here). SANPO's walks are mostly
+outdoors; the user's own route, filmed, is the test that decides what runs.
 
 Two caveats keep this honest. First, the two numbers are not the same measure: the box row is AP50
 for a detection, the segmentation row is the overlap of the predicted stair pixels with the label,
@@ -1421,6 +1438,8 @@ python3 tools/fetch_sanpo_depth.py datasets/sanpo test
 python3 tools/estimate_sanpo_depth.py datasets/sanpo test
 python3 tools/train_stair_seg.py --root datasets/sanpo --split test --only-with depth_npy --eval runs/rgb.pt
 python3 tools/train_stair_seg.py --root datasets/sanpo --split test --depth depth_npy --eval runs/rgbd.pt
+python3 tools/train_stair_seg.py --root datasets/sanpo --val-walks --arch pretrained --augment --out runs/pre_aug.pt
+python3 tools/train_stair_seg.py --root datasets/sanpo --split test --arch pretrained --eval runs/pre_aug.pt
 ```
 
 ## Which way a door opens: its PUSH or PULL sign
