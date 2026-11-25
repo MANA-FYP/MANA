@@ -71,6 +71,8 @@ class Settings:
     # far off leaves a few cells of a riser unblocked)
     edge_check_m: float = 2.0  # nearer than this, a step must raise both edges of the corridor
     spill_m: float = 0.06  # a riser's depth noise reaches this far into the bin before it
+    angled_bins: int = 2  # a riser met at an angle may take this many more bins to cross the
+    # path: 0.9 m wide at 12 degrees off the stairs' axis
     overhang_min_m: float = 0.685  # an object whose lowest edge is above this is an overhang
 
 
@@ -189,21 +191,25 @@ def find(
             # whose face noise spills into the bin before it raises the floor itself just after
             touched = seen & (raised > 0)
             edge = st.min_range_m + (i + 1) * st.bin_m  # where this bin ends
-            # met at an angle, a riser crosses the path diagonally: the cells it has not reached
-            # yet rise in the next bin, to about a riser above this one's floor (5 degrees off
-            # the stairs' axis stopped the chair halfway up the flight)
-            if i + 1 < len(starts) and ends[i + 1] - starts[i + 1] >= st.min_points:
-                a2, b2 = starts[i + 1], ends[i + 1]
-                rise2 = height[a2:b2] - floor
-                up2 = (rise2 > min_height(edge + st.bin_m / 2, st)) & (rise2 <= st.riser_max_m)
-                count2 = np.bincount(across[a2:b2], minlength=cells)
-                raised2 = np.bincount(across[a2:b2], weights=up2, minlength=cells)
-                touched |= seen & (raised2 >= st.min_points) & (raised2 >= st.occupied_share * count2)
+            sides = np.flatnonzero(seen)
+            # met at an angle, a riser crosses the path diagonally: it starts at one edge of the
+            # path in this bin, and the cells it has not reached yet rise in the next bins, to
+            # about a riser above this one's floor (5 degrees off the stairs' axis stopped the
+            # chair halfway up the flight). A bag before a step raises neither edge here
+            if touched[sides[0]] or touched[sides[-1]]:
+                for j in range(i + 1, min(i + 1 + st.angled_bins, len(starts))):
+                    a2, b2 = starts[j], ends[j]
+                    rise2 = height[a2:b2] - floor
+                    up2 = (rise2 > min_height(at + (j - i + 0.5) * st.bin_m, st)) & (
+                        rise2 <= st.riser_max_m
+                    )
+                    count2 = np.bincount(across[a2:b2], minlength=cells)
+                    raised2 = np.bincount(across[a2:b2], weights=up2, minlength=cells)
+                    touched |= seen & (raised2 >= st.min_points) & (raised2 >= st.occupied_share * count2)
             # a step runs across the whole path, so it raises the corridor's outermost seen cells
             # on both sides; a low box in the middle leaves one of them flat. Checked out to
             # edge_check_m: further off, stereo noise can leave a real riser's edge cell flat, and
             # the bin is checked again on every frame as the device comes nearer
-            sides = np.flatnonzero(seen)
             across_path = edge > st.edge_check_m or bool(touched[sides[0]] and touched[sides[-1]])
             after = max((x for x in low[i + 1 : i + 3] if x == x), default=NAN)
             spill = float(np.percentile(ahead[a:b][hit], 5)) >= edge - st.spill_m
