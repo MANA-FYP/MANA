@@ -388,6 +388,10 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
+# on foot, a drop's stop comes this much earlier: a walking pace of 1.0 m/s for 1.3 s to hear
+# "Stop" and react, and 0.8 m to stand still (Mount.walker_reach_m, docs/results.md)
+WALKER_REACH_M = 2.1
+
 # which way is open (readiness review: "if only right is open, tell me to go right"): the way
 # ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
 # nothing stands in it within WAY_OPEN_M; the same answer two depth frames in a row is said
@@ -517,7 +521,9 @@ class Middleware:
     ):
         self.core = core or DecisionCore()
         if on_foot:  # a walker cannot tell how near a drop with no distance is: it stops
-            self.core.mount = replace(self.core.mount, unknown_drop_stops=True)
+            self.core.mount = replace(
+                self.core.mount, unknown_drop_stops=True, walker_reach_m=WALKER_REACH_M
+            )
         # how the phone is carried: on the device (wheels, the default) or by a person on foot
         # (a cane, walking). Only on foot are the steps the person's, not jolts of rough ground.
         self.on_foot = on_foot
@@ -940,7 +946,11 @@ class Middleware:
         if on_foot == self.on_foot:
             return
         self.on_foot = on_foot
-        self.core.mount = replace(self.core.mount, unknown_drop_stops=on_foot)
+        self.core.mount = replace(
+            self.core.mount,
+            unknown_drop_stops=on_foot,
+            walker_reach_m=WALKER_REACH_M if on_foot else 0.0,
+        )
         self._decide(
             now,
             "switch",
