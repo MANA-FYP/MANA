@@ -964,6 +964,19 @@ def test_after_the_yes_the_classifiers_stairs_are_those_stairs_down(height):
     assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
 
 
+def test_on_the_flight_after_a_yes_one_sensors_stairs_down_do_not_stop_the_chair():
+    """Two-thirds of the way down, the camera sees the level floor at the foot of the flight; the
+    3D camera's stairs down alone are the flight the chair is on (Gazebo). Level, they stop it."""
+    c = said_yes_to_stairs_down()
+    on_flight = (ground(CLS, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    d = fed(c, on_flight, NOW + 0.2, motion=0.45)  # pitched nose down on the stairs
+    assert (d.stop, d.mode) == (False, Mode.TRACKS)
+    c = said_yes_to_stairs_down()
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=1.0))
+    c.on_motion(MotionReport(NOW + 0.2, 0.9, pitch_rad=0.45))
+    assert c.tick(NOW + 0.2).stop  # a deep drop still stops, on the flight too
+
+
 def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
     c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
     assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"
