@@ -129,6 +129,8 @@ For each goal it writes down:
 Limits of this first version:
 - Nav2 plans in 2D on the lidar's map. Stairs, curbs and drops are walls to it or are not seen at all, so goals are on routes without them. MANA's own rules still stop the chair at them.
 - The indoor world has no ramps. Goals over ramps need a lidar map of the route world, which is not made yet.
+- The campus building has a map (`--world campus`, above); goals there need `--start`-scored
+  results (`tools/autopilot_goal.py --start 12 9 1.5708`, which `autopilot.sh --world campus` passes).
 - In this world the camera's ground classifier does not run. MANA therefore holds the chair at 30% of top speed, waiting for its second ground sensor ("Waiting for the ground sensors (1 of 2 up: the 3D camera)").
 
 ### The supervisor's panel
@@ -304,7 +306,18 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   samples after 30 s): 0.82 without the sensors, 0.62 with the cameras and the lidar. The
   samples swing widely (0.04 to 2.7), so time a run by the simulation's clock, as the scenarios
   do (`use_sim_time`).
-- **Not done yet:** the camera's mounting angle, and a lidar map for the autopilot.
+- **The autopilot on the campus building.** `tools/indoor_localisation.sh --world campus` drives
+  a loop round the building's corridor and hall from the lobby (`mana_sim.localisation.ROUTES`),
+  all on its floor, and saves slam_toolbox's map; `tools/autopilot.sh --world campus` drives Nav2
+  on it, goals after `--`. On the lab PC (one run each): the 59.7 m mapping lap kept the map pose
+  0.12 m from the ground truth on average (95th percentile 0.33 m), and a lap localising on the
+  saved map 0.13 m (0.32 m). With the autopilot, a goal in the hall was reached in 36 s, 0.42 m
+  from it. A goal past the glass door: the lidar's map has no glass, so Nav2 planned straight
+  through it, and MANA stopped the chair with its front 0.28 m short of the glass ("Obstacle ahead,
+  stopping", from the 3D camera), held the stop for 60 s, and Nav2's progress checker then ended
+  the goal (aborted). The planner cannot see the glass; the decision layer stops for it.
+- **Not done yet:** the camera's mounting angle; a map of the plaza, ramps and terrace (the lidar
+  is one plane, so ramps and curbs need more than this loop on one floor).
 
 ## The host
 
