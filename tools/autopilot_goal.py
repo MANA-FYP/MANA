@@ -2,6 +2,7 @@
 
     python3 tools/autopilot_goal.py --out runs/t78/goals.csv          # the indoor goals below
     python3 tools/autopilot_goal.py --goal 13 0 0                  # one goal: x y yaw (map)
+    python3 tools/autopilot_goal.py --goal 11 -5 -1.57 --goal 6.5 -10.5 -1.57   # in that order
 
 For each goal: whether Nav2 reached it, how long it took, how far the chair ended from it by
 Gazebo's ground truth, and what MANA did on the way: its lowest speed limit, how long it asked
@@ -31,7 +32,7 @@ from rclpy.parameter import Parameter
 
 from mana_msgs.msg import DriveRequest
 
-START = (1.0, 1.375)  # the map's origin in the indoor world (mana_sim.localisation.INDOOR_START)
+START = (1.0, 1.375, 0.0)  # the map's origin in the indoor world (localisation.INDOOR_START)
 # x, y, yaw in the map frame: along the south corridor, round the east corner, along the north
 # corridor (around the central block), and back to the start the shorter way round
 GOALS = [(13.0, 0.0, 0.0), (13.9, 6.6, 1.57), (7.0, 7.2, 3.14), (0.5, 0.0, 3.14)]
@@ -39,7 +40,8 @@ STATUS = {4: "reached", 5: "cancelled", 6: "aborted"}
 
 
 class Autopilot(Node):
-    def __init__(self):
+    def __init__(self, start=START):
+        self.start = start  # where the map frame begins in the world: x, y, heading
         super().__init__(
             "autopilot_goal", parameter_overrides=[Parameter("use_sim_time", value=True)]
         )
@@ -101,15 +103,20 @@ class Autopilot(Node):
             status = STATUS.get(result.result().status, str(result.result().status))
         req = self.requests
         stop_s = sum(b[0] - a[0] for a, b in zip(req, req[1:], strict=False) if a[1])
-        gx, gy = (self.gt[0] - START[0], self.gt[1] - START[1]) if self.gt else (math.nan,) * 2
+        sx, sy, syaw = self.start
+        gx = gy = math.nan
+        if self.gt:  # the ground truth in the map frame
+            dx, dy = self.gt[0] - sx, self.gt[1] - sy
+            gx = dx * math.cos(syaw) + dy * math.sin(syaw)
+            gy = -dx * math.sin(syaw) + dy * math.cos(syaw)
         return {
             "goal": f"{x:g} {y:g}",
             "result": status,
             "seconds": round(self.now() - start, 1),
             "end_error_m": nan_round(math.hypot(gx - x, gy - y), 2),
-            # the map frame faces as the chair did at the start: +x, as in the world
+            # the map frame faces as the chair did at the start
             "end_heading_error_deg": nan_round(
-                abs(math.degrees(math.remainder(self.gt[2] - yaw, math.tau)))
+                abs(math.degrees(math.remainder(self.gt[2] - syaw - yaw, math.tau)))
                 if self.gt
                 else math.nan
             ),
@@ -118,6 +125,7 @@ class Autopilot(Node):
             ),
             "stop_s": round(stop_s, 1),
             "modes": "".join(sorted({"WT"[r[3]] for r in req if r[3] in (0, 1)})),
+            "end_world": f"{self.gt[0]:.2f} {self.gt[1]:.2f}" if self.gt else "",
         }
 
 
@@ -130,6 +138,7 @@ FIELDS = [
     "lowest_speed_limit",
     "stop_s",
     "modes",
+    "end_world",
 ]
 
 
@@ -140,14 +149,17 @@ def nan_round(v: float, digits: int = 0):
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--goal", type=float, nargs=3, metavar=("X", "Y", "YAW"))
+    p.add_argument("--goal", type=float, nargs=3, metavar=("X", "Y", "YAW"), action="append",
+                   help="a goal in the map frame; give it again for more, in order")  # fmt: skip
     p.add_argument("--timeout", type=float, default=300.0, help="wall seconds per goal")
+    p.add_argument("--start", type=float, nargs=3, default=START, metavar=("X", "Y", "YAW"),
+                   help="where the map begins in the world (default the indoor start)")  # fmt: skip
     p.add_argument("--out", help="a CSV of the results")
     p.add_argument("--keep-going", action="store_true",
                    help="send the next goal after one is not reached")  # fmt: skip
     a = p.parse_args(argv)
     rclpy.init()
-    node = Autopilot()
+    node = Autopilot(tuple(a.start))
     if not node.client.wait_for_server(timeout_sec=60) or not node.wait_active(180):
         print("Nav2 is not up and active: start autopilot.launch.py", file=sys.stderr)
         return 2
@@ -156,7 +168,7 @@ def main(argv=None) -> int:
     while node.now() == 0.0:
         rclpy.spin_once(node, timeout_sec=0.1)
     rows = []
-    for x, y, yaw in [tuple(a.goal)] if a.goal else GOALS:
+    for x, y, yaw in [tuple(g) for g in a.goal] if a.goal else GOALS:
         row = node.go(x, y, yaw, a.timeout)
         print(row, flush=True)
         rows.append(row)

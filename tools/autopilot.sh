@@ -7,6 +7,11 @@
 # and writes down how each went.
 #
 #   tools/autopilot.sh --map ~/mana_maps/indoor --out runs/t78
+#   tools/autopilot.sh --world campus --map ~/mana_maps/campus --out runs/glass -- --goal 6.5 -10.5 0
+#
+# --world campus: the campus (mana_sim.campus) from its lobby, on a map made with
+# tools/indoor_localisation.sh --world campus. Arguments after -- go to tools/autopilot_goal.py
+# (its map frame then begins at the lobby, facing north: map x is world y - 9, map y is 12 - world x).
 #
 # Needs the workspace built and sourced, slam_toolbox, robot_localization and Nav2
 # (ros-jazzy-navigation2). Exit 1 when a goal is not reached.
@@ -14,11 +19,15 @@ set -uo pipefail
 
 MAP="$HOME/mana_maps/indoor"
 OUT="autopilot"
+WORLD=indoor
+GOAL_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --map) MAP="$2"; shift ;;
     --out) OUT="$2"; shift ;;
-    *) echo "usage: $0 [--map PATH] [--out DIR]" >&2; exit 2 ;;
+    --world) WORLD="$2"; shift ;;
+    --) shift; GOAL_ARGS=("$@"); break ;;
+    *) echo "usage: $0 [--map PATH] [--out DIR] [--world indoor|campus] [-- GOAL ARGS]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -27,6 +36,12 @@ mkdir -p "$OUT"
 SHARE="$(ros2 pkg prefix mana_sim)/share/mana_sim"
 EKF="$(ros2 pkg prefix mana_position)/share/mana_position/config/localisation.yaml"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+WORLD_FILE="$SHARE/worlds/mana_indoor.sdf"
+if [ "$WORLD" = campus ]; then
+  WORLD_FILE="$OUT/campus_lobby.sdf"
+  python3 -m mana_sim.campus --start lobby > "$WORLD_FILE" || exit 2
+  GOAL_ARGS=(--start 12 9 1.5708 "${GOAL_ARGS[@]}")  # the map begins at the lobby, facing north
+fi
 
 PIDS=()
 stop_all() {  # stop what this script started (each in its own process group): ask, wait, kill
@@ -50,7 +65,7 @@ start() {  # start a command in its own process group, output to a file
 }
 
 start "$OUT/world.log" ros2 launch mana_sim world.launch.py \
-  world:="$SHARE/worlds/mana_indoor.sdf" headless:=true odom:=wheels driver:=true
+  world:="$WORLD_FILE" headless:=true odom:=wheels driver:=true
 sleep 25  # Gazebo up and the sensors publishing
 start "$OUT/core.log" ros2 run mana_core core_node --ros-args --params-file "$SHARE/config/core.yaml"
 start "$OUT/slam.log" ros2 run slam_toolbox localization_slam_toolbox_node \
@@ -107,4 +122,4 @@ start "$OUT/drive_request.csv" ros2 topic echo /drive_request mana_msgs/msg/Driv
 # forward first, through driver_select and MANA like any drive, then send the goals.
 timeout 20 ros2 topic pub --rate 10 --times 30 /cmd_vel/autopilot geometry_msgs/msg/Twist \
   "{linear: {x: 0.3}}" >/dev/null
-python3 "$HERE/autopilot_goal.py" --out "$OUT/goals.csv" --keep-going  # every goal, in simulation
+python3 "$HERE/autopilot_goal.py" --out "$OUT/goals.csv" --keep-going "${GOAL_ARGS[@]}"  # every goal, in simulation
