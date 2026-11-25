@@ -298,13 +298,20 @@ def floor_plane(depth: np.ndarray, cam: dp.Camera, rows_share=0.15, strip=0.3,
 
 
 def nearest_ahead(
-    depth: np.ndarray, cam: dp.Camera, low_m=0.3, high_m=2.0, strip=0.3, share=0.01
+    depth: np.ndarray,
+    cam: dp.Camera,
+    low_m=0.3,
+    high_m=2.0,
+    strip=0.3,
+    share=0.01,
+    centre=0.5,
 ) -> float | None:
     """How far ahead the nearest thing in the path is that stands between low_m and high_m above
     the floor (a wall, a door, a person, a pole), whatever it is: the detector names things, this
-    measures them. The depth must be scaled to the floor. None when nothing stands in the path."""
+    measures them. The depth must be scaled to the floor. None when nothing stands in the path.
+    centre: where the strip is across the picture (0.5 the middle, the path)."""
     rows, cols = depth.shape
-    u = slice(int(cols * (0.5 - strip / 2)), int(cols * (0.5 + strip / 2)))
+    u = slice(int(cols * max(0.0, centre - strip / 2)), int(cols * min(1.0, centre + strip / 2)))
     z = depth[:, u]
     yn = ((np.arange(rows) - cam.cy) / cam.fy)[:, None]
     c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
@@ -314,6 +321,12 @@ def nearest_ahead(
     if hit.sum() < max(10, share * z.size):
         return None
     return float(np.percentile(ahead[hit], 5))
+
+
+def ahead_by_side(depth: np.ndarray, cam: dp.Camera) -> tuple:
+    """The nearest thing standing in the left third of the picture, its middle and its right
+    third, each as nearest_ahead measures it (None: nothing there), for which way is open."""
+    return tuple(nearest_ahead(depth, cam, centre=c) for c in (1 / 6, 0.5, 5 / 6))
 
 
 def box_distance(seen: Seen, box, frame_w: int, frame_h: int) -> float | None:
