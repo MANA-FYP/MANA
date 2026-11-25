@@ -329,6 +329,25 @@ def ahead_by_side(depth: np.ndarray, cam: dp.Camera) -> tuple:
     return tuple(nearest_ahead(depth, cam, centre=c) for c in (1 / 6, 0.5, 5 / 6))
 
 
+def floor_level(
+    depth: np.ndarray, cam: dp.Camera, centre: float, strip=0.3, below_m=0.3, share=0.05
+) -> bool:
+    """Whether the floor in a strip of the picture is at the person's own level: False when a share
+    of what it sees out to 3 m lies below_m or more lower (a drop, a platform edge, stairs down
+    beside the path), so that side is never called open. The phone's depth is rough (it took
+    level floors for drops), so this errs towards "not open", never towards a fall."""
+    rows, cols = depth.shape
+    u = slice(int(cols * max(0.0, centre - strip / 2)), int(cols * min(1.0, centre + strip / 2)))
+    z = depth[:, u]
+    yn = ((np.arange(rows) - cam.cy) / cam.fy)[:, None]
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    ahead = z * (c - yn * s)
+    height = cam.height_m - z * (yn * c + s)
+    seen = np.isfinite(z) & (z > 0) & (ahead > 0.2) & (ahead < 3.0)
+    low = seen & (height < -below_m)
+    return int(low.sum()) < max(10, share * int(seen.sum()))
+
+
 def box_distance(seen: Seen, box, frame_w: int, frame_h: int) -> float | None:
     """How far ahead an object is, along the floor: the median over the middle half of its box (the
     edges of a box hold background). box has x1, y1, x2, y2 in the frame's pixels. None unless the

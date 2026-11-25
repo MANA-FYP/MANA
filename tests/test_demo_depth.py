@@ -710,6 +710,21 @@ def test_each_side_is_measured_on_its_own():
     assert middle == pytest.approx(1.0, abs=0.15) and right == pytest.approx(1.2, abs=0.15)
 
 
+def test_a_side_whose_floor_drops_away_is_never_called_open():
+    """A platform edge or stairs down beside the path: nothing stands there, but "Open to your
+    left" would walk the person off it. The way ahead blocked, only the right is open."""
+    from demo.middleware import way_open
+
+    cam = MOUNT.camera(COLS, ROWS, PITCH)
+    image = bands(syn.step(0.5, -1.0), wall(1.0), syn.flat)
+    left, middle, right = dz.ahead_by_side(image, cam)
+    assert left is None  # nothing stands there: before, this side was "open"
+    assert not dz.floor_level(image, cam, 1 / 6)
+    assert dz.floor_level(image, cam, 5 / 6)
+    assert dz.floor_level(bands(syn.flat, syn.flat, syn.flat), cam, 1 / 6)
+    assert way_open(math.nan, middle, right) == "Way ahead blocked. Open to your right."
+
+
 def test_only_the_open_side_is_told_when_the_way_ahead_is_blocked():
     from demo.middleware import way_open
 
