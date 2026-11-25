@@ -1542,8 +1542,10 @@ recordings (901): glass ahead on 17 (1.9%), a glossy wooden wardrobe door at arm
 laptop screen just in front of the camera (7) and a bedsheet (1). Every frame of one walk (1,334):
 47 frames, in 13 runs, 7 of them only 1 or 2 frames long. So glass is told only once it is in the
 path in 3 frames in a row (`GLASS_FRAMES`, 0.24 s at the lab's 80 ms frames): that leaves 6 of the
-13, all the wardrobe up close, a surface the user must stop for anyway, though not glass. The
-real glass doors and walls of the route are the check still to make.
+13, all the wardrobe up close, a surface the user must stop for anyway, though not glass. These
+are the first run's weights; with the second run's, the ones the demo runs, the same walk gives 25
+frames in 7 runs, 3 of them 3 frames or longer. The real glass doors and walls of the route are
+the check still to make.
 
 ```
 python3 tools/train_glass_seg.py --root datasets/gsds --clear datasets/ade_clear --arch pretrained --out runs/glass_seg.pt
