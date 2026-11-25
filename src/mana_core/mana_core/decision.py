@@ -172,7 +172,9 @@ class Limits:
     level_rad: float = 0.05  # about 3 degrees of tilt counts as level
     level_hold_s: float = 2.0  # level this long before going back to wheels
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
-    down_drop_m: float = 0.6  # after that yes, a drop no deeper than this is those stairs (#52)
+    # after that yes, a drop no deeper than this is those stairs (#52): passing the top edge of the
+    # campus's 12-riser flight, the 3D camera saw four 0.17 m risers as one 0.69 m drop (Gazebo)
+    down_drop_m: float = 0.8
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
@@ -562,7 +564,15 @@ class DecisionCore:
         found = [r for r in self.ground.values() if self._ok(r)]
         if not self.down_ok:
             return found
-        down = {SENSOR_OF.get(r.source, r.source) for r in found if r.ground == Ground.STAIRS_DOWN}
+        # the camera's classifier says "stairs" with no way up or down (its STAIRS_UP): after the
+        # yes, which gave the way, its stairs are those stairs down (in Gazebo the chair otherwise
+        # stopped on the flight, the 3D camera reading a drop and the classifier stairs)
+        down = {
+            SENSOR_OF.get(r.source, r.source)
+            for r in found
+            if r.ground == Ground.STAIRS_DOWN
+            or (r.source == Source.CLASSIFIER and r.ground == Ground.STAIRS_UP)
+        }
         lim = self.limits
         edge = lim.edge_m + self.mount.travel_m(self.moving_speed) + lim.release_m
         return [
