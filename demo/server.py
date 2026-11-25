@@ -718,10 +718,12 @@ def door_sign(app: web.Application, jpeg: bytes, detections, now: float) -> None
                 # be on the wall beside it: on a door photo with PULL drawn on, the detector boxed
                 # the door next to it, and only the whole frame read the sign
                 side, _ = reader.read(jpeg)
+            # with a door boxed it is a door's sign, even when found beside its box; with none,
+            # the text may be on anything, so only what it says is told
             if side is not None and loop is not None:
-                loop.call_soon_threadsafe(app["mw"].on_door_sign, side)
+                loop.call_soon_threadsafe(app["mw"].on_door_sign, side, None, box is not None)
             elif side is not None:
-                app["mw"].on_door_sign(side)
+                app["mw"].on_door_sign(side, None, box is not None)
         except Exception as e:  # one bad frame must not stop the reading
             print(f"door sign: {e}", file=sys.stderr)
         finally:
