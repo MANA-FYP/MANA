@@ -1551,3 +1551,26 @@ the check still to make.
 python3 tools/train_glass_seg.py --root datasets/gsds --clear datasets/ade_clear --arch pretrained --out runs/glass_seg.pt
 python3 tools/eval_glass_in_path.py --gsds datasets/gsds --ade datasets/ADEChallengeData2016 runs/glass_seg.pt
 ```
+
+## How early a walking person must be stopped for a drop (26 November 2026)
+
+On a chair, the core slows the chair before it stops it, and its stop distance allows for how far
+the chair goes at the speed it allowed (`Mount.travel_m`). A person walking with the phone is not
+slowed by a speed limit; it is advice. Before this change the phone said "Stop" 0.5 m before a
+drop, with no allowance for the person to hear it and stop.
+
+| What | Value | Source |
+|---|---|---|
+| Walking speed with a white cane | about 0.9 m/s (0.6 in clutter) | Skovfoged et al. 2022, citing earlier work |
+| Walking speed, sighted adults in a lab | 1.23 to 1.26 m/s | PMC9953996 |
+| From an auditory stop cue to standing still (unplanned) | 1.05 to 1.12 s; steps 0.55 m | PMC9953996 (about 20 healthy adults) |
+| The demo, frame arriving to the decision on the dashboard | 0.03 to 0.10 s (5 trials) | measured on the lab server, 26 Nov |
+| The phone's speech starting, and the word "Stop" said | not measured; about 0.1 to 0.3 s and 0.3 to 0.5 s | estimate |
+
+The allowance used is a pace of 1.0 m/s for 1.3 s (the network, the speech and the person's
+reaction) and 0.8 m to stand still: **2.1 m** (`WALKER_REACH_M`, `Mount.walker_reach_m`). It is
+added to a drop's stop distance (and to stairs down one sensor sees) on foot only. It is not added
+to obstacles: a cane meets them first, and 2.1 m more would stop the person before every person in
+a corridor. It is our own estimate from these sources, not a measured value: no standard sets a
+warning distance for travel aids. Measuring it on the phones we use (the speech start, and people
+walking up to a marked edge) is part of the route walk.
