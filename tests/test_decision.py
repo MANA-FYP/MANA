@@ -1389,3 +1389,13 @@ def test_a_lidar_obstacle_nearer_than_the_step_still_stops_and_without_stairs_to
     assert near.decision.reason == "Obstacle ahead, stopping"  # 1.4 m: well before the stairs
     flat = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(1.4))
     assert flat.decision.reason == "Obstacle ahead, stopping"
+
+
+def test_a_way_report_is_measured_from_the_chairs_furthest_point():
+    """The glass door in Gazebo was 1.62 m from the 3D camera when the chair stopped: 0.87 m from
+    its lifted tracks' tip, so the way ahead was blocked and the user is told so."""
+    c = DecisionCore(mount=Mount(front_wheels_m=0.47, front_tracks_m=1.1, depth_camera_m=0.35))
+    assert c.from_front_m(Source.DEPTH_CAMERA, 1.62) == pytest.approx(0.87)
+    assert c.from_front_m(Source.DEPTH_CAMERA, math.inf) == math.inf
+    assert math.isnan(c.from_front_m(Source.DEPTH_CAMERA, math.nan))
+    assert c.from_front_m(Source.DEPTH_CAMERA, 0.5) == 0.0
