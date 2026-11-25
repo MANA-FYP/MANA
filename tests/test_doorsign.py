@@ -99,6 +99,25 @@ def test_the_server_reads_the_largest_door_at_most_once_a_second():
                 break
             time.sleep(0.01)
     assert reader.boxes[2:] == [None, None]  # 20.0 and 22.1; 21.0 is too soon
+    # with no door in view, only what the sign says: the text may not be on a door
+    assert any(
+        d["text"] == "A sign ahead says push: a door there would open away from you."
+        for d in app["mw"].decisions
+    )
+
+
+def test_a_sign_with_no_door_in_view_is_told_as_a_sign_not_a_door():
+    from demo.middleware import Middleware
+
+    said = []
+    for on_foot in (True, False):
+        mw = Middleware(on_foot=on_foot)
+        mw.on_door_sign("pull", 1.0, door=False)
+        said += [d["text"] for d in mw.decisions if d["kind"] == "door"]
+    assert said == [
+        "A sign ahead says pull.",
+        "A sign ahead says pull: a door there would open towards you.",
+    ]
 
 
 def test_a_letter_height_in_pixels_is_a_distance_for_a_5_cm_letter():

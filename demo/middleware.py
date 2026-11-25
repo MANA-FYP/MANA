@@ -387,6 +387,14 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
+# PUSH or PULL read with no door in view (the whole frame read): only what the sign says, as the
+# text may be on a machine or a notice, not a door (Waqas, #239)
+SIGN_TEXT = {
+    ("push", True): "A sign ahead says push.",
+    ("pull", True): "A sign ahead says pull.",
+    ("push", False): "A sign ahead says push: a door there would open away from you.",
+    ("pull", False): "A sign ahead says pull: a door there would open towards you.",
+}
 
 
 COMMAND_TEXT = {
@@ -1120,10 +1128,11 @@ class Middleware:
         )
         del self.detections[:-10]
 
-    def on_door_sign(self, side: str, now: float | None = None) -> None:
-        """A door ahead says PUSH or PULL (demo/doorsign.py): told once, not again within 10 s."""
+    def on_door_sign(self, side: str, now: float | None = None, door: bool = True) -> None:
+        """A sign says PUSH or PULL (demo/doorsign.py): told once, not again within 10 s. door:
+        a door was in view; without one, only what the sign says is told."""
         now = self.clock() if now is None else now
-        self._decide(now, "door", DOOR_TEXT[(side, self.on_foot)])
+        self._decide(now, "door", (DOOR_TEXT if door else SIGN_TEXT)[(side, self.on_foot)])
 
     def on_detections(
         self, found: list[tuple[str, float | None]], now: float | None = None
