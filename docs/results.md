@@ -1510,11 +1510,12 @@ BSD-3), as for the stairs:
 |---|---:|---:|---:|---:|---:|---:|
 | U-Net, glass photos only (3 runs) | 0.479 to 0.496 | 486 to 493 of 575 | 25 to 33 of 33 | 95% | 76% to 83% | 58% to 62% |
 | U-Net, with photos without glass | 0.473 | 442 | 24 | 91% | 9% | 14% |
-| Pretrained, with photos without glass | 0.657 | 511 | 12 | 89% | 1% | 3% |
+| Pretrained, with photos without glass (3 runs) | 0.655 to 0.668 | 502 to 511 | 12 to 15 | 87% to 89% | 5 to 12 (1%) | 2 to 5 (1% to 3%) |
 
-The pretrained model trained with photos without glass is the one the demo runs: it finds glass
-ahead in 89% of the test photos that have it there, and calls it on 12 of 943 photos without any
-(5 of 191 indoors). The glass-free photos are ADE20K's labels, which may miss some glass; the
+The pretrained model trained with photos without glass holds over three runs: it finds glass
+ahead in 87% to 89% of the test photos that have it there, and calls it on 5 to 12 of 943 photos
+without any. The demo runs the second run's weights (found 88%, false on 5 of 943, 2 of 191
+indoors). The glass-free photos are ADE20K's labels, which may miss some glass; the
 glass photos are GSD-S's, mostly still pictures with the glass well in view.
 
 **On our own phone frames, indoors at home, with no glass in view.** Every tenth frame of the
