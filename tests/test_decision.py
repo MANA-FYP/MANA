@@ -951,6 +951,24 @@ def test_after_the_yes_the_floor_at_the_foot_of_the_stairs_is_not_a_drop():
     assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
 
 
+@pytest.mark.parametrize("height", [0.52, 0.69])
+def test_after_the_yes_the_classifiers_stairs_are_those_stairs_down(height):
+    """The chair camera's classifier says "stairs" with no way up or down (STAIRS_UP). After the
+    yes, its stairs keep the chair going down when the 3D camera, past the top edge, reads the
+    hidden risers as one drop: 0.69 m for four on the campus's 12-riser flight (Gazebo)."""
+    c = said_yes_to_stairs_down()
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CLS, Ground.STAIRS_UP))
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CAM, Ground.FLAT))  # the camera's own reading gone
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=height))
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
+
+
+def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
+    c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"
+
+
 @pytest.mark.parametrize("height", [1.0, math.nan], ids=["deep", "unknown"])
 def test_after_the_yes_a_deep_drop_or_one_of_unknown_depth_still_stops(height):
     c = core(*stairs_down())
