@@ -147,6 +147,7 @@ def build_app(
         "stairs": None,  # the detector's last stairs, measured from the camera (#159)
         "door_read_at": None,  # when a door's sign was last read: at most once a second
         "door_reading": False,
+        "glass_frames": 0,  # frames in a row with glass in the path (GLASS_FRAMES)
     }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
@@ -653,6 +654,9 @@ async def walk_geojson(request: web.Request) -> web.Response:
 
 
 GLASS = "glass (pixels)"  # the glass segmenter's glass on the dashboard
+# frames in a row with glass in the path before it is told: on a real walk at home, 7 of the 13
+# times it called a glossy wardrobe or a screen glass lasted 1 or 2 frames (docs/results.md)
+GLASS_FRAMES = 3
 
 
 def glass_ahead(app: web.Application, jpeg: bytes, w: int, h: int):
@@ -665,7 +669,12 @@ def glass_ahead(app: web.Application, jpeg: bytes, w: int, h: int):
         return None
     seg.segment(jpeg)
     box = seg.in_path(w, h)
+    live = app["live"]
     if box is None or box.confidence < MIN_OBSTACLE_CONFIDENCE:
+        live["glass_frames"] = 0
+        return None
+    live["glass_frames"] += 1
+    if live["glass_frames"] < GLASS_FRAMES:
         return None
     distance = dz.floor_at(app["mount"].camera(w, h, pitch), box.y2)
     if distance is None:  # its bottom edge above the horizon: not on the floor ahead

@@ -63,6 +63,8 @@ def test_glass_reaching_the_floor_ahead_is_an_obstacle_where_it_meets_it():
     app = server.build_app(glass=Fixed(mask(slice(40, 240), slice(110, 210))))
     assert server.glass_ahead(app, jpeg(), 640, 480) is None  # no tilt yet: no distance
     app["mw"].gravity = tilted(20)
+    for _ in range(server.GLASS_FRAMES - 1):
+        assert server.glass_ahead(app, jpeg(), 640, 480) is None  # not yet: frames in a row
     ob = server.glass_ahead(app, jpeg(), 640, 480)
     assert ob.label == "glass" and 1.0 < ob.distance_m < 6.0
     assert abs(ob.bearing_rad) < 0.05  # straight ahead
@@ -72,3 +74,15 @@ def test_glass_whose_bottom_is_above_the_horizon_is_not_on_the_floor_ahead():
     app = server.build_app(glass=Fixed(mask(slice(0, 60), slice(110, 210))))
     app["mw"].gravity = tilted(0)  # held level: the top of the picture is above the horizon
     assert server.glass_ahead(app, jpeg(), 640, 480) is None
+
+
+def test_glass_seen_in_one_frame_and_gone_in_the_next_is_not_told():
+    seg = Fixed(mask(slice(40, 240), slice(110, 210)))
+    app = server.build_app(glass=seg)
+    app["mw"].gravity = tilted(20)
+    glass, clear = seg.fixed, np.zeros((S, S), np.float32)
+    for frame in (glass, glass, clear, glass, glass):  # never 3 in a row
+        seg.fixed = frame
+        assert server.glass_ahead(app, jpeg(), 640, 480) is None
+    seg.fixed = glass
+    assert server.glass_ahead(app, jpeg(), 640, 480) is not None
