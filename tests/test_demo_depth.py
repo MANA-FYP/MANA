@@ -430,7 +430,7 @@ def test_with_depth_farther_than_the_box_says_the_nearer_box_estimate_is_kept():
 
     from demo.vision import Detection, to_obstacles
 
-    close = Detection("person", 0.9, 200, 20, 280, 330)  # tall: about 1.9 m by its height
+    close = Detection("person", 0.9, 200, 20, 280, 330)  # tall: about 2 m by its height
 
     class OnePerson:
         def detect(self, jpeg):
@@ -450,9 +450,10 @@ def test_with_depth_farther_than_the_box_says_the_nearer_box_estimate_is_kept():
                 kept += [d["distance_m"] for d in mw.detections if d["label"] == "person"]
                 if len(kept) >= 20:
                     break
-        estimate = to_obstacles([close], 480, 360)[0].distance_m
+        focal = MOUNT.camera(480, 360, 0.0).fx  # the phone camera, as the server takes it
+        estimate = to_obstacles([close], 480, 360, focal_px=focal)[0].distance_m
         measured = dz.box_distance(depth["seen"], close, 480, 360)
-        assert measured > estimate + 0.1  # the depth says farther (2.14 m against 1.90 m)
+        assert measured > estimate + 0.1  # the depth says farther (2.14 m against 2.03 m)
         assert kept and max(kept) == pytest.approx(estimate, abs=0.01)
 
     run(with_clients(go, detector=OnePerson(), depth=WallAt6m(), mount=MOUNT))
