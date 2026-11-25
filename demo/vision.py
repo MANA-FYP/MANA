@@ -126,13 +126,16 @@ class StairSegmenter:
             if root not in sys.path:
                 sys.path.insert(0, root)
             from demo.depth import device
-            from tools.train_stair_seg import UNet
+            from tools.train_stair_seg import Pretrained, UNet
 
             on = device()
             models = []
             for one in path.split(","):
                 state = torch.load(one.strip(), map_location="cpu")
-                model = UNet(int(state["e1.0.weight"].shape[1]))  # 3 colours, or 4 with depth
+                if any(k.startswith("net.") for k in state):  # --arch pretrained; weights all here
+                    model = Pretrained(pretrained=False)
+                else:  # 3 colours, or 4 with depth
+                    model = UNet(int(state["e1.0.weight"].shape[1]))
                 model.load_state_dict(state)
                 models.append(model.eval().to(on))
             return cls(models, on)
@@ -200,3 +203,33 @@ class StairSegmenter:
         x1, x2 = np.percentile(cols, [2, 98]) * sx
         conf = float(self.mask[stairs].mean())
         return Detection("stairs", conf, float(x1), float(y1), float(x2), float(y2 + sy))
+
+
+class GlassSegmenter(StairSegmenter):
+    """Glass found pixel by pixel (tools/train_glass_seg.py, trained on GSD-S's glass masks). A
+    3D camera's light mostly passes through glass, so a glass wall or a closed glass door ahead
+    can read as open way; the phone's estimated depth mostly puts a surface there, but nothing
+    says it is glass. Only glass in the path counts: the middle third of the picture, where the
+    user is heading."""
+
+    def __init__(self, model, device: str, min_share: float = 0.02, size: int = 320):
+        super().__init__(model, device, min_share, size)
+
+    def in_path(self, frame_w: int, frame_h: int) -> Detection | None:
+        """The last frame's glass in the middle third of the picture, as a box in the frame
+        (the 2nd to 98th percentile of its pixels); its bottom edge is where it meets the floor.
+        None when there is less than min_share of it there."""
+        import numpy as np
+
+        if self.mask is None:
+            return None
+        third = self.size // 3
+        glass = self.mask[:, third : 2 * third] > 0.5
+        if glass.mean() < self.min_share:
+            return None
+        rows, cols = np.nonzero(glass)
+        sx, sy = frame_w / self.size, frame_h / self.size
+        y1, y2 = np.percentile(rows, [2, 98]) * sy
+        x1, x2 = (np.percentile(cols, [2, 98]) + third) * sx
+        conf = float(self.mask[:, third : 2 * third][glass].mean())
+        return Detection("glass", conf, float(x1), float(y1), float(x2), float(y2 + sy))

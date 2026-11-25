@@ -269,6 +269,19 @@ def test_a_depth_model_adds_its_stairs_only_when_the_frame_has_depth():
     assert seg.classify(stairs_jpeg(), depth)[0] == "stairs"
 
 
+def test_pretrained_weights_load_beside_a_unet_and_segment(tmp_path):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tools.train_stair_seg import Pretrained, UNet
+
+    torch.save(Pretrained(pretrained=False).state_dict(), tmp_path / "pre.pt")
+    torch.save(UNet(3).state_dict(), tmp_path / "unet.pt")
+    seg = vision.StairSegmenter.load(f"{tmp_path / 'pre.pt'},{tmp_path / 'unet.pt'}")
+    assert seg is not None and seg.channels == [3, 3]
+    assert isinstance(seg.models[0], Pretrained)
+    assert seg.segment(stairs_jpeg()).shape == (256, 256)
+
+
 def test_weights_trained_with_depth_load_as_a_four_channel_model(tmp_path):
     torch = pytest.importorskip("torch")
     from tools.train_stair_seg import UNet

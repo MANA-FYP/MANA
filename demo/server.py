@@ -116,6 +116,7 @@ def build_app(
     wifi_sensing=None,
     frame_ms=200,
     door_signs=None,
+    glass=None,
 ) -> web.Application:
     """key: what a request must carry (demo.access); None for none, as in the tests."""
     checks = [no_cache] if key is None else [access.middleware(key), no_cache]
@@ -125,6 +126,7 @@ def build_app(
     app["listener"] = listener  # sirens and horns on the microphone (demo.sounds), or None
     app["frame_ms"] = frame_ms  # told to the phone: how often to send a camera frame
     app["door_signs"] = door_signs  # reads PUSH or PULL on a door seen (demo.doorsign), or None
+    app["glass"] = glass  # glass in the path, pixel by pixel (vision.GlassSegmenter), or None
     # depth from the camera image (#131): the model, how the camera is held, the last result
     app["depth_model"], app["mount"] = depth, mount or dz.Mount()
     app["depth_reader"] = dz.Reader(app["mount"])  # holds the scale learned from level floor
@@ -145,6 +147,7 @@ def build_app(
         "stairs": None,  # the detector's last stairs, measured from the camera (#159)
         "door_read_at": None,  # when a door's sign was last read: at most once a second
         "door_reading": False,
+        "glass_frames": 0,  # frames in a row with glass in the path (GLASS_FRAMES)
     }
     app["frame"] = {"seq": 0, "jpeg": b"", "boxes": [], "w": 0, "h": 0}
     app["recorder"] = recorder  # keeps what the phone sends (#89), or None
@@ -541,6 +544,9 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
         frame.update(w=w, h=h)
         per_box: dict[int, float] = {}
         found = obstacles(app, detections, w, h, now, per_box)
+        glass = glass_ahead(app, jpeg, w, h)
+        if glass is not None:  # among the detector's obstacles: the nearest is sent last
+            found = sorted([*found, glass], key=lambda o: o.distance_m)
         nearest: dict[str, float] = {}
         for ob in found:
             nearest.setdefault(ob.label, ob.distance_m)
@@ -557,6 +563,13 @@ def analyse(app: web.Application, jpeg: bytes, now: float) -> None:
              "distance_m": None if i not in per_box else round(per_box[i], 1)}
             for i, d in enumerate(detections)
         ]  # fmt: skip
+        if glass is not None:
+            box = app["glass"].in_path(w, h)
+            frame["boxes"].append(
+                {"label": GLASS, "confidence": round(glass.confidence, 2), "x1": box.x1,
+                 "y1": box.y1, "x2": box.x2, "y2": box.y2,
+                 "distance_m": round(glass.distance_m, 1)}
+            )  # fmt: skip
     if app["classifier"] is not None:
         extra = {}
         if getattr(app["classifier"], "wants_depth", False):
@@ -638,6 +651,36 @@ async def walk_geojson(request: web.Request) -> web.Response:
     disposition = 'attachment; filename="mana-walk.geojson"'
     return web.json_response(data, content_type="application/geo+json",
                              headers={"Content-Disposition": disposition})  # fmt: skip
+
+
+GLASS = "glass (pixels)"  # the glass segmenter's glass on the dashboard
+# frames in a row with glass in the path before it is told: on a real walk at home, 7 of the 13
+# times it called a glossy wardrobe or a screen glass lasted 1 or 2 frames (docs/results.md)
+GLASS_FRAMES = 3
+
+
+def glass_ahead(app: web.Application, jpeg: bytes, w: int, h: int):
+    """Glass in the path as an obstacle, or None. Its distance is where its bottom edge meets
+    the floor, from the camera's height and tilt, as for the detector's boxes without depth: a
+    depth camera may see through the glass."""
+    seg, mw = app["glass"], app["mw"]
+    pitch = None if seg is None or mw.gravity is None else dz.camera_pitch(*mw.gravity)
+    if pitch is None:
+        return None
+    seg.segment(jpeg)
+    box = seg.in_path(w, h)
+    live = app["live"]
+    if box is None or box.confidence < MIN_OBSTACLE_CONFIDENCE:
+        live["glass_frames"] = 0
+        return None
+    live["glass_frames"] += 1
+    if live["glass_frames"] < GLASS_FRAMES:
+        return None
+    distance = dz.floor_at(app["mount"].camera(w, h, pitch), box.y2)
+    if distance is None:  # its bottom edge above the horizon: not on the floor ahead
+        return None
+    bearing = vision.bearing_rad((box.x1 + box.x2) / 2.0, w)
+    return vision.Obstacle("glass", box.confidence, distance, bearing)
 
 
 DOORS = ("door", "glass door")
@@ -964,6 +1007,7 @@ def models_status(app: web.Application) -> dict:
         "depth": app["depth_model"] is not None,
         "sounds": app["listener"] is not None,
         "door signs": app["door_signs"] is not None,
+        "glass": app["glass"] is not None,
     }
 
 
@@ -1112,6 +1156,9 @@ def main(argv=None) -> None:
         help="weights of the stairs segmentation (tools/train_stair_seg.py); used instead of "
         "--stairs-model, on the GPU when there is one",
     )
+    p.add_argument(
+        "--glass-seg", help="weights of the glass segmentation (tools/train_glass_seg.py)"
+    )
     p.add_argument("--door-signs", action="store_true",
                    help="read PUSH or PULL on doors seen (needs rapidocr_onnxruntime)")  # fmt: skip
     p.add_argument("--sounds", metavar="EFFICIENTAT",
@@ -1190,6 +1237,7 @@ def main(argv=None) -> None:
         laptop_wifi=wifi.LaptopWifi(),
         wifi_sensing=wifi_sensing_from(a),
         door_signs=doorsign.DoorSign.load() if a.door_signs else None,
+        glass=vision.GlassSegmenter.load(a.glass_seg) if a.glass_seg else None,
     )
     if a.record:
         print(f"recording the phone into {a.record}")

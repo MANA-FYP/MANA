@@ -1495,3 +1495,59 @@ glare, are the check still to make.
 python3 tools/eval_door_signs.py --ann TextOCR_0.1_train.json TextOCR_0.1_val.json --images train_images --width 640
 python3 tools/door_sign_sizes.py --root datasets/gsds --hard
 ```
+
+## Glass walls and doors, found pixel by pixel
+
+A 3D camera's light mostly passes through glass, so a glass wall or a closed glass door can read
+as open way. The phone's depth, estimated from the image (Depth Anything V2, Metric-Indoor-Small),
+mostly does not: on GSD-S's test photos it put a surface where the glass is in 85% of 474 glass
+regions (the depth inside within 15% of the depth around it), 11% read 1.15 to 1.5 times as far,
+and 3% as seen through (1.5 times or more). But neither says it is glass. So the demo
+(`--glass-seg`) marks glass pixel by pixel, and glass in the middle third of the picture, where the
+user is heading, is an obstacle where its bottom edge meets the floor: "Stop. Glass ahead, 1
+metre."
+
+**Data.** GSD-S ("Exploiting Semantic Relations for Glass Surface Detection", NeurIPS 2022;
+bsd-3-clause-non-commercial): 3,911 training and 608 test photos with a glass mask. The saved
+epoch is chosen on a sixth of the training photos; the test photos play no part in it
+(`tools/train_glass_seg.py`).
+
+**Trained on glass photos only, it sees glass everywhere.** GSD-S is nearly all glass (575 of the
+608 test photos show some). The small U-Net trained on it scores IoU 0.496, 0.479 and 0.481 over
+three runs, but marked 25, 28 and 33 of the 33 test photos without glass. Asked the way the demo
+asks (`tools/eval_glass_in_path.py`: glass in the path, at the obstacle confidence), it called
+glass ahead on 76% to 83% of ADE20K validation photos with nothing glassy labelled (no window,
+door, mirror, display case, screen, vehicle, shower or drinking glass), and on 58% to 62% of the
+indoor ones. A user would hear it almost everywhere.
+
+**With photos without glass.** `--clear` adds 4,000 ADE20K training photos with nothing glassy
+labelled (of 9,419), each with an empty mask; a sixth of them join the validation photos.
+`--arch pretrained` is LR-ASPP on an ImageNet-pretrained MobileNetV3 backbone (torchvision,
+BSD-3), as for the stairs:
+
+| Glass model | Test IoU | Test photos with glass: found | Without glass: marked | Glass ahead found (437) | False glass ahead (943) | Indoor (191) |
+|---|---:|---:|---:|---:|---:|---:|
+| U-Net, glass photos only (3 runs) | 0.479 to 0.496 | 486 to 493 of 575 | 25 to 33 of 33 | 95% | 76% to 83% | 58% to 62% |
+| U-Net, with photos without glass | 0.473 | 442 | 24 | 91% | 9% | 14% |
+| Pretrained, with photos without glass (3 runs) | 0.655 to 0.668 | 502 to 511 | 12 to 15 | 87% to 89% | 5 to 12 (1%) | 2 to 5 (1% to 3%) |
+
+The pretrained model trained with photos without glass holds over three runs: it finds glass
+ahead in 87% to 89% of the test photos that have it there, and calls it on 5 to 12 of 943 photos
+without any. The demo runs the second run's weights (found 88%, false on 5 of 943, 2 of 191
+indoors). The glass-free photos are ADE20K's labels, which may miss some glass; the
+glass photos are GSD-S's, mostly still pictures with the glass well in view.
+
+**On our own phone frames, indoors at home, with no glass in view.** Every tenth frame of the
+recordings (901): glass ahead on 17 (1.9%), a glossy wooden wardrobe door at arm's length (9), a
+laptop screen just in front of the camera (7) and a bedsheet (1). Every frame of one walk (1,334):
+47 frames, in 13 runs, 7 of them only 1 or 2 frames long. So glass is told only once it is in the
+path in 3 frames in a row (`GLASS_FRAMES`, 0.24 s at the lab's 80 ms frames): that leaves 6 of the
+13, all the wardrobe up close, a surface the user must stop for anyway, though not glass. These
+are the first run's weights; with the second run's, the ones the demo runs, the same walk gives 25
+frames in 7 runs, 3 of them 3 frames or longer. The real glass doors and walls of the route are
+the check still to make.
+
+```
+python3 tools/train_glass_seg.py --root datasets/gsds --clear datasets/ade_clear --arch pretrained --out runs/glass_seg.pt
+python3 tools/eval_glass_in_path.py --gsds datasets/gsds --ade datasets/ADEChallengeData2016 runs/glass_seg.pt
+```
