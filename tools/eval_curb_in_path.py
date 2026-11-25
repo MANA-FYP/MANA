@@ -1,5 +1,5 @@
-"""Curb ahead, per frame, on SANPO walks the curb model never trained on: how often it finds a
-curb in the walking path within 3 m, and how often it calls one on frames with no curb in the path,
+"""Curb ahead (or, with --class-id 1 2, road or curb: the walkway has ended), per frame, on SANPO
+walks the model never trained on: how often it finds one in the walking path within 3 m, and how often it calls one on frames with no curb in the path,
 the false alarms a person walking would hear.
 
     python3 tools/eval_curb_in_path.py --root datasets/sanpo runs/curb_pre_0.pt [more weights]
@@ -50,7 +50,7 @@ def truth(mp: Path, fp: Path) -> str | None:
     """'curb' (a curb in the path within NEAR_M), 'clear' (none in the path), or None."""
     red = np.asarray(Image.open(mp).convert("RGB"))[..., 0]
     h, w = red.shape
-    path = red[h // 2 :, w // 3 : 2 * w // 3] == T.CURB_ID
+    path = np.isin(red[h // 2 :, w // 3 : 2 * w // 3], T.TARGET_IDS)
     if not path.any():
         return "clear"
     if path.sum() < 200:
@@ -68,8 +68,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("weights", type=Path, nargs="+")
+    ap.add_argument(
+        "--class-id", type=int, nargs="+", default=[T.CURB_ID], help="as the model was trained"
+    )
     a = ap.parse_args(argv)
-    T.TARGET_ID = T.CURB_ID
+    T.TARGET_IDS = tuple(a.class_id)
     held, allp = held_walks(a.root)
     frames = sorted((fp, mp) for fp, mp in allp if T.walk_of(fp) in held)
     labels = [truth(mp, fp) for fp, mp in frames]

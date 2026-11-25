@@ -38,7 +38,7 @@ from torch.utils.data import DataLoader, Dataset
 
 STAIR_ID = 15  # SANPO 'stairs' class, stored in the mask's red channel (see sanpo_to_yolo.py)
 CURB_ID = 2  # SANPO 'curb': where a pavement ends at a road, up or down (--class-id 2)
-TARGET_ID = STAIR_ID  # the class learnt: --class-id sets it
+TARGET_IDS = (STAIR_ID,)  # the classes learnt, as one: --class-id sets them
 IMG = 256  # frames are resized to this square for training
 
 
@@ -125,7 +125,7 @@ def list_pairs(root: Path, split: str) -> list[tuple[Path, Path]]:
 
 def has_stairs(mask_path: Path) -> bool:
     red = np.array(Image.open(mask_path).convert("RGB"))[..., 0]
-    return bool((red == TARGET_ID).any())
+    return bool(np.isin(red, TARGET_IDS).any())
 
 
 def dim(rgb: np.ndarray, rng: np.random.Generator, light=None, gamma=None, noise=None):
@@ -196,7 +196,7 @@ class StairSeg(Dataset):
         fp, mp = self.pairs[i]
         rgb = np.array(Image.open(fp).convert("RGB").resize((IMG, IMG))) / 255.0
         m = np.array(Image.open(mp).convert("RGB").resize((IMG, IMG), Image.NEAREST))
-        seg = (m[..., 0] == TARGET_ID).astype(np.float32)
+        seg = np.isin(m[..., 0], TARGET_IDS).astype(np.float32)
         if self.dark:
             rgb = dim(rgb, np.random.default_rng(i), **DARK)
         elif self.low_light and np.random.random() < 0.5:
@@ -295,13 +295,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--class-id",
         type=int,
-        default=STAIR_ID,
-        help="the SANPO class to learn, from the mask's red channel: 15 stairs (the default), "
-        "2 curb (where the pavement ends: a road end for someone walking)",
+        nargs="+",
+        default=[STAIR_ID],
+        help="the SANPO classes to learn as one, from the mask's red channel: 15 stairs (the "
+        "default), 2 curb (where the pavement ends: a road end for someone walking), 1 2 road "
+        "or curb (the walkway has ended)",
     )
     a = ap.parse_args(argv)
-    global TARGET_ID
-    TARGET_ID = a.class_id
+    global TARGET_IDS
+    TARGET_IDS = tuple(a.class_id)
     only = a.only_with or a.depth
     if a.arch == "pretrained" and a.depth:
         ap.error("--arch pretrained takes colour only, not --depth")
