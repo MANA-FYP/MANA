@@ -518,7 +518,8 @@ def test_while_the_slides_move_the_longer_front_counts():
 
 
 def test_an_obstacle_from_the_lidar_is_measured_from_the_front_too():
-    c = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(0.85))
+    # on wheels too, from the lifted tracks' tip, 0.7 m ahead of the lidar: they meet it first
+    c = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(1.5))
     assert c.obstacles[LIDAR].distance_m == pytest.approx(0.80) and c.decision.stop
 
 
@@ -1338,4 +1339,3 @@ def test_on_wheels_an_obstacle_is_measured_from_the_lifted_tracks_tip_a_drop_fro
     c2.on_motion(level())
     assert not c2.tick(NOW).stop  # beyond edge_m (0.5) from the wheels: not yet a stop
     assert c2.ground[DEPTH].distance_m == pytest.approx(0.83)
-
