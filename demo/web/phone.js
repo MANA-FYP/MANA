@@ -24,6 +24,7 @@ function connect() {
   ws = new WebSocket(scheme + "://" + location.host + "/ws/phone");
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
+    resync = true;  // maybe a server started again: it numbers its lines afresh
     conn.textContent = "connected";
     conn.className = "chip";
     send({ type: "hello", caps: capabilities(), audio_rate: audioRate });
@@ -116,6 +117,7 @@ function showSaid(heard) {
 const BUZZ = { URGENT: [400, 100, 400], WARNING: [200] };
 let voiceReady = false;      // speech is allowed only after a tap (the Start button)
 let lastSpoken = null;       // the newest line already said; null until the first state
+let resync = false;          // set on each new connection: the server may have started again
 function speakNow(text, priority) {
   if (navigator.vibrate && BUZZ[priority]) navigator.vibrate(BUZZ[priority]);
   if (!voiceReady || !("speechSynthesis" in window)) return;
@@ -126,6 +128,15 @@ function sayAloud(heard) {
   if (!heard || !heard.length) return;
   const newest = heard[heard.length - 1].n;
   if (lastSpoken === null) { lastSpoken = newest; return; }  // not what was said before the page
+  if (resync || newest < lastSpoken) {
+    // a new connection, or a server that started again and numbers its lines from 1: what was
+    // missed is not said as a burst, and a stop that stands now is said, so it is never lost
+    resync = false;
+    const now = heard[heard.length - 1];
+    if (now.speak && now.priority === "URGENT") speakNow(now.text, now.priority);
+    lastSpoken = newest;
+    return;
+  }
   heard.filter((e) => e.n > lastSpoken && e.speak).forEach((e) => speakNow(e.text, e.priority));
   lastSpoken = Math.max(lastSpoken, newest);
 }
