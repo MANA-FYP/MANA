@@ -75,8 +75,9 @@ def main(argv=None) -> int:
     labels = [truth(mp, fp) for fp, mp in frames]
     keep = [i for i, t in enumerate(labels) if t is not None]
     n_curb = sum(labels[i] == "curb" for i in keep)
+    left_out = len(frames) - len(keep)
     print(f"held-out walks {len(held)}, frames {len(frames)}: curb ahead {n_curb}, "
-          f"clear {len(keep) - n_curb}, left out {len(frames) - len(keep)}", flush=True)  # fmt: skip
+          f"clear {len(keep) - n_curb}, left out {left_out}", flush=True)  # fmt: skip
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     data = T.StairSeg([frames[i] for i in keep])
     s0, s1 = T.IMG // 2, (T.IMG // 3, 2 * (T.IMG // 3))
