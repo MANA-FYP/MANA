@@ -41,8 +41,8 @@ class MessageQueue:
       not dropped by one, and it drops nothing when it is pushed.
     - A new message waits until the one before it has been said (its length at chars_per_s, and at
       least gap_s). An URGENT message does not wait for a less urgent one: it goes at once and
-      replaces every waiting message that is less urgent. It does wait for an URGENT one, so a stop
-      never cuts off another stop.
+      replaces every waiting message that is less urgent but a NOTICE, which is said after it. It
+      does wait for an URGENT one, so a stop never cuts off another stop.
     - A message older than max_age_s is dropped, because it may no longer be true. An URGENT one is
       never dropped for its age: a stop is always answered.
     - A message is not said twice in a row. A decision is a repeat when it is the same text as the
@@ -157,9 +157,13 @@ class MessageQueue:
             ):
                 continue  # the same decision has just been said: nothing changed for the user
             if best.priority == Priority.URGENT:
-                # less urgent ones are replaced; a waiting urgent direction would repeat the stop
+                # less urgent ones are replaced; a waiting urgent direction would repeat the stop.
+                # A notice is kept, said after the stop: a door's PUSH or PULL read as the user
+                # comes up to the door is needed just when the stop at that door comes (review)
                 self.waiting = [
-                    m for m in self.waiting if m.priority >= Priority.URGENT and m.kind != DIRECTION
+                    m
+                    for m in self.waiting
+                    if (m.priority >= Priority.URGENT and m.kind != DIRECTION) or m.kind == NOTICE
                 ]
             spoken_s = len(best.text) / self.chars_per_s if best.speak else 0.0
             self._free_at = now + max(self.gap_s, spoken_s)

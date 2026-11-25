@@ -698,3 +698,16 @@ def test_a_decision_still_drops_the_decisions_and_directions_that_wait():
     q.push(say("Wait", INFO, 0.2, kind=NOTICE), 0.2)
     q.push(say("Obstacle ahead, slowing down", WARNING, 0.3), 0.3)
     assert [m.text for m in q.waiting] == ["Wait", "Obstacle ahead, slowing down"]
+
+
+def test_a_door_sign_waiting_is_said_after_the_stop_at_that_door_not_dropped():
+    """The sign is read as the user comes up to the door; the stop at the door comes a moment
+    later and goes first, then the sign (readiness review: it was dropped and then held back
+    for 10 s as already said)."""
+    q = MessageQueue()
+    q.push(say("Slow down. Obstacle ahead, slowing down.", WARNING, 0.0), 0.0)
+    assert q.release(0.0).text.startswith("Slow down")  # being said: the next ones wait
+    q.push(say("Door ahead. Pull to open.", INFO, 0.5, kind=NOTICE), 0.5)
+    q.push(say("Stop. Obstacle ahead, stopping.", URGENT, 0.6), 0.6)
+    said = [m.text for t in range(6, 120) if (m := q.release(t / 10))]
+    assert said == ["Stop. Obstacle ahead, stopping.", "Door ahead. Pull to open."]
