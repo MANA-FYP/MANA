@@ -105,8 +105,9 @@ def points(depth: np.ndarray, cam: Camera, mount: Camera | None = None, roll_rad
     """Ahead, left and height above the ground of every valid pixel (REP 103: left is positive),
     and how far ahead each is along the device itself, with the camera as mounted: when the device
     pitches nose up, its own parts below the camera swing forward in the level frame. roll_rad is
-    the device's own roll (REP 103: left side up is positive): on the stairs the tracks sit a little
-    unevenly, and 2 degrees made the level floor at the top rise 4 cm across the path, an obstacle."""
+    the device's own roll (REP 103: left side up is positive): on the stairs the tracks sit a
+    little unevenly, and 2 degrees made the level floor at the top rise 4 cm across the path, an
+    obstacle."""
     z = median3(depth)
     rows, cols = z.shape
     yn = (np.arange(rows)[:, None] - cam.cy) / cam.fy
@@ -205,7 +206,8 @@ def find(
                     )
                     count2 = np.bincount(across[a2:b2], minlength=cells)
                     raised2 = np.bincount(across[a2:b2], weights=up2, minlength=cells)
-                    touched |= seen & (raised2 >= st.min_points) & (raised2 >= st.occupied_share * count2)
+                    rose = (raised2 >= st.min_points) & (raised2 >= st.occupied_share * count2)
+                    touched |= seen & rose
             # a step runs across the whole path, so it raises the corridor's outermost seen cells
             # on both sides; a low box in the middle leaves one of them flat. Checked out to
             # edge_check_m: further off, stereo noise can leave a real riser's edge cell flat, and
