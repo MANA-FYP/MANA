@@ -19,6 +19,8 @@ Parameters:
   segmenter  instead, stairs segmentation weights (tools/train_stair_seg.py; several separated by
              commas), as the phone demo runs them: "stairs" when at least 2 percent of the picture
              is stairs (mana_perception.stair_seg). Needs torch.
+  threads    CPU threads for the segmenter (default 2): torch takes every core it sees, and beside
+             a simulation that left its reports too late for the core (older than 0.5 s)
   rate_hz  most frames per second; frames in between are skipped (default 5.0)
 """
 
@@ -39,11 +41,15 @@ class ClassifierNode(Node):
         super().__init__("mana_ground_classifier")
         path = self.declare_parameter("model", "ground.onnx").value
         seg = self.declare_parameter("segmenter", "").value
+        threads = self.declare_parameter("threads", 2).value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 5.0).value
         log = self.get_logger().error
         if model is None and seg:
+            import torch
+
             from mana_perception.stair_seg import StairSegModel
 
+            torch.set_num_threads(int(threads))
             model, path = StairSegModel.load(seg, log=log), seg
         self.model = model or ground_classifier.GroundModel.load(path, log=log)
         if self.model is None:
