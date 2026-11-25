@@ -65,3 +65,18 @@ def test_the_loop_stays_in_the_corridors_of_the_world():
         for i in range(101):
             x, y = x1 + (x2 - x1) * i / 100, y1 + (y2 - y1) * i / 100
             assert not (block[0] < x < block[1] and block[2] < y < block[3]), (x, y)
+
+
+def test_the_campus_loop_stays_clear_on_the_building_floor():
+    """Every point of every leg, from the lobby start, is clear of walls, tables and glass for a
+    chair 0.7 m wide, and on the building floor (one level, for a 2D lidar)."""
+    from mana_sim.campus import build
+
+    c = build()
+    x0, y0, _, _ = c.starts["lobby"]
+    pts = [(x0, y0), *loc.ROUTES["campus"]]
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:], strict=False):
+        for i in range(101):
+            x, y = x1 + (x2 - x1) * i / 100, y1 + (y2 - y1) * i / 100
+            assert c.ground(x, y) == pytest.approx(c.floor), (x, y)
+            assert not c.blocked(x, y, 0.35, c.floor), (x, y, c.blocked(x, y, 0.35, c.floor))

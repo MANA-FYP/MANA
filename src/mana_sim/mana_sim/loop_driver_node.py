@@ -28,7 +28,7 @@ from rclpy.time import Time
 from tf2_ros import Buffer, TransformListener
 
 from mana_msgs.msg import DriveRequest
-from mana_sim.localisation import COLUMNS, INDOOR_LOOP, driven_m, errors, steer
+from mana_sim.localisation import COLUMNS, ROUTES, driven_m, errors, steer
 
 
 def yaw_of(q) -> float:
@@ -36,9 +36,9 @@ def yaw_of(q) -> float:
 
 
 class LoopDriver(Node):
-    def __init__(self, laps: int, out: str):
+    def __init__(self, laps: int, out: str, route: str = "indoor"):
         super().__init__("loop_driver", parameter_overrides=[Parameter("use_sim_time", value=True)])
-        self.route = INDOOR_LOOP * laps
+        self.route = ROUTES[route] * laps
         self.wp, self.gt, self.done = 0, None, False
         self.history: deque = deque(maxlen=200)  # (time, ground-truth pose), newest last
         self.rows: list[dict] = []
@@ -109,8 +109,10 @@ def main(argv=None) -> int:
     p.add_argument("--laps", type=int, default=1)
     p.add_argument("--csv", default="loop_drive.csv")
     p.add_argument("--timeout", type=float, default=900.0, help="wall-clock seconds")
+    p.add_argument("--route", choices=sorted(ROUTES), default="indoor",
+                   help="the indoor world's corridor loop, or the campus building's")  # fmt: skip
     a = p.parse_args(rclpy.utilities.remove_ros_args(sys.argv if argv is None else argv)[1:])
-    node = LoopDriver(a.laps, a.csv)
+    node = LoopDriver(a.laps, a.csv, a.route)
     end = time.time() + a.timeout
     while not node.done and time.time() < end:
         rclpy.spin_once(node, timeout_sec=0.05)

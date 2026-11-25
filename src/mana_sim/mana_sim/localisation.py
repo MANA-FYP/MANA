@@ -17,6 +17,23 @@ from dataclasses import dataclass
 INDOOR_START = (1.0, 1.375, 0.0)
 # the corridor loop round the central block of worlds/mana_indoor.sdf, from the start at (1, 1.375)
 INDOOR_LOOP = [(14.5, 1.375), (14.9, 8.6), (1.5, 8.6), (1.5, 1.375), (8.0, 1.375)]
+# inside the campus building (mana_sim.campus, from its start "lobby" at (12, 9) facing north): up
+# the lobby to the corridor, to its west end, east to 3.5 m before the glass door, into the hall
+# through its doorway and along it, and back to the lobby. All on one floor, so a 2D lidar maps it
+ROUTES = {
+    "indoor": INDOOR_LOOP,
+    "campus": [
+        (12.0, 15.5),
+        (2.5, 15.5),
+        (17.5, 15.5),
+        (12.0, 15.5),
+        (12.0, 20.0),
+        (17.0, 20.0),
+        (12.0, 20.0),
+        (12.0, 15.5),
+        (12.0, 9.0),
+    ],  # fmt: skip
+}
 
 COLUMNS = ["t", "gx", "gy", "gyaw", "mx", "my", "myaw", "ox", "oy", "oyaw"]
 

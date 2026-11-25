@@ -12,6 +12,10 @@
 #   tools/indoor_localisation.sh --laps 3 --out runs/t43
 #   tools/indoor_localisation.sh --no-mapping --map ~/mana_maps/indoor   # localise on a saved map
 #   tools/indoor_localisation.sh --no-mapping --ekf --out runs/t43-ekf   # the EKF with the gated lidar
+#   tools/indoor_localisation.sh --world campus --map ~/mana_maps/campus   # the campus building (#79)
+#
+# --world campus: the campus (mana_sim.campus) from its lobby, and the loop round the building's
+# corridor and hall (mana_sim.localisation.ROUTES), all on its floor, for the autopilot's map.
 #
 # --ekf: in the localisation step slam_toolbox's map pose goes through mana_position's lidar_gate
 # (jumps against the wheels' move taken out) into ekf_global (with the wheels and the IMU), and the
@@ -28,6 +32,7 @@ OUT="indoor_localisation"
 LAPS=2
 MAPPING=1
 EKF=0
+WORLD=indoor
 while [ $# -gt 0 ]; do
   case "$1" in
     --map) MAP="$2"; shift ;;
@@ -35,13 +40,19 @@ while [ $# -gt 0 ]; do
     --laps) LAPS="$2"; shift ;;
     --no-mapping) MAPPING=0 ;;
     --ekf) EKF=1 ;;
-    *) echo "usage: $0 [--map PATH] [--out DIR] [--laps N] [--no-mapping] [--ekf]" >&2; exit 2 ;;
+    --world) WORLD="$2"; shift ;;
+    *) echo "usage: $0 [--map PATH] [--out DIR] [--laps N] [--no-mapping] [--ekf] [--world indoor|campus]" >&2; exit 2 ;;
   esac
   shift
 done
 mkdir -p "$OUT" "$(dirname "$MAP")"
 SHARE="$(ros2 pkg prefix mana_sim)/share/mana_sim"
 POSITION="$(ros2 pkg prefix mana_position)/share/mana_position"
+WORLD_FILE="$SHARE/worlds/mana_indoor.sdf"
+if [ "$WORLD" = campus ]; then
+  WORLD_FILE="$OUT/campus_lobby.sdf"
+  python3 -m mana_sim.campus --start lobby > "$WORLD_FILE" || exit 2
+fi
 
 PIDS=()
 stop_all() {  # stop what this script started (each in its own process group): ask, wait, kill
@@ -67,7 +78,7 @@ start() {  # start a command in its own process group, output to a file
 run() {  # one step: the world from the start, slam_toolbox in a mode, then the drive
   local name=$1 executable=$2 config=$3 laps=$4; shift 4
   start "$OUT/$name-world.log" ros2 launch mana_sim world.launch.py \
-    world:="$SHARE/worlds/mana_indoor.sdf" headless:=true odom:=wheels driver:=true
+    world:="$WORLD_FILE" headless:=true odom:=wheels driver:=true
   sleep 25  # Gazebo up and the sensors publishing
   start "$OUT/$name-slam.log" ros2 run slam_toolbox "$executable" \
     --ros-args --params-file "$SHARE/config/$config" "$@"
@@ -92,7 +103,7 @@ run() {  # one step: the world from the start, slam_toolbox in a mode, then the 
     # the drive's first row waits for map > odom itself (loop_driver), so nothing is polled here
   fi
   echo "--- $name"
-  ros2 run mana_sim loop_driver --laps "$laps" --csv "$OUT/$name.csv"
+  ros2 run mana_sim loop_driver --laps "$laps" --csv "$OUT/$name.csv" --route "$WORLD"
 }
 
 status=0
