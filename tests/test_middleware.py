@@ -399,6 +399,19 @@ def test_the_decision_log_says_stop_and_go_in_words():
     assert any(t.startswith("MANA reactivated.") for t in log)
 
 
+def test_the_person_is_told_when_it_is_too_dark_for_the_camera_and_when_it_sees_again():
+    m = Middleware(on_foot=True)
+    m.on_light(0.5, now=0.0)
+    m.on_light(0.1, now=1.0)  # trust 0.2: too dark
+    m.on_light(0.08, now=2.0)  # still dark: said once
+    m.on_light(0.2, now=3.0)  # trust 0.6: not light enough to say it sees again
+    m.on_light(0.4, now=4.0)  # trust 1.0
+    texts = [d["text"] for d in m.decisions]
+    assert texts.count(Middleware.DARK_TEXT) == 1
+    assert texts.count(Middleware.LIGHT_TEXT) == 1
+    assert texts.index(Middleware.DARK_TEXT) < texts.index(Middleware.LIGHT_TEXT)
+
+
 def test_a_person_in_view_does_not_fill_the_decision_log():
     m = Middleware(clock=lambda: 10.0)
     m.tick(0.0)
@@ -896,16 +909,3 @@ def test_a_walker_is_stopped_for_stairs_down_with_no_distance_and_the_chair_is_n
     walker.set_on_foot(True, 2.0)
     walker.on_ground(Source.CAMERA, Ground.STAIRS_DOWN, 0.9, float("nan"), 3.0)
     assert walker.core.tick(3.0).stop
-
-
-def test_the_person_is_told_when_it_is_too_dark_for_the_camera_and_when_it_sees_again():
-    m = Middleware(on_foot=True)
-    m.on_light(0.5, now=0.0)
-    m.on_light(0.1, now=1.0)  # trust 0.2: too dark
-    m.on_light(0.08, now=2.0)  # still dark: said once
-    m.on_light(0.2, now=3.0)  # trust 0.6: not light enough to say it sees again
-    m.on_light(0.4, now=4.0)  # trust 1.0
-    texts = [d["text"] for d in m.decisions]
-    assert texts.count(Middleware.DARK_TEXT) == 1
-    assert texts.count(Middleware.LIGHT_TEXT) == 1
-    assert texts.index(Middleware.DARK_TEXT) < texts.index(Middleware.LIGHT_TEXT)
