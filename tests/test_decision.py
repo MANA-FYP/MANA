@@ -977,6 +977,17 @@ def test_on_the_flight_after_a_yes_one_sensors_stairs_down_do_not_stop_the_chair
     assert c.tick(NOW + 0.2).stop  # a deep drop still stops, on the flight too
 
 
+def test_going_down_after_a_yes_the_lidars_obstacle_is_the_steps_below():
+    """Pitched nose down on the flight, the lidar's plane meets the steps below: it stopped the
+    chair on the campus's flight (Gazebo). The 3D camera's obstacle still stops it."""
+    c = said_yes_to_stairs_down()
+    reports = (ground(CLS, Ground.STAIRS_UP), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    c.on_obstacle(ObstacleReport(NOW + 0.2, 0.9, Source.LIDAR, 0.9))
+    assert not fed(c, reports, NOW + 0.2, motion=0.5).stop
+    c.on_obstacle(ObstacleReport(NOW + 0.3, 0.9, Source.DEPTH_CAMERA, 0.6, "person"))
+    assert fed(c, reports, NOW + 0.3, motion=0.5).stop
+
+
 def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
     c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
     assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"

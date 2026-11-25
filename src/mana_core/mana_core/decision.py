@@ -433,6 +433,8 @@ class DecisionCore:
         an obstacle of the lidar's nearer than the step still stops."""
         if report.source != Source.LIDAR or not math.isfinite(report.distance_m):
             return False
+        if self._descending():  # pitched nose down on a flight, the plane meets the steps below
+            return True
         sw = self._switching()
         steps = [
             g.distance_m + self.mount.front_m(self.mode, sw)
