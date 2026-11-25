@@ -241,10 +241,15 @@ class Mount:
             return 0.0
         return max(0.0, v - self.decel_mps2 * (stopped_s - self.reaction_s))
 
-    def ahead_of_sensor(self, source: Source, mode: Mode, switching: bool) -> float:
-        """How far the front is ahead of the sensor of this source."""
+    def ahead_of_sensor(
+        self, source: Source, mode: Mode, switching: bool, body: bool = False
+    ) -> float:
+        """How far the front is ahead of the sensor of this source. body: the front an obstacle
+        meets, whatever sticks out furthest: on wheels the simulated chair's lifted tracks still
+        reach front_tracks_m (they lift, they do not fold), so it stopped with their tip 0.2 m
+        from a glass door (#240). The ground is met where the wheels or tracks touch it."""
         front = {Mode.WHEELS: self.front_wheels_m, Mode.TRACKS: self.front_tracks_m}
-        at = max(front.values()) if switching else front[mode]
+        at = max(front.values()) if switching or body else front[mode]
         sensor = {
             Source.CAMERA: self.camera_m,
             Source.DEPTH_CAMERA: self.depth_camera_m,
@@ -347,12 +352,13 @@ class DecisionCore:
     def _switching(self) -> bool:
         return 0.0 <= self.now - self.mode_changed_at < self.mount.switch_s
 
-    def _from_front(self, report):
+    def _from_front(self, report, body: bool = False):
         """The report with its distance from the device's front instead of from its sensor. A
-        hazard the front has already reached is at 0 m; an unknown distance stays unknown."""
+        hazard the front has already reached is at 0 m; an unknown distance stays unknown. body:
+        from the furthest point of the device, for an obstacle (Mount.ahead_of_sensor)."""
         if not math.isfinite(report.distance_m):
             return report
-        ahead = self.mount.ahead_of_sensor(report.source, self.mode, self._switching())
+        ahead = self.mount.ahead_of_sensor(report.source, self.mode, self._switching(), body)
         return replace(report, distance_m=max(0.0, report.distance_m - ahead)) if ahead else report
 
     def on_ground(self, report: GroundReport) -> None:
@@ -361,7 +367,7 @@ class DecisionCore:
     def on_obstacle(self, report: ObstacleReport) -> None:
         if self._newer(self.obstacles.get(report.source), report) and self.mount.top_mps > 0:
             self._track(report)
-        self._keep(self.obstacles, report.source, self._from_front(report))
+        self._keep(self.obstacles, report.source, self._from_front(report, body=True))
 
     def _track(self, report: ObstacleReport) -> None:
         """Where the obstacle is along the way, as the distance from its sensor (fixed on the

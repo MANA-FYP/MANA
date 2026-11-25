@@ -378,6 +378,7 @@ KIND_PRIORITY = {
     "coverage": Priority.INFO,
     "sound": Priority.WARNING,
     "door": Priority.INFO,
+    "way": Priority.WARNING,  # which way is open, when the way ahead is blocked
 }
 # which way a door ahead opens, from its sign (demo/doorsign.py): on foot, and in a chair, where
 # a door that opens towards the user is hard to open alone
@@ -387,6 +388,31 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
+# which way is open (readiness review: "if only right is open, tell me to go right"): the way
+# ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
+# nothing stands in it within WAY_OPEN_M; the same answer two depth frames in a row is said
+WAY_BLOCKED_M = 1.5
+WAY_OPEN_M = 2.5
+WAY_TEXT = {
+    (True, False): "Way ahead blocked. Open to your left.",
+    (False, True): "Way ahead blocked. Open to your right.",
+    (True, True): "Way ahead blocked. Open on both sides.",
+    (False, False): "Way ahead blocked, and to both sides.",
+}
+
+
+def way_open(left_m, middle_m, right_m) -> str | None:
+    """What to tell the user about which way is open, from the nearest thing standing in the left,
+    middle and right of the picture (None: nothing there); None when the way ahead is clear."""
+
+    def free(d):
+        return d is None or d >= WAY_OPEN_M
+
+    if middle_m is None or middle_m >= WAY_BLOCKED_M:
+        return None
+    return WAY_TEXT[(free(left_m), free(right_m))]
+
+
 # PUSH or PULL read with no door in view (the whole frame read): only what the sign says, as the
 # text may be on a machine or a notice, not a door (Waqas, #239)
 SIGN_TEXT = {
@@ -500,6 +526,7 @@ class Middleware:
         self.directions = directions  # also say what is ahead, for a cane or glasses host
         self.heard: deque = deque(maxlen=10)  # what the queue let out, newest last
         self._heard_n = 0
+        self._way = None  # the last frame's answer on which way is open
         self.clock = clock
         self.sensors = {s.id: SensorState(s) for s in SENSORS}
         self.position = PositionSource()
@@ -578,7 +605,7 @@ class Middleware:
         """Write down one decision MANA took, as a sentence. The same sentence is not written
         again within 10 s, so a radio that flickers does not repeat itself. Everything but a
         detection also goes into the message queue, which says one at a time, urgent first."""
-        if kind in ("switch", "link", "position", "coverage", "sound", "door"):  # stop, go repeat
+        if kind in ("switch", "link", "position", "coverage", "sound", "door", "way"):  # no repeat
             last = self._said_at.get(text)
             if last is not None and now - last < 10.0:
                 return
@@ -1130,6 +1157,15 @@ class Middleware:
             }
         )
         del self.detections[:-10]
+
+    def on_way(self, left_m, middle_m, right_m, now: float | None = None) -> None:
+        """Which way is open, from one depth frame (depth.ahead_by_side). Said when the same answer
+        comes two frames in a row, and not again within 10 s, as a notice."""
+        now = self.clock() if now is None else now
+        text = way_open(left_m, middle_m, right_m)
+        last, self._way = self._way, text
+        if text is not None and text == last:
+            self._decide(now, "way", text)
 
     def on_door_sign(self, side: str, now: float | None = None, door: bool = True) -> None:
         """A sign says PUSH or PULL (demo/doorsign.py): told once, not again within 10 s. door:
