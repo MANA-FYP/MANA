@@ -81,9 +81,12 @@ def test_a_seed_varies_the_world_within_the_ranges_of_the_issue():
 
 def walkable_from(c, start, cell=0.5):
     """The cells a chair can reach from `start`: free of walls and furniture, and each move no
-    higher than a step or the curb (the tracks climb those), so never down a drop."""
+    higher than a step or the curb (the tracks climb those), so never down a drop. A cell can span
+    two treads of a flight (0.33 m deep), so a move may rise two risers: at most 0.4 m, still under
+    the lowest drop (0.5 m)."""
     v = c.variation
-    climb = max(v.riser_m, v.curb_m) + 0.01
+    climb = max(2 * v.riser_m, v.curb_m) + 0.01
+    assert climb < 0.5  # the drop, at its lowest, stays a drop
     seen, todo = set(), [(round(start[0] / cell), round(start[1] / cell))]
     while todo:
         i, j = todo.pop()
@@ -96,7 +99,7 @@ def walkable_from(c, start, cell=0.5):
             g = c.ground(x, y)
             if (a, b) in seen or g is None or abs(g - z) > climb:
                 continue
-            if not c.blocked(x, y, CHAIR_HALF, g):
+            if not c.blocked(x, y, CHAIR_HALF, g, climb):
                 todo.append((a, b))
     return seen
 
@@ -188,3 +191,27 @@ def test_glass_shuts_the_corridor_and_only_the_camera_sees_it():
     assert masks["depth_camera"] == masks["lidar"] == str(SEE_THROUGH_GLASS)
     assert masks["camera"] is None  # sees everything, glass too
     assert SEE_THROUGH_GLASS & GLASS_FLAG == 0
+
+
+@pytest.mark.parametrize("seed", [None, 1, 2, 5, 11])
+def test_a_flight_of_stairs_climbs_to_the_upper_floor_one_riser_at_a_time(seed):
+    """The upper floor is UPPER_RISERS risers above the plaza, each one a step of the riser height
+    and a tread deep; the flight is walled on both sides, and the floor has walls round it, open
+    only at the top of the stairs."""
+    from mana_sim.campus import TREAD, UPPER_RISERS, UPPER_STAIRS_Y
+
+    c = build(None if seed is None else Variation.from_seed(seed))
+    r = c.variation.riser_m
+    assert c.upper == pytest.approx(c.plaza + UPPER_RISERS * r)
+    # the middle of each tread from the plaza before the flight (i = 0) to the floor beyond it
+    heights = [c.ground(29.5, UPPER_STAIRS_Y - TREAD / 2 + i * TREAD) for i in range(14)]
+    rises = [b - a for a, b in zip(heights, heights[1:], strict=False)]
+    assert rises[:UPPER_RISERS] == pytest.approx([r] * UPPER_RISERS)  # one riser per tread
+    assert heights[-1] == pytest.approx(c.upper)
+    top_y = UPPER_STAIRS_Y + (UPPER_RISERS - 1) * TREAD
+    on_floor = top_y + 1.0
+    assert c.blocked(27.9, 10.0, 0.05, c.plaza)  # the stairwell's side walls
+    assert c.blocked(31.1, 10.0, 0.05, c.plaza)
+    assert c.blocked(27.0, top_y + 0.1, 0.05, c.upper)  # the floor's edge beside the stairs
+    assert not c.blocked(29.5, top_y + 0.1, 0.35, c.upper)  # open at the top of the stairs
+    assert c.ground(29.5, on_floor) == pytest.approx(c.upper)

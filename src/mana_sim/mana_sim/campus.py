@@ -15,6 +15,9 @@ The layout (metres; x east, y north; the street at z = 0):
                   corridor at its east end
     terrace       x -26 to -12, y 6 to 20 (further north when its ramp is long), a drop above
                   the plaza on three sides, a ramp up from the south
+    upper floor   x 26 to 35, from y 11.63 to 30, 12 risers above the plaza: a flight of stairs
+                  up from the south (x 28 to 31, from y 8), walled on both sides; walls round
+                  the floor, open only at the top of the stairs
 
 A seed varies what the real world varies, within the ranges of #79: the step height (10 to
 20 cm), the curb, the ramp slopes, the drop, the colours of the floors and the sunlight. The
@@ -33,6 +36,8 @@ CHAIR_Z = 0.38  # the chair's origin above the ground it stands on (worlds/mana_
 WALL_H = 2.5
 WALL_T = 0.2
 TREAD = 0.33  # the depth of a step, as on the route
+UPPER_RISERS = 12  # the flight up to the upper floor: about 2 m at 17 cm, a storey's half landing
+UPPER_STAIRS_Y = 8.0  # where its first riser is
 # Glass: the camera sees it, but the 3D camera and the lidar look through it, as their light
 # mostly passes through real glass. Its visuals carry this flag, and the chair's depth camera and
 # lidar leave it out of their visibility mask (models/mana_chair/model.sdf); it still collides.
@@ -157,6 +162,10 @@ class Campus:
     def terrace(self) -> float:
         return self.plaza + self.variation.drop_m
 
+    @property
+    def upper(self) -> float:
+        return self.plaza + UPPER_RISERS * self.variation.riser_m
+
     def ground(self, x: float, y: float) -> float | None:
         """The height of the walkable surface at (x, y): the highest top of a box or ramp there
         no more than 0.25 m above the one below (a wall or a table is not ground); None off the
@@ -165,14 +174,14 @@ class Campus:
         tops += [r.top(x, y) for r in self.ramps if r.x0 <= x <= r.x1 and r.y0 <= y <= r.y1]
         return max(tops) if tops else None
 
-    def blocked(self, x: float, y: float, half: float, z: float) -> list[str]:
-        """The boxes higher than a step over z within `half` metres of (x, y): what a chair of
-        that size would stand in."""
+    def blocked(self, x: float, y: float, half: float, z: float, climb: float = 0.05) -> list[str]:
+        """The boxes more than `climb` over z within `half` metres of (x, y): what a chair of that
+        size would stand in. A climb of a riser or two lets the next steps of a flight through."""
         return [
             b.name
             for b in self.boxes
             if b.collide
-            and b.z1 > z + 0.05
+            and b.z1 > z + climb
             and b.z0 < z + 1.5
             and b.x0 < x + half
             and b.x1 > x - half
@@ -296,6 +305,26 @@ def build(v: Variation | None = None) -> Campus:
     B(Box("terrace_edge_stripe", -26, -12, ty + 13.8, ty + 14, t, t + 0.004, stripe, collide=False))
     entrance_run = (f - p) / math.tan(math.radians(v.entrance_ramp_deg))
 
+    # the upper floor: a flight of UPPER_RISERS risers up from the south, the floor its last rise.
+    # Each step is a box to the top of the flight, as the building's steps, so the highest one
+    # under a point is the step there
+    u = c.upper
+    top_y = UPPER_STAIRS_Y + (UPPER_RISERS - 1) * TREAD
+    for i in range(1, UPPER_RISERS):
+        y0 = UPPER_STAIRS_Y + (i - 1) * TREAD
+        B(Box(f"upper_stairs_{i}", 28, 31, y0, top_y, p, p + i * r, step_c))
+    B(Box("upper_floor", 26, 35, top_y, 30, p, u, floor_c))
+    for name, box in {  # the stairwell's sides, and the upper floor's walls, open at the stairs
+        "upper_stairs_wall_w": (27.8, 28.0, UPPER_STAIRS_Y, top_y, p, u + 1.0),
+        "upper_stairs_wall_e": (31.0, 31.2, UPPER_STAIRS_Y, top_y, p, u + 1.0),
+        "upper_wall_s_0": (26, 28, top_y, top_y + WALL_T, u, u + WALL_H),
+        "upper_wall_s_1": (31, 35, top_y, top_y + WALL_T, u, u + WALL_H),
+        "upper_wall_w": (26, 26 + WALL_T, top_y, 30, u, u + WALL_H),
+        "upper_wall_e": (35 - WALL_T, 35, top_y, 30, u, u + WALL_H),
+        "upper_wall_n": (26, 35, 30 - WALL_T, 30, u, u + WALL_H),
+    }.items():
+        B(Box(name, *box, wall_c))
+
     # where a run can start: x, y, yaw (rad), and the ground there (the chair stands on it)
     starts = {
         "plaza": (-2.0, 2.0, math.pi / 2),
@@ -312,6 +341,8 @@ def build(v: Variation | None = None) -> Campus:
         "behind_building": (18.0, 31.0, -math.pi / 2),  # facing the stairs up from the north
         "before_terrace_ramp": (-19.0, max(ty - terrace_run - 3, -5.0), math.pi / 2),
         "terrace": (-19.0, ty + 7, math.pi / 2),  # facing the north edge, the drop
+        "before_upper_stairs": (29.5, UPPER_STAIRS_Y - 3.0, math.pi / 2),  # 3 m before the flight
+        "upper_floor": (29.5, top_y + 4.0, -math.pi / 2),  # facing the flight down, 4 m before it
     }
     # the ten Gazebo scenarios (mana_sim.gazebo_scenarios), each where its hazard is
     for scenario, at in {
@@ -431,7 +462,8 @@ def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None, walkers=Fal
 
   Steps {v.riser_m} m, curb {v.curb_m} m, entrance ramp {v.entrance_ramp_deg} deg,
   terrace ramp {v.terrace_ramp_deg} deg, drop {v.drop_m} m, sun {v.sun}, floor shade {v.shade}.
-  Heights: street 0, plaza {_f(c.plaza)}, building floor {_f(c.floor)}, terrace {_f(c.terrace)}.
+  Heights: street 0, plaza {_f(c.plaza)}, building floor {_f(c.floor)}, terrace {_f(c.terrace)},
+  upper floor {_f(c.upper)}.
 
   Start poses (the chair stands at {start}; the start option of mana_sim.campus picks another):
 {starts}

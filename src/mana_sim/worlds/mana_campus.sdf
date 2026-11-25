@@ -5,7 +5,8 @@
 
   Steps 0.17 m, curb 0.12 m, entrance ramp 4.8 deg,
   terrace ramp 7.0 deg, drop 1.0 m, sun 0.9, floor shade 0.0.
-  Heights: street 0, plaza 0.12, building floor 0.63, terrace 1.12.
+  Heights: street 0, plaza 0.12, building floor 0.63, terrace 1.12,
+  upper floor 2.16.
 
   Start poses (the chair stands at plaza; the start option of mana_sim.campus picks another):
     plaza                          x   -2.00  y    2.00  yaw  1.571  ground 0.120
@@ -21,6 +22,8 @@
     behind_building                x   18.00  y   31.00  yaw -1.571  ground 0.120
     before_terrace_ramp            x  -19.00  y   -5.00  yaw  1.571  ground 0.120
     terrace                        x  -19.00  y   13.00  yaw  1.571  ground 1.120
+    before_upper_stairs            x   29.50  y    5.00  yaw  1.571  ground 0.120
+    upper_floor                    x   29.50  y   15.63  yaw -1.571  ground 2.160
     scenario_level                 x   -2.00  y    2.00  yaw  1.571  ground 0.120
     scenario_ramp                  x   14.00  y   -3.07  yaw  1.571  ground 0.120
     scenario_stairs                x   10.00  y    1.00  yaw  1.571  ground 0.120
@@ -172,6 +175,44 @@
         <collision name="terrace"><pose>-19 13 0.62 0 0 0</pose><geometry><box><size>14 14 1</size></box></geometry></collision>
         <visual name="terrace"><pose>-19 13 0.62 0 0 0</pose><geometry><box><size>14 14 1</size></box></geometry><material><ambient>0.496 0.48 0.44 1</ambient><diffuse>0.62 0.6 0.55 1</diffuse></material></visual>
         <visual name="terrace_edge_stripe"><pose>-19 19.9 1.122 0 0 0</pose><geometry><box><size>14 0.2 0.004</size></box></geometry><material><ambient>0.72 0.08 0.08 1</ambient><diffuse>0.9 0.1 0.1 1</diffuse></material></visual>
+        <collision name="upper_stairs_1"><pose>29.5 9.815 0.205 0 0 0</pose><geometry><box><size>3 3.63 0.17</size></box></geometry></collision>
+        <visual name="upper_stairs_1"><pose>29.5 9.815 0.205 0 0 0</pose><geometry><box><size>3 3.63 0.17</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_2"><pose>29.5 9.98 0.29 0 0 0</pose><geometry><box><size>3 3.3 0.34</size></box></geometry></collision>
+        <visual name="upper_stairs_2"><pose>29.5 9.98 0.29 0 0 0</pose><geometry><box><size>3 3.3 0.34</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_3"><pose>29.5 10.145 0.375 0 0 0</pose><geometry><box><size>3 2.97 0.51</size></box></geometry></collision>
+        <visual name="upper_stairs_3"><pose>29.5 10.145 0.375 0 0 0</pose><geometry><box><size>3 2.97 0.51</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_4"><pose>29.5 10.31 0.46 0 0 0</pose><geometry><box><size>3 2.64 0.68</size></box></geometry></collision>
+        <visual name="upper_stairs_4"><pose>29.5 10.31 0.46 0 0 0</pose><geometry><box><size>3 2.64 0.68</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_5"><pose>29.5 10.475 0.545 0 0 0</pose><geometry><box><size>3 2.31 0.85</size></box></geometry></collision>
+        <visual name="upper_stairs_5"><pose>29.5 10.475 0.545 0 0 0</pose><geometry><box><size>3 2.31 0.85</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_6"><pose>29.5 10.64 0.63 0 0 0</pose><geometry><box><size>3 1.98 1.02</size></box></geometry></collision>
+        <visual name="upper_stairs_6"><pose>29.5 10.64 0.63 0 0 0</pose><geometry><box><size>3 1.98 1.02</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_7"><pose>29.5 10.805 0.715 0 0 0</pose><geometry><box><size>3 1.65 1.19</size></box></geometry></collision>
+        <visual name="upper_stairs_7"><pose>29.5 10.805 0.715 0 0 0</pose><geometry><box><size>3 1.65 1.19</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_8"><pose>29.5 10.97 0.8 0 0 0</pose><geometry><box><size>3 1.32 1.36</size></box></geometry></collision>
+        <visual name="upper_stairs_8"><pose>29.5 10.97 0.8 0 0 0</pose><geometry><box><size>3 1.32 1.36</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_9"><pose>29.5 11.135 0.885 0 0 0</pose><geometry><box><size>3 0.99 1.53</size></box></geometry></collision>
+        <visual name="upper_stairs_9"><pose>29.5 11.135 0.885 0 0 0</pose><geometry><box><size>3 0.99 1.53</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_10"><pose>29.5 11.3 0.97 0 0 0</pose><geometry><box><size>3 0.66 1.7</size></box></geometry></collision>
+        <visual name="upper_stairs_10"><pose>29.5 11.3 0.97 0 0 0</pose><geometry><box><size>3 0.66 1.7</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_11"><pose>29.5 11.465 1.055 0 0 0</pose><geometry><box><size>3 0.33 1.87</size></box></geometry></collision>
+        <visual name="upper_stairs_11"><pose>29.5 11.465 1.055 0 0 0</pose><geometry><box><size>3 0.33 1.87</size></box></geometry><material><ambient>0.44 0.44 0.48 1</ambient><diffuse>0.55 0.55 0.6 1</diffuse></material></visual>
+        <collision name="upper_floor"><pose>30.5 20.815 1.14 0 0 0</pose><geometry><box><size>9 18.37 2.04</size></box></geometry></collision>
+        <visual name="upper_floor"><pose>30.5 20.815 1.14 0 0 0</pose><geometry><box><size>9 18.37 2.04</size></box></geometry><material><ambient>0.576 0.544 0.48 1</ambient><diffuse>0.72 0.68 0.6 1</diffuse></material></visual>
+        <collision name="upper_stairs_wall_w"><pose>27.9 9.815 1.64 0 0 0</pose><geometry><box><size>0.2 3.63 3.04</size></box></geometry></collision>
+        <visual name="upper_stairs_wall_w"><pose>27.9 9.815 1.64 0 0 0</pose><geometry><box><size>0.2 3.63 3.04</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_stairs_wall_e"><pose>31.1 9.815 1.64 0 0 0</pose><geometry><box><size>0.2 3.63 3.04</size></box></geometry></collision>
+        <visual name="upper_stairs_wall_e"><pose>31.1 9.815 1.64 0 0 0</pose><geometry><box><size>0.2 3.63 3.04</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_wall_s_0"><pose>27 11.73 3.41 0 0 0</pose><geometry><box><size>2 0.2 2.5</size></box></geometry></collision>
+        <visual name="upper_wall_s_0"><pose>27 11.73 3.41 0 0 0</pose><geometry><box><size>2 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_wall_s_1"><pose>33 11.73 3.41 0 0 0</pose><geometry><box><size>4 0.2 2.5</size></box></geometry></collision>
+        <visual name="upper_wall_s_1"><pose>33 11.73 3.41 0 0 0</pose><geometry><box><size>4 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_wall_w"><pose>26.1 20.815 3.41 0 0 0</pose><geometry><box><size>0.2 18.37 2.5</size></box></geometry></collision>
+        <visual name="upper_wall_w"><pose>26.1 20.815 3.41 0 0 0</pose><geometry><box><size>0.2 18.37 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_wall_e"><pose>34.9 20.815 3.41 0 0 0</pose><geometry><box><size>0.2 18.37 2.5</size></box></geometry></collision>
+        <visual name="upper_wall_e"><pose>34.9 20.815 3.41 0 0 0</pose><geometry><box><size>0.2 18.37 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="upper_wall_n"><pose>30.5 29.9 3.41 0 0 0</pose><geometry><box><size>9 0.2 2.5</size></box></geometry></collision>
+        <visual name="upper_wall_n"><pose>30.5 29.9 3.41 0 0 0</pose><geometry><box><size>9 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
         <collision name="curb_cut"><pose>21 -6.746 0.0102 0.0798 0 0</pose><geometry><box><size>2 1.5048 0.1</size></box></geometry></collision>
         <visual name="curb_cut"><pose>21 -6.746 0.0102 0.0798 0 0</pose><geometry><box><size>2 1.5048 0.1</size></box></geometry><material><ambient>0.6 0.496 0.2 1</ambient><diffuse>0.75 0.62 0.25 1</diffuse></material></visual>
         <collision name="entrance_ramp"><pose>14 2.9675 0.3252 0.0838 0 0</pose><geometry><box><size>4 6.0948 0.1</size></box></geometry></collision>
