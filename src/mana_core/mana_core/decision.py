@@ -86,6 +86,7 @@ class Priority(IntEnum):
 
 
 STEPS = {Ground.STAIRS_UP, Ground.STAIRS_DOWN, Ground.CURB}
+LIDAR_ON_STEPS_M = 0.3  # a lidar obstacle this little nearer than the step's start is the step
 NO_GROUND = "Ground sensors not available, slowing down"
 # the 3D camera is the one sensor that sees a drop: without it the rest cannot tell level ground
 # from an edge (the camera's classifier has no drops, the lidar's plane is above the ground)
@@ -252,6 +253,12 @@ class Mount:
         }[SENSOR_OF.get(source, source)]
         return at - sensor
 
+    def front_m(self, mode: Mode, switching: bool, body: bool = False) -> float:
+        """How far the front is ahead of the device's own point (its centre): the one a report's
+        distance is measured from once the core has it (ahead_of_sensor)."""
+        front = {Mode.WHEELS: self.front_wheels_m, Mode.TRACKS: self.front_tracks_m}
+        return max(front.values()) if switching or body else front[mode]
+
     def tip_lead_m(self, mode: Mode, switching: bool) -> float:
         """How far the tracks' tip is ahead of the front the reports are measured from. On wheels
         a step is measured from the front wheels, but the tracks are asked for so that their tip
@@ -402,12 +409,33 @@ class DecisionCore:
 
     def _obstacle_within(self, distance_m: float, speed_limit: float) -> bool:
         """An obstacle this near, or this near once its approach is counted for a stop from this
-        speed limit."""
+        speed limit. Not the lidar's, at a step up the 3D camera sees: that is the step."""
         return any(
             r.distance_m <= distance_m + self._approach_m(source, speed_limit)
             for source, r in self.obstacles.items()
-            if self._ok(r)
+            if self._ok(r) and not self._lidar_on_steps(r)
         )
+
+    def _lidar_on_steps(self, report: ObstacleReport) -> bool:
+        """The lidar's obstacle is a step up that the 3D camera sees begin no further off. The
+        lidar is one level plane: a flight of stairs higher than it crosses it a little way up
+        the flight, and to the plane its risers are a wall. In Gazebo, at the foot of a 12-riser
+        flight, the lidar's "obstacle" at 1.7 m stopped the chair for good, the user's TRACKS
+        too, while the 3D camera read the flight as stairs (readiness review). What is really on
+        the stairs, a person, the 3D camera's structure reading still reports as an obstacle;
+        an obstacle of the lidar's nearer than the step still stops."""
+        if report.source != Source.LIDAR or not math.isfinite(report.distance_m):
+            return False
+        sw = self._switching()
+        steps = [
+            g.distance_m + self.mount.front_m(self.mode, sw)
+            for g in self._grounds()
+            if g.source == Source.DEPTH_CAMERA
+            and g.ground in (Ground.STAIRS_UP, Ground.CURB)
+            and math.isfinite(g.distance_m)
+        ]
+        at = report.distance_m + self.mount.front_m(self.mode, sw, body=True)
+        return any(at >= start - LIDAR_ON_STEPS_M for start in steps)
 
     def on_motion(self, report: MotionReport) -> None:
         if self._newer(self.motion, report):

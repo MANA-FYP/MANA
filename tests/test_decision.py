@@ -1339,3 +1339,31 @@ def test_on_wheels_an_obstacle_is_measured_from_the_lifted_tracks_tip_a_drop_fro
     c2.on_motion(level())
     assert not c2.tick(NOW).stop  # beyond edge_m (0.5) from the wheels: not yet a stop
     assert c2.ground[DEPTH].distance_m == pytest.approx(0.83)
+
+
+# ---- the lidar's plane cuts a flight of stairs: its "obstacle" there is the step (review)
+
+
+def test_at_a_flight_higher_than_the_lidar_its_obstacle_is_the_step_not_a_wall():
+    # the 3D camera: stairs up 0.8 m from the wheels; the lidar: something 1.7 m from it
+    c = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_UP, 0.9), obstacle(1.7))
+    assert c.decision.reason != "Obstacle ahead, stopping"
+    assert c.decision.reason == STEP_STOP  # one sensor sees the step: a lone step stops
+
+
+def test_with_the_users_tracks_the_chair_climbs_past_the_lidars_view_of_the_flight():
+    c = DecisionCore(mount=CHAIR)
+    c.on_command(Command.MANUAL, 1.0)
+    c.on_command(Command.TRACKS, 1.0)
+    for r in (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_UP, 0.9), obstacle(1.7)):
+        (c.on_obstacle if isinstance(r, ObstacleReport) else c.on_ground)(r)
+    c.on_motion(level())
+    d = c.tick(NOW)
+    assert not d.stop and d.mode == Mode.TRACKS
+
+
+def test_a_lidar_obstacle_nearer_than_the_step_still_stops_and_without_stairs_too():
+    near = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_UP, 2.0), obstacle(1.4))
+    assert near.decision.reason == "Obstacle ahead, stopping"  # 1.4 m: well before the stairs
+    flat = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(1.4))
+    assert flat.decision.reason == "Obstacle ahead, stopping"
