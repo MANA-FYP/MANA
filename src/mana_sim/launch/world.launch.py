@@ -32,7 +32,7 @@ from launch.actions import (
     TimerAction,
 )
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from mana_sim.frames import depth_mount
@@ -90,6 +90,12 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "weights", default_value="yolo26n.pt", description="the object detector's weights"
+            ),
+            DeclareLaunchArgument(
+                "stairs_weights",
+                default_value="",
+                description="stairs segmentation weights for the camera's ground classifier "
+                "(tools/train_stair_seg.py): the chair's second ground sensor; empty: none",
             ),
             DeclareLaunchArgument(
                 "odom",
@@ -220,6 +226,19 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": True}],
                 condition=IfCondition(LaunchConfiguration("panel")),
+            ),
+            # stairs from the simulated RGB camera: the camera's half of the two-sensor rule for
+            # stairs, with the same segmentation models as the phone demo
+            Node(
+                package="mana_perception",
+                executable="classifier_node",
+                output="screen",
+                parameters=[
+                    {"use_sim_time": True, "segmenter": LaunchConfiguration("stairs_weights")}
+                ],
+                condition=IfCondition(
+                    PythonExpression(["'", LaunchConfiguration("stairs_weights"), "' != ''"])
+                ),
             ),
             # obstacles from the simulated RGB camera (camera/image, camera/camera_info)
             Node(

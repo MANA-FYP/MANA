@@ -15,7 +15,10 @@ Topics (remap them to the camera's):
                 is trusted less in the dark
 
 Parameters:
-  model    ONNX file from tools/train_ground.py (default ground.onnx)
+  model      ONNX file from tools/train_ground.py (default ground.onnx)
+  segmenter  instead, stairs segmentation weights (tools/train_stair_seg.py; several separated by
+             commas), as the phone demo runs them: "stairs" when at least 2 percent of the picture
+             is stairs (mana_perception.stair_seg). Needs torch.
   rate_hz  most frames per second; frames in between are skipped (default 5.0)
 """
 
@@ -35,8 +38,13 @@ class ClassifierNode(Node):
     def __init__(self, model=None):
         super().__init__("mana_ground_classifier")
         path = self.declare_parameter("model", "ground.onnx").value
+        seg = self.declare_parameter("segmenter", "").value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 5.0).value
         log = self.get_logger().error
+        if model is None and seg:
+            from mana_perception.stair_seg import StairSegModel
+
+            model, path = StairSegModel.load(seg, log=log), seg
         self.model = model or ground_classifier.GroundModel.load(path, log=log)
         if self.model is None:
             log(f"no ground classifier: install onnxruntime and check the model {path!r}")
