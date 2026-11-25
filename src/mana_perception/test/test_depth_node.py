@@ -150,3 +150,14 @@ def test_a_wall_in_a_depth_frame_is_reported_as_an_obstacle_and_clear_ground_is_
     assert o.label == "wall"
     assert abs(o.distance_m - 1.5) < 0.1
     assert o.trust == pytest.approx(0.9)
+
+
+def test_the_chairs_roll_comes_with_its_pitch(ros):
+    """structure.find takes the chair's roll from the same motion report as its pitch: leaning
+    2 degrees on the stairs made the level floor ahead an obstacle. An untrusted report gives 0."""
+    node = DepthNode()
+    node.on_motion(MotionReport(trust=0.9, pitch_rad=-0.4, roll_rad=0.035))
+    assert node.roll_now(node.get_clock().now()) == pytest.approx(0.035)
+    node.on_motion(MotionReport(trust=0.1, pitch_rad=-0.4, roll_rad=0.035))
+    assert node.roll_now(node.get_clock().now()) == 0.0
+    node.destroy_node()

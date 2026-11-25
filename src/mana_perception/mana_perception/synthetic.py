@@ -35,11 +35,14 @@ def render(ground, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0) -> np.nd
     return image
 
 
-def render_boxes(boxes, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0) -> np.ndarray:
+def render_boxes(
+    boxes, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0, yaw_rad=0.0, roll_rad=0.0
+) -> np.ndarray:
     """Depth of a flat floor with boxes on or above it: walls, door jambs, a table top, a box on
     the floor. Each box is (ahead_from, ahead_to, left_from, left_to, bottom, top) in metres, in
     the level frame under the camera (left is positive, REP 103). inf where a ray meets nothing
-    within far."""
+    within far. yaw_rad turns the camera left of the boxes' axes (stairs met at an angle);
+    roll_rad leans it about its forward axis, REP 103 (the chair's left side up)."""
     v = np.arange(rows, dtype=np.float64)[:, None]
     u = np.arange(cols, dtype=np.float64)[None, :]
     yn, xn = (v - cam.cy) / cam.fy, (u - cam.cx) / cam.fx
@@ -48,6 +51,12 @@ def render_boxes(boxes, cam: Camera = CAMERA, rows=ROWS, cols=COLS, far=8.0) -> 
     a = np.broadcast_to(c - yn * s, (rows, cols))
     b = np.broadcast_to(-xn, (rows, cols))
     d = np.broadcast_to(yn * c + s, (rows, cols))
+    if roll_rad:  # about the forward axis: (left, up) turn by the roll
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        b, d = b * cr + d * sr, d * cr - b * sr
+    if yaw_rad:  # about the vertical: (ahead, left) turn by the yaw
+        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+        a, b = a * cy - b * sy, a * sy + b * cy
     with np.errstate(divide="ignore", invalid="ignore"):
         best = np.where(d > 0, cam.height_m / d, np.inf)  # the floor
         for x0, x1, y0, y1, z0, z1 in boxes:

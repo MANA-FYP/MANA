@@ -99,20 +99,32 @@ def median3(depth: np.ndarray) -> np.ndarray:
         return np.nanmedian(np.stack(stack), axis=0)
 
 
-def points(depth: np.ndarray, cam: Camera, mount: Camera | None = None):
+def points(depth: np.ndarray, cam: Camera, mount: Camera | None = None, roll_rad: float = 0.0):
     """Ahead, left and height above the ground of every valid pixel (REP 103: left is positive),
     and how far ahead each is along the device itself, with the camera as mounted: when the device
-    pitches nose up, its own parts below the camera swing forward in the level frame."""
+    pitches nose up, its own parts below the camera swing forward in the level frame. roll_rad is
+    the device's own roll (REP 103: left side up is positive): on the stairs the tracks sit a little
+    unevenly, and 2 degrees made the level floor at the top rise 4 cm across the path, an obstacle."""
     z = median3(depth)
     rows, cols = z.shape
     yn = (np.arange(rows)[:, None] - cam.cy) / cam.fy
     xn = (np.arange(cols)[None, :] - cam.cx) / cam.fx
     ok = np.isfinite(z) & (z > 0)
-    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
-    ahead = z * (c - yn * s)
-    left = -z * xn
-    height = cam.height_m - z * (yn * c + s)
     pitch = (mount or cam).pitch_rad
+    if roll_rad:  # the device rolls under the camera's mounting tilt, then pitches (Z-Y-X)
+        c, s = math.cos(pitch), math.sin(pitch)
+        ahead, left, up = z * (c - yn * s), -z * xn, -z * (yn * c + s)
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        left, up = left * cr - up * sr, left * sr + up * cr
+        tilt = cam.pitch_rad - pitch  # the device's own pitch
+        ct, st_ = math.cos(tilt), math.sin(tilt)
+        ahead, up = ahead * ct + up * st_, up * ct - ahead * st_
+        height = cam.height_m + up
+    else:
+        c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+        ahead = z * (c - yn * s)
+        left = np.broadcast_to(-z * xn, z.shape)
+        height = cam.height_m - z * (yn * c + s)
     own = z * (math.cos(pitch) - yn * math.sin(pitch))
     return ahead[ok], np.broadcast_to(left, z.shape)[ok], height[ok], own[ok]
 
@@ -123,15 +135,19 @@ def min_height(distance_m: float, settings: Settings = DEFAULTS) -> float:
 
 
 def find(
-    depth: np.ndarray, cam: Camera, settings: Settings = DEFAULTS, chair_pitch_rad: float = 0.0
+    depth: np.ndarray,
+    cam: Camera,
+    settings: Settings = DEFAULTS,
+    chair_pitch_rad: float = 0.0,
+    chair_roll_rad: float = 0.0,
 ) -> Obstacle | None:
     """The nearest thing blocking the device's corridor in one depth image, or None. cam is the
-    camera as mounted; chair_pitch_rad the device's own pitch (REP 103: nose down is positive),
-    as depth.read_ground takes it."""
+    camera as mounted; chair_pitch_rad and chair_roll_rad the device's own pitch and roll (REP 103:
+    nose down, left side up are positive), as depth.read_ground takes the pitch."""
     st = settings
     half = st.device_width_m / 2.0 + st.margin_m
     seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
-    ahead, left, height, own = points(depth, seen_by, cam)
+    ahead, left, height, own = points(depth, seen_by, cam, chair_roll_rad)
     keep = (np.abs(left) <= half) & (ahead >= st.min_range_m) & (ahead < st.max_range_m)
     keep &= own >= st.body_m
     ahead, left, height = ahead[keep], left[keep], height[keep]
@@ -172,12 +188,22 @@ def find(
             # a riser far off has few points in some cells, but it raises them all; and a riser
             # whose face noise spills into the bin before it raises the floor itself just after
             touched = seen & (raised > 0)
+            edge = st.min_range_m + (i + 1) * st.bin_m  # where this bin ends
+            # met at an angle, a riser crosses the path diagonally: the cells it has not reached
+            # yet rise in the next bin, to about a riser above this one's floor (5 degrees off
+            # the stairs' axis stopped the chair halfway up the flight)
+            if i + 1 < len(starts) and ends[i + 1] - starts[i + 1] >= st.min_points:
+                a2, b2 = starts[i + 1], ends[i + 1]
+                rise2 = height[a2:b2] - floor
+                up2 = (rise2 > min_height(edge + st.bin_m / 2, st)) & (rise2 <= st.riser_max_m)
+                count2 = np.bincount(across[a2:b2], minlength=cells)
+                raised2 = np.bincount(across[a2:b2], weights=up2, minlength=cells)
+                touched |= seen & (raised2 >= st.min_points) & (raised2 >= st.occupied_share * count2)
             # a step runs across the whole path, so it raises the corridor's outermost seen cells
             # on both sides; a low box in the middle leaves one of them flat. Checked out to
             # edge_check_m: further off, stereo noise can leave a real riser's edge cell flat, and
             # the bin is checked again on every frame as the device comes nearer
             sides = np.flatnonzero(seen)
-            edge = st.min_range_m + (i + 1) * st.bin_m  # where this bin ends
             across_path = edge > st.edge_check_m or bool(touched[sides[0]] and touched[sides[-1]])
             after = max((x for x in low[i + 1 : i + 3] if x == x), default=NAN)
             spill = float(np.percentile(ahead[a:b][hit], 5)) >= edge - st.spill_m

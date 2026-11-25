@@ -59,6 +59,7 @@ class DepthNode(Node):
             max_range_m=self.settings.max_range_m,
         )
         self.chair_pitch: tuple[float, Time] | None = None  # (pitch, when it arrived)
+        self.chair_roll = 0.0  # with the pitch, from the same report
         self.cam: dp.Camera | None = None
         self.last: Time | None = None
         self.warned: set[str] = set()
@@ -75,11 +76,12 @@ class DepthNode(Node):
 
     def on_motion(self, m: MotionReport) -> None:
         if m.trust < 0.5 or m.pitch_rad != m.pitch_rad:  # untrusted, or NaN: no pitch to go by
-            self.chair_pitch = None
+            self.chair_pitch, self.chair_roll = None, 0.0
             return
         stamped = m.header.stamp.sec or m.header.stamp.nanosec  # aged as the core ages it
         at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
         self.chair_pitch = (float(m.pitch_rad), at)
+        self.chair_roll = float(m.roll_rad) if m.roll_rad == m.roll_rad else 0.0
 
     def pitch_now(self, now: Time, image=None) -> float:
         """The chair's pitch if a recent motion report gave it. Else, with the IMU lost, from the
@@ -92,6 +94,13 @@ class DepthNode(Node):
                 return pitch
         floor = None if image is None else dp.floor_pitch(image, self.cam)
         return 0.0 if floor is None else floor
+
+    def roll_now(self, now: Time) -> float:
+        """The chair's roll from the same recent motion report as its pitch; else 0."""
+        if self.chair_pitch is None:
+            return 0.0
+        fresh = (now - self.chair_pitch[1]).nanoseconds / 1e9 <= self.motion_max_age_s
+        return self.chair_roll if fresh else 0.0
 
     def warn_once(self, text: str) -> None:
         if text not in self.warned:
@@ -124,7 +133,7 @@ class DepthNode(Node):
         # a frame stamped 0 (1970) would make the core drop every report as stale
         msg.header.stamp = m.header.stamp if stamped else now.to_msg()
         self.ground.publish(msg)
-        found = structure.find(image, self.cam, self.structure, pitch)
+        found = structure.find(image, self.cam, self.structure, pitch, self.roll_now(now))
         if found is not None:
             block = ObstacleReport(
                 trust=self.trust,
