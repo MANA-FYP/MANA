@@ -689,3 +689,45 @@ def test_a_report_from_a_frame_taken_too_long_ago_is_dropped_by_the_core():
     assert not mw.core.tick(now).stop  # too old to act on: the core's max_age_s is 0.5 s
     server.depth_step(app, jpeg(), mw.clock())  # the same wall, just taken
     assert mw.core.tick(mw.clock()).stop
+
+
+# ---- which way is open: the left, the middle and the right of the picture (readiness review)
+
+
+def bands(*kinds):
+    """A depth picture made of three column bands, left to right, each from its own scene."""
+    out = scene(syn.flat).copy()
+    edges = np.linspace(0, COLS, 4).astype(int)
+    for (a, b), kind in zip(zip(edges, edges[1:], strict=False), kinds, strict=True):
+        out[:, a:b] = scene(kind)[:, a:b]
+    return out
+
+
+def test_each_side_is_measured_on_its_own():
+    cam = MOUNT.camera(COLS, ROWS, PITCH)
+    left, middle, right = dz.ahead_by_side(bands(syn.flat, wall(1.0), wall(1.2)), cam)
+    assert left is None  # open floor
+    assert middle == pytest.approx(1.0, abs=0.15) and right == pytest.approx(1.2, abs=0.15)
+
+
+def test_only_the_open_side_is_told_when_the_way_ahead_is_blocked():
+    from demo.middleware import way_open
+
+    assert way_open(None, 1.0, 0.9) == "Way ahead blocked. Open to your left."
+    assert way_open(0.9, 1.0, 3.0) == "Way ahead blocked. Open to your right."
+    assert way_open(None, 1.0, None) == "Way ahead blocked. Open on both sides."
+    assert way_open(1.0, 1.0, 2.0) == "Way ahead blocked, and to both sides."
+    assert way_open(None, 2.0, 0.5) is None  # the way ahead is not blocked: nothing to say
+    assert way_open(None, None, 0.5) is None
+
+
+def test_the_way_is_said_once_it_holds_for_two_frames_and_not_repeated():
+    from demo.middleware import Middleware
+
+    mw = Middleware(on_foot=True)
+    mw.on_way(None, 1.0, 0.9, 1.0)  # one frame: not yet
+    mw.on_way(None, 1.0, None, 1.2)  # a different answer: not yet
+    mw.on_way(None, 1.0, None, 1.4)  # the same twice: said
+    mw.on_way(None, 1.0, None, 1.6)  # and not again within 10 s
+    said = [d["text"] for d in mw.decisions if d["kind"] == "way"]
+    assert said == ["Way ahead blocked. Open on both sides."]
