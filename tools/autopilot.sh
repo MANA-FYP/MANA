@@ -40,6 +40,7 @@ WORLD_FILE="$SHARE/worlds/mana_indoor.sdf"
 if [ "$WORLD" = campus ]; then
   WORLD_FILE="$OUT/campus_lobby.sdf"
   python3 -m mana_sim.campus --start lobby > "$WORLD_FILE" || exit 2
+  GOAL_ARGS=(--start 12 9 1.5708 "${GOAL_ARGS[@]}")  # the map begins at the lobby, facing north
 fi
 
 PIDS=()
