@@ -17,7 +17,7 @@ import math
 import re
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from mana_core.decision import (
@@ -516,6 +516,8 @@ class Middleware:
         on_foot: bool = False,
     ):
         self.core = core or DecisionCore()
+        if on_foot:  # a walker cannot tell how near a drop with no distance is: it stops
+            self.core.mount = replace(self.core.mount, unknown_drop_stops=True)
         # how the phone is carried: on the device (wheels, the default) or by a person on foot
         # (a cane, walking). Only on foot are the steps the person's, not jolts of rough ground.
         self.on_foot = on_foot
@@ -938,6 +940,7 @@ class Middleware:
         if on_foot == self.on_foot:
             return
         self.on_foot = on_foot
+        self.core.mount = replace(self.core.mount, unknown_drop_stops=on_foot)
         self._decide(
             now,
             "switch",

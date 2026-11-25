@@ -1321,6 +1321,28 @@ def test_a_host_without_a_3d_camera_set_is_not_slowed_for_it():
     assert c.tick(NOW).speed_limit == 1.0
 
 
+# ---- on foot, a drop with no distance stops (readiness review)
+
+
+def test_on_foot_a_drop_or_stairs_down_with_no_distance_stops_on_the_chair_it_slows():
+    for kind in (Ground.DROP, Ground.STAIRS_DOWN):
+        walker = DecisionCore(mount=Mount(unknown_drop_stops=True))
+        walker.on_ground(ground(CAM, kind))  # no distance: the phone's tilt was not known
+        walker.on_motion(level())
+        d = walker.tick(NOW)
+        assert d.stop and d.reason == "Drop ahead, stopping", kind
+        chair = core(ground(CAM, kind), ground(DEPTH, Ground.FLAT))
+        assert not chair.decision.stop, kind  # its 3D camera measures it: no distance, a slow-down
+
+
+def test_on_foot_stairs_down_that_two_sensors_confirm_still_ask_not_stop_as_a_drop():
+    walker = DecisionCore(mount=Mount(unknown_drop_stops=True))
+    walker.on_ground(ground(CAM, Ground.STAIRS_DOWN))
+    walker.on_ground(ground(DEPTH, Ground.STAIRS_DOWN, 1.0))
+    walker.on_motion(level())
+    assert walker.tick(NOW).reason == ASK_DOWN
+
+
 def test_on_wheels_an_obstacle_is_measured_from_the_lifted_tracks_tip_a_drop_from_the_wheels():
     """The simulated chair's tracks lift but stay 1.1 m ahead of its centre: an obstacle meets
     them first. A drop is met where the wheels touch the ground (readiness review, #240)."""

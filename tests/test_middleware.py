@@ -882,3 +882,17 @@ def test_the_phones_round_trip_is_kept_for_the_dashboard():
     m.on_heartbeat(12.34, 1.5)
     assert m.latency["phone_rtt_ms"] == 12.3
     assert m.tick(2.0)["latency"]["phone_rtt_ms"] == 12.3
+
+
+def test_a_walker_is_stopped_for_stairs_down_with_no_distance_and_the_chair_is_not():
+    """On foot the core's Mount stops for a drop or stairs down with no distance (readiness
+    review); carried on the device it does not, and switching back and forth follows."""
+    from mana_core.decision import Ground, Source
+
+    walker = Middleware(on_foot=True)
+    assert walker.core.mount.unknown_drop_stops
+    walker.set_on_foot(False, 1.0)
+    assert not walker.core.mount.unknown_drop_stops
+    walker.set_on_foot(True, 2.0)
+    walker.on_ground(Source.CAMERA, Ground.STAIRS_DOWN, 0.9, float("nan"), 3.0)
+    assert walker.core.tick(3.0).stop

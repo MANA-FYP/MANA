@@ -215,6 +215,11 @@ class Mount:
     # in manual mode too, rather than drive on the camera's level ground alone (readiness review,
     # 25 November). False: no such wait, as in the scripted world and on the phone.
     depth_required: bool = False
+    # a drop, or stairs down that one sensor sees, with no distance stops as if at the edge: a
+    # person walking with the phone has nothing else to tell how near it is (the stairs box needs
+    # the phone's tilt), and may already be there. False: it only slows, as on the chair, whose
+    # 3D camera measures it (readiness review, 25 November).
+    unknown_drop_stops: bool = False
 
     def travel_m(self, speed_limit: float) -> float:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
@@ -550,10 +555,11 @@ class DecisionCore:
         """A drop at the edge, or stairs going down at the edge that only one sensor sees: a fall
         needs no second opinion. Stairs down that two sensors confirm are left to the "stairs
         down" and "going down" branches, which stop and ask, so a yes can still take the chair
-        down them. A stop needs a measured distance."""
+        down them. A stop needs a measured distance, unless Mount.unknown_drop_stops."""
         confirmed = self._stairs_down()
+        edge_m = self.limits.edge_m if edge_m is None else edge_m
         return any(
-            r.distance_m <= (self.limits.edge_m if edge_m is None else edge_m)
+            (r.distance_m <= edge_m or (self.mount.unknown_drop_stops and math.isnan(r.distance_m)))
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
