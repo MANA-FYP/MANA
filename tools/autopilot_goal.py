@@ -2,6 +2,7 @@
 
     python3 tools/autopilot_goal.py --out runs/t78/goals.csv          # the indoor goals below
     python3 tools/autopilot_goal.py --goal 13 0 0                  # one goal: x y yaw (map)
+    python3 tools/autopilot_goal.py --goal 11 -5 -1.57 --goal 6.5 -10.5 -1.57   # in that order
 
 For each goal: whether Nav2 reached it, how long it took, how far the chair ended from it by
 Gazebo's ground truth, and what MANA did on the way: its lowest speed limit, how long it asked
@@ -140,7 +141,8 @@ def nan_round(v: float, digits: int = 0):
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--goal", type=float, nargs=3, metavar=("X", "Y", "YAW"))
+    p.add_argument("--goal", type=float, nargs=3, metavar=("X", "Y", "YAW"), action="append",
+                   help="a goal in the map frame; give it again for more, in order")  # fmt: skip
     p.add_argument("--timeout", type=float, default=300.0, help="wall seconds per goal")
     p.add_argument("--out", help="a CSV of the results")
     p.add_argument("--keep-going", action="store_true",
@@ -156,7 +158,7 @@ def main(argv=None) -> int:
     while node.now() == 0.0:
         rclpy.spin_once(node, timeout_sec=0.1)
     rows = []
-    for x, y, yaw in [tuple(a.goal)] if a.goal else GOALS:
+    for x, y, yaw in [tuple(g) for g in a.goal] if a.goal else GOALS:
         row = node.go(x, y, yaw, a.timeout)
         print(row, flush=True)
         rows.append(row)
