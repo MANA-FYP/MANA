@@ -336,6 +336,9 @@ def build(v: Variation | None = None) -> Campus:
         "lobby": (12.0, 9.0, math.pi / 2),
         "corridor": (2.0, 15.5, 0.0),
         "before_glass_door": (17.0, 15.5, 0.0),  # 4 m before the glass door, facing it
+        # 5 m before the plaza's planter, just west of its middle: blocked ahead and to the right,
+        # open to the left ("Way ahead blocked. Open to your left.", #254)
+        "before_planter": (25.9, -3.0, math.pi / 2),
         "outside_dark_room": (8.0, 9.5, math.pi),
         "hall": (18.0, 21.0, math.pi / 2),  # facing the stairs down at the north door
         "behind_building": (18.0, 31.0, -math.pi / 2),  # facing the stairs up from the north
