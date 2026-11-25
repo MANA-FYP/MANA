@@ -246,7 +246,7 @@ and `worlds/mana_campus.sdf` is its default (do not edit it by hand: the tests c
 |---|---|
 | y -16 to -6 | the street, with a curb cut at x 20 to 22 |
 | y -6 to 34 | the plaza, a curb above the street along its whole length |
-| x 0 to 24, y 6 to 26 | a building, its floor 3 risers up: steps and a ramp at the south door, stairs down at the north door; inside a lobby, a corridor, a dark room (roofed), a room with tables and a hall with tables and chairs, 1 m doors |
+| x 0 to 24, y 6 to 26 | a building, its floor 3 risers up: steps and a ramp at the south door, stairs down at the north door; inside a lobby, a corridor, a dark room (roofed), a room with tables and a hall with tables and chairs, 1 m doors; a closed glass door and glass wall across the corridor at x 21 |
 | x -26 to -12, from y 6 | a terrace, a drop above the plaza on three sides, a ramp up from the south |
 
 ```bash
@@ -281,13 +281,30 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   a frame kept every 2 s (`scan_watch.py --frames`), the demo's detector (YOLO26n at 416) found a
   person in 12 of the 58 frames, 11 of them at 0.5 or more (up to 0.89). The person is only in view
   while crossing in front, and with the camera pitched down the head is out of the frame at 2.5 m.
+- **Glass** (`glass_wall_s`, `glass_door`, `glass_wall_n`, start `before_glass_door` 4 m before it):
+  it collides, so the way on is shut, and the camera sees it, but the lidar looks through it, as
+  a real lidar's light mostly passes through glass: its visuals carry `GLASS_FLAG`, which the
+  lidar's `visibility_mask` leaves out (`models/mana_chair/model.sdf`). In Gazebo, from that start,
+  the lidar read 6.50 m straight ahead with the glass and without it (the wall behind, not the
+  glass at 3.6 m). The depth camera has the same mask, but Gazebo's depth camera does not apply
+  it: it reads the glass (3.3 m in its top rows, against 4.4 m to beyond its 6 m range without
+  the glass). So in the simulation the 3D camera sees glass, the best case of a real one.
+  Driven at it from that start, with the core on and nobody driving, the chair stopped with its
+  front 0.2 m short of the glass door ("Obstacle ahead, stopping"), on the 3D camera's wall at
+  0.96 m; the lidar's nearest was 3.81 m. With the glass taken out, it drove on to the end wall.
+  The chair's own camera reports glass when `detector_node` is given the glass weights
+  (`glass_weights`, `mana_perception.glass`), as a real 3D camera that sees through it would need.
 - **Checked** (`test/test_campus.py`, no Gazebo): every start stands clear of walls and furniture
   and is reachable from the plaza moving no higher than a step or the curb (so never down the drop),
   for the default and four seeds; each ramp's top meets the ground at both ends; the seed ranges.
   In Gazebo (WSL, 10 November 2026) the chair settled 0.3345 m above the ground it stood on, the
   same as on the route: on the plaza (0.12 m) by default, and on the terrace (1.535 m) of seed 2.
-- **Not done yet:** the camera's mounting angle, a lidar map
-  for the autopilot, and the real-time factor (the one measured so far was with the computer busy).
+- **Real-time factor** (default campus, headless, on the lab PC in a container limited to 8
+  processor cores, the sensors rendered on the processor by Mesa; Gazebo's `/stats` over 60
+  samples after 30 s): 0.82 without the sensors, 0.62 with the cameras and the lidar. The
+  samples swing widely (0.04 to 2.7), so time a run by the simulation's clock, as the scenarios
+  do (`use_sim_time`).
+- **Not done yet:** the camera's mounting angle, and a lidar map for the autopilot.
 
 ## The host
 

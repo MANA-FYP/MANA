@@ -20,7 +20,8 @@ def mask(rows, cols, p=0.9):
 def test_glass_in_the_middle_third_is_in_the_path_with_its_bottom_and_centre():
     ahead = glass.in_path(mask(slice(40, 240), slice(120, 200)))
     assert ahead is not None and ahead.confidence == pytest.approx(0.9)
-    assert ahead.bottom == pytest.approx(240 / S, abs=0.01)
+    # the 98th percentile of its rows 40 to 239, so a few stray pixels below do not move it
+    assert ahead.bottom == pytest.approx((np.percentile(np.arange(40, 240), 98) + 1) / S)
     assert ahead.centre == pytest.approx(0.5, abs=0.01)
 
 
