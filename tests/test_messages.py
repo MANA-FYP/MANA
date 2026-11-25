@@ -15,7 +15,15 @@ from mana_core.decision import (
     Source,
 )
 from mana_core.evaluate import run
-from mana_core.messages import DECISION, DIRECTION, Message, MessageQueue, direction, metres
+from mana_core.messages import (
+    DECISION,
+    DIRECTION,
+    NOTICE,
+    Message,
+    MessageQueue,
+    direction,
+    metres,
+)
 from mana_core.scenarios import SCENARIOS
 
 INFO, WARNING, URGENT = Priority.INFO, Priority.WARNING, Priority.URGENT
@@ -664,3 +672,29 @@ def test_a_stop_is_not_lost_behind_a_waiting_direction_with_the_same_text():
         if out := q.release(i / 10):
             said.append((out.text, out.kind))
     assert ("Drop ahead, stopping", DECISION) in said
+
+
+def test_a_notice_is_not_dropped_by_a_decision_and_drops_nothing():
+    """A host's own line (a siren heard, a door's sign) is not a decision: a newer decision must
+    not drop it unsaid, and pushing it must not drop a warning that waits."""
+    q = MessageQueue()
+    q.push(say("A siren nearby. Take care.", WARNING, 0.0, kind=NOTICE), 0.0)
+    q.push(say("Door ahead. Push to open.", INFO, 0.1, kind=NOTICE), 0.1)
+    q.push(say("Level ground", INFO, 0.2), 0.2)  # a decision
+    assert [m.text for m in q.waiting] == [
+        "A siren nearby. Take care.",
+        "Door ahead. Push to open.",
+        "Level ground",
+    ]
+    said = [text for _, text in heard(q, 6.0)]
+    assert said[0] == "A siren nearby. Take care."  # the warning first
+    assert set(said) == {"A siren nearby. Take care.", "Door ahead. Push to open.", "Level ground"}
+
+
+def test_a_decision_still_drops_the_decisions_and_directions_that_wait():
+    q = MessageQueue()
+    q.push(say("Level ground", INFO, 0.0), 0.0)
+    q.push(tell("Ramp ahead.", INFO, 0.1), 0.1)
+    q.push(say("Wait", INFO, 0.2, kind=NOTICE), 0.2)
+    q.push(say("Obstacle ahead, slowing down", WARNING, 0.3), 0.3)
+    assert [m.text for m in q.waiting] == ["Wait", "Obstacle ahead, slowing down"]

@@ -703,6 +703,10 @@ def door_sign(app: web.Application, jpeg: bytes, detections, now: float) -> None
     if live["door_read_at"] is not None and now - live["door_read_at"] < wait:
         return
     door = max(doors, key=lambda d: (d.x2 - d.x1) * (d.y2 - d.y1)) if doors else None
+    try:  # the reader runs in its own thread; what it says goes back to the server's loop
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # called with no loop running (a test): said from the thread
+        loop = None
     box = None if door is None else (door.x1, door.y1, door.x2, door.y2)
     live["door_reading"], live["door_read_at"] = True, now
 
@@ -714,7 +718,9 @@ def door_sign(app: web.Application, jpeg: bytes, detections, now: float) -> None
                 # be on the wall beside it: on a door photo with PULL drawn on, the detector boxed
                 # the door next to it, and only the whole frame read the sign
                 side, _ = reader.read(jpeg)
-            if side is not None:
+            if side is not None and loop is not None:
+                loop.call_soon_threadsafe(app["mw"].on_door_sign, side)
+            elif side is not None:
                 app["mw"].on_door_sign(side)
         except Exception as e:  # one bad frame must not stop the reading
             print(f"door sign: {e}", file=sys.stderr)
