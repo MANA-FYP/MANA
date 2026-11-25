@@ -366,6 +366,27 @@ def _direction_deg(way: tuple[float, float | None, str]) -> float:
     return turn % 360.0 if turn is not None else COMPASS.index(compass) * 45.0
 
 
+# A drop or stairs down seen with a distance is remembered on foot (readiness review: a hand-held
+# phone tips up, or the edge goes below the camera's view, and the stop let go 0.5 s later with the
+# person at the edge). It is kept as how far the person had walked plus the distance to it, from the
+# steps counted. Nearer than EDGE_VIEW_M, where the camera may not see the ground at the edge, a
+# report from the same source that does not show it is taken as the edge still there, at the
+# distance left. It is forgotten only on evidence: level ground seen while the edge should still be
+# in view, a turn of more than EDGE_TURN_DEG, or walking EDGE_PAST_M past it. Standing still keeps
+# it: no timeout. Our own design: published aids found keep a drop per frame only (26 Nov search).
+EDGE_VIEW_M = 1.0
+EDGE_TURN_DEG = 45.0
+EDGE_PAST_M = 1.0
+EDGE_SEEN_M = 3.0  # an edge further than this is not remembered: the phone's depth is rough there
+
+
+@dataclass
+class Edge:
+    at_walked_m: float  # how far the person will have walked at the edge
+    heading: float | None  # degrees, the compass heading when it was seen
+    ground: Ground  # DROP or STAIRS_DOWN
+
+
 USER_STOP_TEXT = "MANA deactivated. Press GO or say go to restart."
 # a siren or a horn heard on the microphone (#47): said, not a decision of its own
 SOUND_TEXT = {"siren": "A siren nearby. Take care.", "horn": "A horn nearby. Take care."}
@@ -388,27 +409,6 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
-# A drop or stairs down seen with a distance is remembered on foot (readiness review: a hand-held
-# phone tips up, or the edge goes below the camera's view, and the stop let go 0.5 s later with the
-# person at the edge). It is kept as how far the person had walked plus the distance to it, from the
-# steps counted. Nearer than EDGE_VIEW_M, where the camera may not see the ground at the edge, a
-# report from the same source that does not show it is taken as the edge still there, at the
-# distance left. It is forgotten only on evidence: level ground seen while the edge should still be
-# in view, a turn of more than EDGE_TURN_DEG, or walking EDGE_PAST_M past it. Standing still keeps
-# it: no timeout. Our own design: published aids found keep a drop per frame only (26 Nov search).
-EDGE_VIEW_M = 1.0
-EDGE_TURN_DEG = 45.0
-EDGE_PAST_M = 1.0
-EDGE_SEEN_M = 3.0  # an edge further than this is not remembered: the phone's depth is rough there
-
-
-@dataclass
-class Edge:
-    at_walked_m: float  # how far the person will have walked at the edge
-    heading: float | None  # degrees, the compass heading when it was seen
-    ground: Ground  # DROP or STAIRS_DOWN
-
-
 # which way is open (readiness review: "if only right is open, tell me to go right"): the way
 # ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
 # nothing stands in it within WAY_OPEN_M; the same answer two depth frames in a row is said
