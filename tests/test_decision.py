@@ -1318,3 +1318,24 @@ def test_a_host_without_a_3d_camera_set_is_not_slowed_for_it():
     c.on_ground(ground(CAM, Ground.FLAT))
     c.on_motion(level())
     assert c.tick(NOW).speed_limit == 1.0
+
+
+def test_on_wheels_an_obstacle_is_measured_from_the_lifted_tracks_tip_a_drop_from_the_wheels():
+    """The simulated chair's tracks lift but stay 1.1 m ahead of its centre: an obstacle meets
+    them first. A drop is met where the wheels touch the ground (readiness review, #240)."""
+    mount = Mount(front_wheels_m=0.47, front_tracks_m=1.1, lidar_m=0.4, depth_camera_m=0.35)
+    c = DecisionCore(mount=mount)
+    c.on_ground(ground(CAM, Ground.FLAT))
+    c.on_ground(ground(DEPTH, Ground.FLAT))
+    c.on_obstacle(obstacle(1.5))  # 1.5 m from the lidar: 0.8 m from the tracks' tip
+    c.on_motion(level())
+    d = c.tick(NOW)
+    assert d.mode == Mode.WHEELS and d.stop and d.reason == "Obstacle ahead, stopping"
+    assert c.obstacles[LIDAR].distance_m == pytest.approx(0.8)
+    c2 = DecisionCore(mount=mount)
+    c2.on_ground(ground(CAM, Ground.FLAT))
+    c2.on_ground(ground(DEPTH, Ground.DROP, 0.95))  # from the 3D camera: 0.83 m from the wheels
+    c2.on_motion(level())
+    assert not c2.tick(NOW).stop  # beyond edge_m (0.5) from the wheels: not yet a stop
+    assert c2.ground[DEPTH].distance_m == pytest.approx(0.83)
+
