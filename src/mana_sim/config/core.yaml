@@ -18,3 +18,5 @@ mana_core:
     decel_mps2: 3.0
     # the camera and the 3D camera: slow until both have reported once (#151)
     ground_sensors: 2
+    # the 3D camera sees the drops: with it gone or blind, slow down (readiness review)
+    depth_required: true
