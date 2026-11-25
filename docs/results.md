@@ -1572,5 +1572,11 @@ otherwise.
   stairs down stop). The second is the oracle's doing; the first is the core's and would repeat
   on a real long flight.
 
-Still open: a real second ground sensor on the chair (the camera stairs model on its RGB camera)
-to replace the oracle, and the stop at the top edge of a long flight.
+A candidate for that real second sensor: the live demo's stairs segmenter (`stairs_plain.pt`,
+trained on SANPO's real walks), run on the chair camera's 16 frames from the climb up the same
+flight, called stairs on 5 of the 6 frames at the foot and on the flight (confidence 0.67 to 0.75)
+and level ground on all 10 frames on the upper floor (0.94 to 0.98). The ROS classifier node runs
+the older StairNet classifier, so it would need the segmenter (and torch in the simulation image).
+
+Still open: that real second ground sensor on the chair, to replace the oracle, and the stop at
+the top edge of a long flight.
