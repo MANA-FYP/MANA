@@ -174,14 +174,14 @@ class Campus:
         tops += [r.top(x, y) for r in self.ramps if r.x0 <= x <= r.x1 and r.y0 <= y <= r.y1]
         return max(tops) if tops else None
 
-    def blocked(self, x: float, y: float, half: float, z: float) -> list[str]:
-        """The boxes higher than a step over z within `half` metres of (x, y): what a chair of
-        that size would stand in."""
+    def blocked(self, x: float, y: float, half: float, z: float, climb: float = 0.05) -> list[str]:
+        """The boxes more than `climb` over z within `half` metres of (x, y): what a chair of that
+        size would stand in. A climb of a riser or two lets the next steps of a flight through."""
         return [
             b.name
             for b in self.boxes
             if b.collide
-            and b.z1 > z + 0.05
+            and b.z1 > z + climb
             and b.z0 < z + 1.5
             and b.x0 < x + half
             and b.x1 > x - half

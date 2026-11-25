@@ -99,7 +99,7 @@ def walkable_from(c, start, cell=0.5):
             g = c.ground(x, y)
             if (a, b) in seen or g is None or abs(g - z) > climb:
                 continue
-            if not c.blocked(x, y, CHAIR_HALF, g):
+            if not c.blocked(x, y, CHAIR_HALF, g, climb):
                 todo.append((a, b))
     return seen
 
