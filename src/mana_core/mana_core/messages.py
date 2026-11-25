@@ -18,6 +18,7 @@ from mana_core.decision import STEPS, DecisionCore, Ground, Priority
 
 DECISION = "decision"
 DIRECTION = "direction"
+NOTICE = "notice"  # a host's own line (a siren heard, a door's sign): not a decision
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class Message:
     priority: Priority
     speak: bool  # also say it aloud, not only show it
     stamp: float  # seconds, when it was made
-    kind: str = DECISION  # DECISION or DIRECTION
+    kind: str = DECISION  # DECISION, DIRECTION or NOTICE
 
 
 class MessageQueue:
@@ -35,7 +36,9 @@ class MessageQueue:
     - The most urgent message goes first. The same priority goes decision first, then oldest first:
       what the core has just decided is newer than a direction that was pushed every tick.
     - Only the latest decision is true. When a decision is pushed, the decisions and the directions
-      that are still waiting are dropped; an URGENT message (a stop) stays and is still said.
+      that are still waiting are dropped; an URGENT message (a stop) stays and is still said. A
+      NOTICE (a host's own line, such as a siren heard or a door's sign) is not a decision: it is
+      not dropped by one, and it drops nothing when it is pushed.
     - A new message waits until the one before it has been said (its length at chars_per_s, and at
       least gap_s). An URGENT message does not wait for a less urgent one: it goes at once and
       replaces every waiting message that is less urgent. It does wait for an URGENT one, so a stop
@@ -93,8 +96,13 @@ class MessageQueue:
             return
         if message.kind == DECISION:
             # the newest decision is the only true one; a stop that is waiting is still answered
-            dropped = [w for w in self.waiting if w.priority < Priority.URGENT]
-            self.waiting = [w for w in self.waiting if w.priority >= Priority.URGENT]
+            stale = [
+                w
+                for w in self.waiting
+                if w.priority < Priority.URGENT and w.kind in (DECISION, DIRECTION)
+            ]
+            dropped = stale
+            self.waiting = [w for w in self.waiting if w not in stale]
             if any(w.kind == DIRECTION for w in dropped):
                 self.direction_gone()  # what was dropped may come back at the next tick
         self._pushed[message.kind] = (message.text, message.stamp)

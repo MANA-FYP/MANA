@@ -151,3 +151,16 @@ def test_a_sign_outside_the_boxed_door_is_read_from_the_whole_frame():
     assert [d["text"] for d in app["mw"].decisions if d["kind"] == "door"] == [
         "Door ahead. It opens towards you: pull. You may need help."
     ]
+
+
+def test_a_door_sign_does_not_drop_a_siren_that_waits_to_be_said():
+    """Both are a notice, not a decision: before, the door line, pushed as a decision, dropped
+    every waiting message below a stop, a siren's warning among them."""
+    from demo.middleware import Middleware
+
+    mw = Middleware()
+    mw.on_sounds({"siren": 0.6}, now=1.0)
+    mw.on_door_sign("push", 1.1)
+    waiting = [m.text for m in mw.queue.waiting]
+    assert "A siren nearby. Take care." in waiting
+    assert any(w.startswith("Door ahead") for w in waiting)
