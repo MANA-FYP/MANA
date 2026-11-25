@@ -165,3 +165,26 @@ def test_people_are_in_the_world_only_when_asked_for(capsys):
     assert [a.get("name") for a in actors] == ["walker_plaza", "walker_corridor", "walker_hall"]
     assert all(a.find("./script/trajectory").get("type") == "walking" for a in actors)
     assert main(["--walkers"]) == 0 and "<actor" in capsys.readouterr().out
+
+
+def test_glass_shuts_the_corridor_and_only_the_camera_sees_it():
+    """The glass collides and spans the corridor wall to wall; its visuals carry GLASS_FLAG, which
+    the chair's depth camera and lidar leave out of their mask, and the camera does not."""
+    from mana_sim.campus import GLASS_FLAG, SEE_THROUGH_GLASS
+
+    c = build()
+    glass = [b for b in c.boxes if b.glass]
+    assert {b.name for b in glass} == {"glass_wall_s", "glass_door", "glass_wall_n"}
+    assert all(b.collide for b in glass)
+    ys = sorted((b.y0, b.y1) for b in glass)
+    assert ys[0][0] <= 14.1 and ys[-1][1] >= 16.9  # to within the walls' thickness at y 14 and 17
+    assert all(a[1] == b[0] for a, b in zip(ys, ys[1:], strict=False))  # no gap between panes
+    assert c.blocked(21.01, 15.5, CHAIR_HALF, c.floor)  # the chair cannot pass
+    flags = [v.findtext("visibility_flags") for v in ET.fromstring(to_sdf(c)).iter("visual")]
+    assert flags.count(str(GLASS_FLAG)) == 3 and flags.count(None) == len(flags) - 3
+
+    chair = ET.parse(Path(__file__).parents[1] / "models" / "mana_chair" / "model.sdf")
+    masks = {s.get("name"): s.findtext(".//visibility_mask") for s in chair.iter("sensor")}
+    assert masks["depth_camera"] == masks["lidar"] == str(SEE_THROUGH_GLASS)
+    assert masks["camera"] is None  # sees everything, glass too
+    assert SEE_THROUGH_GLASS & GLASS_FLAG == 0

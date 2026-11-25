@@ -83,6 +83,8 @@
           <horizontal_fov>1.2</horizontal_fov>
           <image><width>320</width><height>240</height><format>R_FLOAT32</format></image>
           <clip><near>0.3</near><far>6</far></clip>
+          <!-- all but glass (mana_sim/campus.py GLASS_FLAG): it looks through glass -->
+          <visibility_mask>4294967293</visibility_mask>
         </camera>
       </sensor>
       <!-- 2D lidar, forward half plane, above the front ends of the tracks -->
@@ -100,6 +102,8 @@
             </horizontal>
           </scan>
           <range><min>0.3</min><max>12</max><resolution>0.01</resolution></range>
+          <!-- all but glass (mana_sim/campus.py GLASS_FLAG): it looks through glass -->
+          <visibility_mask>4294967293</visibility_mask>
         </lidar>
       </sensor>
       <sensor name="imu" type="imu">
