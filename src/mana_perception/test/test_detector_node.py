@@ -46,9 +46,10 @@ def ros():
     rclpy.shutdown()
 
 
-def run(boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255)):
+def run(boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255), glass_model=None, want=1):
     fake = FixedDetector(boxes)
-    node, probe = DetectorNode(detector=fake), rclpy.create_node("probe")
+    node = DetectorNode(detector=fake, glass_model=glass_model)
+    probe = rclpy.create_node("probe")
     reports = []
     probe.create_subscription(ObstacleReport, "obstacle", reports.append, 10)
     info_pub = probe.create_publisher(CameraInfo, "camera/camera_info", 10)
@@ -66,7 +67,7 @@ def run(boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255)):
     image.header.frame_id = "camera"
 
     end = time.monotonic() + seconds
-    while time.monotonic() < end and not (reports and fake.frames):
+    while time.monotonic() < end and not (len(reports) >= want and fake.frames):
         info_pub.publish(info)
         image_pub.publish(image)
         executor.spin_once(timeout_sec=0.05)
@@ -111,3 +112,30 @@ def test_in_the_dark_the_report_is_trusted_less_as_on_the_phone(ros):
     light = detection.camera_trust_factor(30 / 255)
     assert 0 < light < 1
     assert reports[0].trust == pytest.approx(0.8 * light, abs=1e-3)
+
+
+def glass_ahead(image):
+    """A stand-in glass model: glass over the middle of the picture, down to 3/4 of its height."""
+    from mana_perception.glass import SIZE
+
+    m = np.zeros((SIZE, SIZE), np.float32)
+    m[: SIZE * 3 // 4, SIZE // 3 : 2 * SIZE // 3] = 0.9
+    return m
+
+
+def test_glass_in_the_path_is_an_obstacle_where_it_meets_the_floor(ros):
+    reports, _ = run([FAR], glass_model=glass_ahead, want=4, seconds=6.0)
+    labels = [r.label for r in reports]
+    assert "glass" in labels and labels.index("glass") >= 2  # not before its third frame
+    g = reports[labels.index("glass")]
+    # its bottom at row 360 of 480, 120 rows below the centre: from 1 m up, tilted 0.3 rad down
+    yn = 120 / F
+    expected = (math.cos(0.3) - yn * math.sin(0.3)) / (yn * math.cos(0.3) + math.sin(0.3))
+    assert g.distance_m == pytest.approx(expected, abs=0.05)
+    assert abs(g.bearing_rad) < 0.05 and g.source == ObstacleReport.DETECTOR
+    assert all(r.label == "person" for r in reports[: labels.index("glass")])  # the far person
+
+
+def test_without_a_glass_model_nothing_changes(ros):
+    reports, _ = run([FAR], want=3, seconds=3.0)
+    assert reports and all(r.label == "person" for r in reports)
