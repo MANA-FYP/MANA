@@ -250,6 +250,7 @@ and `worlds/mana_campus.sdf` is its default (do not edit it by hand: the tests c
 | y -6 to 34 | the plaza, a curb above the street along its whole length |
 | x 0 to 24, y 6 to 26 | a building, its floor 3 risers up: steps and a ramp at the south door, stairs down at the north door; inside a lobby, a corridor, a dark room (roofed), a room with tables and a hall with tables and chairs, 1 m doors; a closed glass door and glass wall across the corridor at x 21 |
 | x -26 to -12, from y 6 | a terrace, a drop above the plaza on three sides, a ramp up from the south |
+| x 26 to 35, from y 11.63 | an upper floor, 12 risers above the plaza (2.04 m at 17 cm): a flight of stairs up from the south (x 28 to 31, from y 8), walled on both sides; walls round the floor, open only at the top of the stairs |
 
 ```bash
 python3 -m mana_sim.campus --start before_steps > /tmp/campus.sdf    # another start
@@ -316,6 +317,16 @@ ros2 launch mana_sim world.launch.py world:=/tmp/campus.sdf headless:=true
   through it, and MANA stopped the chair with its front 0.28 m short of the glass ("Obstacle ahead,
   stopping", from the 3D camera), held the stop for 60 s, and Nav2's progress checker then ended
   the goal (aborted). The planner cannot see the glass; the decision layer stops for it.
+- **The flight to the upper floor** (starts `before_upper_stairs`, `upper_floor`), in Gazebo with
+  the core on and nobody driving (lab PC, one run each), shows two things MANA does not do yet:
+  - Up: the 3D camera alone sees the first riser, so the core stops ("Step ahead, stopping", a
+    lone step). With the user's TRACKS pressed it still does not climb: the flight, 2 m of risers,
+    is in the device's corridor and `structure.py` reports it as an obstacle ("Obstacle ahead,
+    stopping"). The route's 3 risers (0.51 m) do not show this. Stairs the device is to climb must
+    not count as an obstacle.
+  - Down: facing the flight from the upper floor, the core said "Drop ahead, stopping" and the
+    chair stopped with the front of its tracks 0.02 m past the top step's edge: the stop is
+    measured from the 3D camera, and the tracks reach 1.1 m ahead of the chair's centre.
 - **Not done yet:** the camera's mounting angle; a map of the plaza, ramps and terrace (the lidar
   is one plane, so ramps and curbs need more than this loop on one floor).
 
