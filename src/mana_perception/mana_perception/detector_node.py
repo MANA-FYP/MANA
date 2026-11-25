@@ -24,6 +24,12 @@ Parameters:
   min_confidence  lowest confidence that becomes an obstacle (default 0.5, the core's min_trust:
                   anything lower the core would ignore)
   rate_hz         most frames per second; frames in between are skipped (default 10.0)
+  glass_weights   the glass model (mana_perception.glass, tools/train_glass_seg.py --arch
+                  pretrained); empty for none (default). Glass in the middle third for 3 frames
+                  in a row is an obstacle labelled "glass", where it meets the floor
+  camera_height_m the camera's height above the floor, for that distance (default 1.0, the
+                  simulated chair's)
+  camera_pitch_rad how far the camera looks below level (default 0.3, the simulated chair's)
 """
 
 import rclpy
@@ -33,17 +39,24 @@ from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
 from mana_msgs.msg import ObstacleReport
-from mana_perception import detection
+from mana_perception import detection, glass
 
 
 class DetectorNode(Node):
-    def __init__(self, detector=None):
+    def __init__(self, detector=None, glass_model=None):
         super().__init__("mana_detector")
         weights = self.declare_parameter("weights", "yolo26n.pt").value
         imgsz = self.declare_parameter("imgsz", 416).value
         self.conf = self.declare_parameter("conf", 0.3).value
         self.min_confidence = self.declare_parameter("min_confidence", 0.5).value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 10.0).value
+        glass_weights = self.declare_parameter("glass_weights", "").value
+        self.camera_height_m = self.declare_parameter("camera_height_m", 1.0).value
+        self.camera_pitch_rad = self.declare_parameter("camera_pitch_rad", 0.3).value
+        self.glass = glass_model or (glass.load(glass_weights) if glass_weights else None)
+        if glass_weights and self.glass is None:
+            self.get_logger().error(f"no glass model: check torchvision and {glass_weights!r}")
+        self.in_a_row = glass.InARow()
         self.detector = detector or detection.Detector.load(weights, imgsz)
         if self.detector is None:
             self.get_logger().error(
@@ -81,9 +94,11 @@ class DetectorNode(Node):
         self.last = now
         found = self.detector.detect_image(image, self.conf)
         fx, fy = self.info.k[0], self.info.k[4]
-        obstacles = detection.to_obstacles(
-            found, m.width, m.height, fy, self.min_confidence, detection.hfov_from(fx, m.width)
-        )
+        hfov = detection.hfov_from(fx, m.width)
+        obstacles = detection.to_obstacles(found, m.width, m.height, fy, self.min_confidence, hfov)
+        pane = self.glass_ahead(image, m.width, m.height, fy, hfov)
+        if pane is not None:
+            obstacles = sorted([*obstacles, pane], key=lambda o: o.distance_m)
         if not obstacles:
             return
         nearest = obstacles[0]
@@ -99,6 +114,22 @@ class DetectorNode(Node):
         stamped = m.header.stamp.sec or m.header.stamp.nanosec
         msg.header.stamp = m.header.stamp if stamped else now.to_msg()
         self.obstacle.publish(msg)
+
+    def glass_ahead(self, image, width, height, fy, hfov) -> detection.Obstacle | None:
+        """Glass in the path as an obstacle, or None (see mana_perception.glass)."""
+        if self.glass is None:
+            return None
+        ahead = glass.in_path(self.glass(image))
+        sure = ahead is not None and ahead.confidence >= self.min_confidence
+        if not self.in_a_row.see(sure):
+            return None
+        cy = self.info.k[5] if self.info.k[5] > 0 else height / 2.0
+        row = ahead.bottom * height
+        distance = glass.floor_distance(row, fy, cy, self.camera_height_m, self.camera_pitch_rad)
+        if distance is None:  # its bottom edge above the horizon: not on the floor ahead
+            return None
+        bearing = detection.bearing_rad(ahead.centre * width, width, hfov)
+        return detection.Obstacle("glass", ahead.confidence, distance, bearing)
 
 
 def main(args=None):

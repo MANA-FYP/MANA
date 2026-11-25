@@ -56,6 +56,9 @@ as one sensor.
 | `conf` | `0.3` | lowest confidence the detector keeps |
 | `min_confidence` | `0.5` | lowest confidence that becomes an obstacle; the core ignores trust under 0.5 anyway |
 | `rate_hz` | `10.0` | most frames per second; frames in between are skipped |
+| `glass_weights` | `""` | the glass model (`mana_perception.glass`; `tools/train_glass_seg.py --arch pretrained`, needs torchvision); empty for none. Glass over 2% of the middle third, for 3 frames in a row, is an obstacle labelled `glass`, placed where its bottom edge meets the floor |
+| `camera_height_m` | `1.0` | the camera's height above the floor, for the glass's distance (the simulated chair's) |
+| `camera_pitch_rad` | `0.3` | how far the camera looks below level (the simulated chair's) |
 
 **Time per frame** (`python3 tools/time_detector.py --weights yolo26n.pt yoloe-26n-mana.pt
 --imgsz 480 416`): on an AMD Ryzen 7 7730U laptop (8 cores, 16 GB, CPU only, PyTorch 2.14.1 and

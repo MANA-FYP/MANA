@@ -11,7 +11,8 @@ The layout (metres; x east, y north; the street at z = 0):
     building      x 0 to 24, y 6 to 26, its floor 3 risers above the plaza:
                   steps and a ramp at the south door, stairs down at the north door,
                   a lobby, a corridor, a dark room (roofed, no door light), a room and a hall
-                  with tables and chairs
+                  with tables and chairs; a closed glass door and glass wall across the
+                  corridor at its east end
     terrace       x -26 to -12, y 6 to 20 (further north when its ramp is long), a drop above
                   the plaza on three sides, a ramp up from the south
 
@@ -32,6 +33,11 @@ CHAIR_Z = 0.38  # the chair's origin above the ground it stands on (worlds/mana_
 WALL_H = 2.5
 WALL_T = 0.2
 TREAD = 0.33  # the depth of a step, as on the route
+# Glass: the camera sees it, but the 3D camera and the lidar look through it, as their light
+# mostly passes through real glass. Its visuals carry this flag, and the chair's depth camera and
+# lidar leave it out of their visibility mask (models/mana_chair/model.sdf); it still collides.
+GLASS_FLAG = 0x2
+SEE_THROUGH_GLASS = 0xFFFFFFFF & ~GLASS_FLAG  # the mask of the sensors that see through it
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,7 @@ class Box:
     z1: float
     colour: tuple[float, float, float]
     collide: bool = True
+    glass: bool = False
 
 
 @dataclass(frozen=True)
@@ -263,6 +270,12 @@ def build(v: Variation | None = None) -> Campus:
     wall("wall_room", 18, 18, 6, 14, gaps=[(9, 10)])
     wall("wall_room_corridor", 18, 24, 14, 14)
     wall("wall_hall", 0, 24, 17, 17, gaps=[(2, 3.5), (10, 14)])
+    # a glass partition across the corridor's east end: a glass wall either side of a closed glass
+    # door, wall to wall, so the way on is shut and only the camera can see why
+    glass_c = (0.75, 0.88, 0.92)
+    for name, y0, y1, h in (("glass_wall_s", 14.1, 15.0, WALL_H), ("glass_door", 15.0, 16.0, 2.1),
+                            ("glass_wall_n", 16.0, 16.9, WALL_H)):  # fmt: skip
+        B(Box(name, 21.0, 21.02, y0, y1, f, f + h, glass_c, glass=True))
     B(Box("dark_room_roof", 0, 6, 6, 14, f + WALL_H, f + WALL_H + 0.1, wall_c))
     c.roofed.append("dark_room")
     for i, (x, y) in enumerate([(20, 8), (20, 11.5), (22.5, 8)]):  # the room: tables
@@ -293,6 +306,7 @@ def build(v: Variation | None = None) -> Campus:
         "before_entrance_ramp": (14.0, max(6 - entrance_run - 3, -5.0), math.pi / 2),
         "lobby": (12.0, 9.0, math.pi / 2),
         "corridor": (2.0, 15.5, 0.0),
+        "before_glass_door": (17.0, 15.5, 0.0),  # 4 m before the glass door, facing it
         "outside_dark_room": (8.0, 9.5, math.pi),
         "hall": (18.0, 21.0, math.pi / 2),  # facing the stairs down at the north door
         "behind_building": (18.0, 31.0, -math.pi / 2),  # facing the stairs up from the north
@@ -339,14 +353,18 @@ def _material(rgb) -> str:
     return f"<material><ambient>{amb} 1</ambient><diffuse>{dif} 1</diffuse></material>"
 
 
-def _shape(name: str, pose, size, rgb, collide: bool) -> str:
+def _shape(name: str, pose, size, rgb, collide: bool, glass: bool = False) -> str:
     pose_s = " ".join(_f(round(x, 4)) for x in pose)
     size_s = " ".join(_f(round(x, 4)) for x in size)
     geo = f"<geometry><box><size>{size_s}</size></box></geometry>"
     out = []
     if collide:
         out.append(f'        <collision name="{name}"><pose>{pose_s}</pose>{geo}</collision>')
-    out.append(f'        <visual name="{name}"><pose>{pose_s}</pose>{geo}{_material(rgb)}</visual>')
+    seen = f"<transparency>0.6</transparency><visibility_flags>{GLASS_FLAG}</visibility_flags>"
+    out.append(
+        f'        <visual name="{name}"><pose>{pose_s}</pose>{geo}{_material(rgb)}'
+        f"{seen if glass else ''}</visual>"
+    )
     return "\n".join(out)
 
 
@@ -389,7 +407,9 @@ def to_sdf(c: Campus, start: str = "plaza", seed: int | None = None, walkers=Fal
     for b in c.boxes:
         pose = ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2, 0, 0, 0)
         shapes.append(
-            _shape(b.name, pose, (b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0), b.colour, b.collide)
+            _shape(
+                b.name, pose, (b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0), b.colour, b.collide, b.glass
+            )
         )
     for r in c.ramps:
         pose, size = r.pose()

@@ -15,6 +15,7 @@
     before_entrance_ramp           x   14.00  y   -3.07  yaw  1.571  ground 0.120
     lobby                          x   12.00  y    9.00  yaw  1.571  ground 0.630
     corridor                       x    2.00  y   15.50  yaw  0.000  ground 0.630
+    before_glass_door              x   17.00  y   15.50  yaw  0.000  ground 0.630
     outside_dark_room              x    8.00  y    9.50  yaw  3.142  ground 0.630
     hall                           x   18.00  y   21.00  yaw  1.571  ground 0.630
     behind_building                x   18.00  y   31.00  yaw -1.571  ground 0.120
@@ -130,6 +131,12 @@
         <visual name="wall_hall_1"><pose>6.75 17 1.88 0 0 0</pose><geometry><box><size>6.5 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
         <collision name="wall_hall_2"><pose>19 17 1.88 0 0 0</pose><geometry><box><size>10 0.2 2.5</size></box></geometry></collision>
         <visual name="wall_hall_2"><pose>19 17 1.88 0 0 0</pose><geometry><box><size>10 0.2 2.5</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
+        <collision name="glass_wall_s"><pose>21.01 14.55 1.88 0 0 0</pose><geometry><box><size>0.02 0.9 2.5</size></box></geometry></collision>
+        <visual name="glass_wall_s"><pose>21.01 14.55 1.88 0 0 0</pose><geometry><box><size>0.02 0.9 2.5</size></box></geometry><material><ambient>0.6 0.704 0.736 1</ambient><diffuse>0.75 0.88 0.92 1</diffuse></material><transparency>0.6</transparency><visibility_flags>2</visibility_flags></visual>
+        <collision name="glass_door"><pose>21.01 15.5 1.68 0 0 0</pose><geometry><box><size>0.02 1 2.1</size></box></geometry></collision>
+        <visual name="glass_door"><pose>21.01 15.5 1.68 0 0 0</pose><geometry><box><size>0.02 1 2.1</size></box></geometry><material><ambient>0.6 0.704 0.736 1</ambient><diffuse>0.75 0.88 0.92 1</diffuse></material><transparency>0.6</transparency><visibility_flags>2</visibility_flags></visual>
+        <collision name="glass_wall_n"><pose>21.01 16.45 1.88 0 0 0</pose><geometry><box><size>0.02 0.9 2.5</size></box></geometry></collision>
+        <visual name="glass_wall_n"><pose>21.01 16.45 1.88 0 0 0</pose><geometry><box><size>0.02 0.9 2.5</size></box></geometry><material><ambient>0.6 0.704 0.736 1</ambient><diffuse>0.75 0.88 0.92 1</diffuse></material><transparency>0.6</transparency><visibility_flags>2</visibility_flags></visual>
         <collision name="dark_room_roof"><pose>3 10 3.18 0 0 0</pose><geometry><box><size>6 8 0.1</size></box></geometry></collision>
         <visual name="dark_room_roof"><pose>3 10 3.18 0 0 0</pose><geometry><box><size>6 8 0.1</size></box></geometry><material><ambient>0.68 0.68 0.656 1</ambient><diffuse>0.85 0.85 0.82 1</diffuse></material></visual>
         <collision name="table_room_0"><pose>20.6 8.4 1.005 0 0 0</pose><geometry><box><size>1.2 0.8 0.75</size></box></geometry></collision>
