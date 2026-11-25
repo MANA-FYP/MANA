@@ -170,3 +170,28 @@ def test_a_box_that_is_not_cut_and_other_classes_keep_the_height_distance():
     )
     wide = person(0, 640)  # cut and as wide as the frame: right in front, 0.31 m
     assert detection.to_obstacles([wide], 640, 480, 500)[0].distance_m == pytest.approx(0.3125)
+
+
+def test_the_nearer_side_of_a_box_beside_the_path_is_measured_from_the_line_ahead():
+    from mana_perception import detection as dn
+
+    hfov = dn.DEFAULT_HFOV_RAD
+    middle = dn.Detection("person", 0.9, 300, 0, 340, 100)
+    assert dn.side_gap_m(middle, 3.0, 640, hfov) == 0.0  # spans the middle
+    right = dn.Detection("person", 0.9, 480, 0, 560, 100)
+    gap = dn.side_gap_m(right, 3.0, 640, hfov)
+    expected = 3.0 * math.tan(abs(dn.bearing_rad(480, 640, hfov)))  # its left side, the nearer
+    assert gap == pytest.approx(expected)
+    left = dn.Detection("person", 0.9, 80, 0, 160, 100)
+    assert dn.side_gap_m(left, 3.0, 640, hfov) == pytest.approx(gap)  # the same, mirrored
+
+
+def test_with_a_path_width_only_obstacles_in_it_are_kept():
+    from mana_perception import detection as dn
+
+    near_beside = dn.Detection("person", 0.9, 0, 0, 60, 300)  # far left, near
+    ahead = dn.Detection("person", 0.9, 290, 100, 350, 200)
+    every = dn.to_obstacles([near_beside, ahead], 640, 480)
+    assert len(every) == 2  # without a path width, as before
+    kept = dn.to_obstacles([near_beside, ahead], 640, 480, path_half_m=0.6)
+    assert [o.bearing_rad for o in kept] == [every[-1].bearing_rad]  # only the one ahead

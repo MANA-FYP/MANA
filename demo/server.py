@@ -807,6 +807,11 @@ def on_the_floor(app: web.Application, det, w: int, h: int, seen):
     return vision.Obstacle(det.label, det.confidence, distance, bearing)
 
 
+# an obstacle is in the walker's path when its nearer side is within this of the line straight
+# ahead: about half a person's width with the cane's sweep, and a margin (readiness review)
+PATH_HALF_M = 0.6
+
+
 def obstacles(
     app: web.Application, detections, w: int, h: int, now: float, per_box: dict | None = None
 ) -> list:
@@ -832,7 +837,8 @@ def obstacles(
                 ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
         if per_box is not None:
             per_box[i] = ob.distance_m
-        found.append(ob)
+        if vision.side_gap_m(det, ob.distance_m, w) <= PATH_HALF_M:  # beside the path: shown only
+            found.append(ob)
     return sorted(found, key=lambda o: o.distance_m)
 
 

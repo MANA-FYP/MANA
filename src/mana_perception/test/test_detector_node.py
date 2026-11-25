@@ -46,9 +46,14 @@ def ros():
     rclpy.shutdown()
 
 
-def run(boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255), glass_model=None, want=1):
+def run(
+    boxes, encoding="bgr8", seconds=3.0, bgr=(200, 200, 255), glass_model=None, want=1, path=None
+):
+    """path: the node's path_half_m; None (the default here) sends obstacles beside the path too,
+    as these tests place people left and right to check the bearing and the distance."""
     fake = FixedDetector(boxes)
     node = DetectorNode(detector=fake, glass_model=glass_model)
+    node.path_half_m = path
     probe = rclpy.create_node("probe")
     reports = []
     probe.create_subscription(ObstacleReport, "obstacle", reports.append, 10)
@@ -139,3 +144,14 @@ def test_glass_in_the_path_is_an_obstacle_where_it_meets_the_floor(ros):
 def test_without_a_glass_model_nothing_changes(ros):
     reports, _ = run([FAR], want=3, seconds=3.0)
     assert reports and all(r.label == "person" for r in reports)
+
+
+def test_only_an_obstacle_in_the_path_is_sent_not_a_nearer_one_beside_it(ros):
+    """Someone 3.4 m away whose nearer side is 0.9 m left of the line ahead is beside the chair's
+    path (0.7 m: half its width and a margin); the person straight ahead at 6.8 m is sent, since
+    the core keeps one obstacle per source and the one beside must not hide it."""
+    ahead = detection.Detection("person", 0.9, 300, 100, 340, 225)  # spans the middle: 6.8 m
+    reports, _ = run([NEAR, ahead], path=0.7)
+    assert reports and reports[0].distance_m == pytest.approx(6.8, abs=0.01)
+    reports, _ = run([NEAR], path=0.7, seconds=1.0)
+    assert reports == []
