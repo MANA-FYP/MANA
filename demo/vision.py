@@ -99,9 +99,9 @@ class StairSegmenter:
     gives where the stairs are, as a box the floor and depth code can measure.
 
     Several models may be given (load("a.pt,b.pt")): a pixel is stairs when any of them says so.
-    A model trained only on plain frames found no stairs at all in a dark copy of SANPO's
-    validation frames; one also trained on dim frames found half; together they keep the first's
-    IoU in good light (0.822 against 0.824) with more recall (0.904 against 0.873).
+    A model trained only on plain frames finds no stairs at all in a dark copy of SANPO's test
+    walks; one also trained on dim frames finds some (IoU 0.348 in the dark copy, 0.278 in good
+    light against 0.334), so the demo runs both.
 
     A model trained with depth as a fourth channel (tools/train_stair_seg.py --depth) is given the
     demo's own depth for the frame (Depth Anything V2, raw metres) when there is one; without it,
