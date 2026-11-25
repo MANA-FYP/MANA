@@ -113,9 +113,8 @@ class CoreNode(Node):
         now = self.get_clock().now().nanoseconds / 1e9
         if self.controller != "mana" or m.trust < 0.5 or now - self.measured(m) > 1.0:
             return
-        left, ahead, right = (
-            self.core.from_front_m(d.Source.DEPTH_CAMERA, x) for x in (m.left_m, m.ahead_m, m.right_m)
-        )
+        lanes = (m.left_m, m.ahead_m, m.right_m)
+        left, ahead, right = (self.core.from_front_m(d.Source.DEPTH_CAMERA, x) for x in lanes)
         if said := self.way.on_frame(left, ahead, right, now):
             self.queue.push(said, now)
 
