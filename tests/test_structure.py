@@ -213,3 +213,38 @@ def test_a_door_wide_enough_for_the_chair_is_clear():
 def test_the_simulated_chair_tells_the_depth_node_its_width():
     launch = (ROOT / "src" / "mana_sim" / "launch" / "world.launch.py").read_text()
     assert re.search(r'"device_width_m":\s*0\.8\b', launch)
+
+
+STAIRS_UP = [(1.2 + 0.28 * k, 9.0, -W, W, 0.0, 0.17 * (k + 1)) for k in range(6)]
+
+
+@pytest.mark.parametrize("yaw", [-8.0, -5.0, -3.0, 3.0, 5.0, 8.0])
+def test_stairs_met_at_an_angle_are_not_an_obstacle(yaw):
+    """Turned a few degrees off the stairs' axis, each riser crosses the path diagonally, so one
+    bin sees only part of it: the chair on tracks stopped halfway up the campus flight (Gazebo)."""
+    clean = syn.render_boxes(STAIRS_UP, yaw_rad=math.radians(yaw))
+    rng = np.random.default_rng(5)
+    for image in [clean] + [stereo_noise(clean, rng) for _ in range(5)]:
+        for s in (st.DEFAULTS, CHAIR):
+            assert st.find(image, syn.CAMERA, s) is None, (yaw, st.find(image, syn.CAMERA, s))
+
+
+@pytest.mark.parametrize("roll", [-4.0, -2.0, 2.0, 4.0])
+def test_level_floor_seen_by_a_leaning_chair_is_level(roll):
+    """At the top of the flight the tracks sat 2 degrees unevenly; the level floor then rose 4 cm
+    across the path and was an obstacle. With the chair's roll it is level again."""
+    r = math.radians(roll)
+    clean = syn.render_boxes([], roll_rad=r)
+    rng = np.random.default_rng(6)
+    for image in [clean] + [stereo_noise(clean, rng) for _ in range(5)]:
+        assert st.find(image, syn.CAMERA, CHAIR, chair_roll_rad=r) is None, roll
+
+
+@pytest.mark.parametrize("yaw, roll", [(5.0, 0.0), (0.0, 3.0), (-5.0, -3.0)])
+def test_a_box_is_still_found_by_a_turned_or_leaning_chair(yaw, roll):
+    r = math.radians(roll)
+    for box in [(1.5, 1.8, -0.2, 0.2, 0.0, 0.1), (1.3, 1.45, -0.1, 0.2, 0.0, 0.1)]:
+        boxes = [box] + ([(1.5, 9.0, -W, W, 0.0, 0.15)] if box[0] < 1.5 else [])
+        image = syn.render_boxes(boxes, yaw_rad=math.radians(yaw), roll_rad=r)
+        found = st.find(image, syn.CAMERA, chair_roll_rad=r)
+        assert found is not None and found.label == "obstacle", (yaw, roll, box, found)
