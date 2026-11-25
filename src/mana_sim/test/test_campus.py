@@ -81,9 +81,12 @@ def test_a_seed_varies_the_world_within_the_ranges_of_the_issue():
 
 def walkable_from(c, start, cell=0.5):
     """The cells a chair can reach from `start`: free of walls and furniture, and each move no
-    higher than a step or the curb (the tracks climb those), so never down a drop."""
+    higher than a step or the curb (the tracks climb those), so never down a drop. A cell can span
+    two treads of a flight (0.33 m deep), so a move may rise two risers: at most 0.4 m, still under
+    the lowest drop (0.5 m)."""
     v = c.variation
-    climb = max(v.riser_m, v.curb_m) + 0.01
+    climb = max(2 * v.riser_m, v.curb_m) + 0.01
+    assert climb < 0.5  # the drop, at its lowest, stays a drop
     seen, todo = set(), [(round(start[0] / cell), round(start[1] / cell))]
     while todo:
         i, j = todo.pop()
@@ -200,7 +203,8 @@ def test_a_flight_of_stairs_climbs_to_the_upper_floor_one_riser_at_a_time(seed):
     c = build(None if seed is None else Variation.from_seed(seed))
     r = c.variation.riser_m
     assert c.upper == pytest.approx(c.plaza + UPPER_RISERS * r)
-    heights = [c.ground(29.5, UPPER_STAIRS_Y - 0.1 + i * TREAD + TREAD / 2) for i in range(14)]
+    # the middle of each tread from the plaza before the flight (i = 0) to the floor beyond it
+    heights = [c.ground(29.5, UPPER_STAIRS_Y - TREAD / 2 + i * TREAD) for i in range(14)]
     rises = [b - a for a, b in zip(heights, heights[1:], strict=False)]
     assert rises[:UPPER_RISERS] == pytest.approx([r] * UPPER_RISERS)  # one riser per tread
     assert heights[-1] == pytest.approx(c.upper)
