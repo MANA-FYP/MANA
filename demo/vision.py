@@ -39,6 +39,7 @@ from mana_perception.detection import (  # noqa: E402, F401  (re-exported for th
     camera_trust_factor,
     distance_m,
     focal_from_fov,
+    side_gap_m,
     to_obstacles,
 )
 

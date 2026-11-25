@@ -24,6 +24,9 @@ Parameters:
   min_confidence  lowest confidence that becomes an obstacle (default 0.5, the core's min_trust:
                   anything lower the core would ignore)
   rate_hz         most frames per second; frames in between are skipped (default 10.0)
+  path_half_m     an obstacle counts when its nearer side is within this of the line straight
+                  ahead (default 0.7: half the simulated chair's 0.8 m and 0.3 m); one beside the
+                  path is not sent, so it neither stops the device nor hides one in the path
   glass_weights   the glass model (mana_perception.glass, tools/train_glass_seg.py --arch
                   pretrained); empty for none (default). Glass in the middle third for 3 frames
                   in a row is an obstacle labelled "glass", where it meets the floor
@@ -50,6 +53,7 @@ class DetectorNode(Node):
         self.conf = self.declare_parameter("conf", 0.3).value
         self.min_confidence = self.declare_parameter("min_confidence", 0.5).value
         self.period_s = 1.0 / self.declare_parameter("rate_hz", 10.0).value
+        self.path_half_m = self.declare_parameter("path_half_m", 0.7).value
         glass_weights = self.declare_parameter("glass_weights", "").value
         self.camera_height_m = self.declare_parameter("camera_height_m", 1.0).value
         self.camera_pitch_rad = self.declare_parameter("camera_pitch_rad", 0.3).value
@@ -95,7 +99,9 @@ class DetectorNode(Node):
         found = self.detector.detect_image(image, self.conf)
         fx, fy = self.info.k[0], self.info.k[4]
         hfov = detection.hfov_from(fx, m.width)
-        obstacles = detection.to_obstacles(found, m.width, m.height, fy, self.min_confidence, hfov)
+        obstacles = detection.to_obstacles(
+            found, m.width, m.height, fy, self.min_confidence, hfov, self.path_half_m
+        )
         pane = self.glass_ahead(image, m.width, m.height, fy, hfov)
         if pane is not None:
             obstacles = sorted([*obstacles, pane], key=lambda o: o.distance_m)

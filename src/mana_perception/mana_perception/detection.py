@@ -109,6 +109,19 @@ def bearing_rad(
     return -offset * (hfov_rad / 2.0)
 
 
+def side_gap_m(
+    d: Detection, distance_m: float, image_width_px: float, hfov_rad: float = DEFAULT_HFOV_RAD
+) -> float:
+    """How far the box's nearer side is from the line straight ahead, in metres at its distance:
+    0 when the box spans the middle of the picture. Its nearer side, not its centre, so a person
+    half in the path counts as in it."""
+    middle = image_width_px / 2.0
+    if d.x1 <= middle <= d.x2:
+        return 0.0
+    edge = d.x2 if d.x2 < middle else d.x1
+    return distance_m * abs(math.tan(bearing_rad(edge, image_width_px, hfov_rad)))
+
+
 def cut_by_frame(d: Detection, image_height_px: float) -> bool:
     """True when the box runs off the top or the bottom of the frame."""
     margin = max(2.0, EDGE * image_height_px)
@@ -122,8 +135,12 @@ def to_obstacles(
     focal_px: float | None = None,
     min_confidence: float = 0.4,
     hfov_rad: float = DEFAULT_HFOV_RAD,
+    path_half_m: float | None = None,
 ) -> list[Obstacle]:
     """Keep the classes that count as obstacles and estimate where they are, nearest first.
+    With path_half_m, only those whose nearer side is within it of the line straight ahead: the
+    device's path, half its width and a margin. Someone passing beside the user is not ahead, and
+    the core keeps one obstacle per source, so one beside must not stand for one in the path.
 
     The distance comes from the box height and a typical height for the class. A box cut by the top
     or the bottom of the frame shows only part of the object, so its height gives a distance too
@@ -141,6 +158,8 @@ def to_obstacles(
         if width is not None and cut_by_frame(d, image_height_px):
             dist = min(dist, distance_m(d.x2 - d.x1, width, focal))  # square pixels
         if math.isinf(dist):
+            continue
+        if path_half_m is not None and side_gap_m(d, dist, image_width_px, hfov_rad) > path_half_m:
             continue
         bearing = bearing_rad(d.center_x, image_width_px, hfov_rad)
         found.append(Obstacle(d.label, d.confidence, dist, bearing))
