@@ -148,25 +148,26 @@ def way(
 ) -> tuple[float, float, float]:
     """How far the way is free to the left, ahead and to the right: three corridors as wide as the
     device, side by side. Each is the distance to the nearest thing blocking it, inf when nothing
-    does, or NaN when less than half of it is seen out to open_m (beside the device, near, is out
-    of the camera's view: a side not seen is not called open)."""
+    does, or NaN when nothing blocks it but less than half of its floor out to open_m has a reading
+    (beside the device, near, is out of the camera's view: a side not seen is not called open)."""
     st = settings
     pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
     ahead, left = pts[0], pts[1]
     width = st.device_width_m + 2.0 * st.margin_m
     near = max(st.min_range_m, st.body_m)
     bins = max(1, math.ceil((open_m - near) / st.bin_m))
+    cells = max(1, math.ceil(width / st.cell_m - 1e-9))
     out = []
     for offset in (width, 0.0, -width):
-        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
-        filled = np.bincount(
-            np.floor((ahead[lane] - near) / st.bin_m).astype(int), minlength=bins
-        )
-        if (filled >= st.min_points).sum() < bins / 2.0:
-            out.append(NAN)
-            continue
         found = find(depth, cam, st, chair_pitch_rad, chair_roll_rad, offset, pts)
-        out.append(math.inf if found is None else found.distance_m)
+        if found is not None:  # blocked: what stands there hides the floor behind it
+            out.append(found.distance_m)
+            continue
+        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
+        row = np.minimum(np.floor((ahead[lane] - near) / st.bin_m).astype(int), bins - 1)
+        col = np.clip(np.floor((left[lane] - offset + width / 2.0) / st.cell_m), 0, cells - 1)
+        filled = np.unique(row * cells + col.astype(int)).size  # floor patches with a reading
+        out.append(math.inf if filled >= bins * cells / 2.0 else NAN)
     return out[0], out[1], out[2]
 
 

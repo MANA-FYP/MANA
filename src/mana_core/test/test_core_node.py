@@ -206,8 +206,8 @@ def test_an_unknown_controller_is_refused():
 
 
 def test_with_the_way_ahead_blocked_the_user_is_told_which_side_is_open(ros):
-    """The 3D camera's three corridors (WayReport): blocked ahead, open to the right only. The user
-    hears it once (two reports in a row, then not again within 10 s); a stale report says nothing."""
+    """The 3D camera's three corridors (WayReport): blocked ahead, open to the right only. The
+    user hears it once (two reports in a row, then not again within 10 s); a stale one is ignored."""
     from mana_msgs.msg import WayReport
 
     core, probe = CoreNode(), rclpy.create_node("probe")

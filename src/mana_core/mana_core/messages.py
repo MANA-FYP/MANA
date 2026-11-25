@@ -295,8 +295,8 @@ def way_open(left_m, middle_m, right_m) -> str | None:
 
 
 class WayTeller:
-    """Says which way is open when the same answer comes from two frames in a row, and not the same
-    answer again within repeat_s. A NOTICE: a decision does not drop it, and a stop is said first."""
+    """Says which way is open when the same answer comes from two frames in a row, and not the
+    same answer again within repeat_s. A NOTICE: a decision does not drop it; a stop goes first."""
 
     def __init__(self, repeat_s: float = 10.0):
         self.repeat_s = repeat_s
