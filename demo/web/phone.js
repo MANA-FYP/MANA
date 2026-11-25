@@ -1,5 +1,6 @@
-// MANA phone page: a sensor input only. It streams the phone's real sensors to the laptop; the
-// decision and its voice output are on the laptop.
+// MANA phone page: it streams the phone's real sensors to the server, which decides; the phone
+// says each decision aloud and vibrates, and warns by itself when the server stops answering, as
+// a blind user walking with it has nothing else (the laptop's /live page may say it too).
 // Nothing is simulated here. A sensor the browser cannot read is shown as "N/A" with the reason.
 
 const grid = document.getElementById("grid");
@@ -30,6 +31,7 @@ function connect() {
   ws.onclose = () => {
     conn.textContent = "offline";
     conn.className = "chip off";
+    linkLost();
     setTimeout(connect, 1500);
   };
   ws.onmessage = (e) => {
@@ -76,8 +78,11 @@ function capabilities() {
 // ---- tiles come from the server; they are updated in place, so only a changed tile changes
 
 function onState(m) {
+  lastStateAt = performance.now();
+  if (lost) { lost = false; speakNow("Connected again.", "INFO"); }
   updateTiles(grid, m.sensors);
   showSaid(m.heard);
+  sayAloud(m.heard);
   laptopHasVoiceModel = !!(m.models && m.models.speech);
   laptopHearsSounds = !!(m.models && m.models.sounds);
   // the mode buttons show which one is on
@@ -105,6 +110,40 @@ function showSaid(heard) {
     say.className = "say";
   }, 8000);
 }
+
+// ---- the voice on the phone: each new line said once, a stop at once, with a vibration
+
+const BUZZ = { URGENT: [400, 100, 400], WARNING: [200] };
+let voiceReady = false;      // speech is allowed only after a tap (the Start button)
+let lastSpoken = null;       // the newest line already said; null until the first state
+function speakNow(text, priority) {
+  if (navigator.vibrate && BUZZ[priority]) navigator.vibrate(BUZZ[priority]);
+  if (!voiceReady || !("speechSynthesis" in window)) return;
+  if (priority === "URGENT") speechSynthesis.cancel();   // a stop does not wait its turn
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+function sayAloud(heard) {
+  if (!heard || !heard.length) return;
+  const newest = heard[heard.length - 1].n;
+  if (lastSpoken === null) { lastSpoken = newest; return; }  // not what was said before the page
+  heard.filter((e) => e.n > lastSpoken && e.speak).forEach((e) => speakNow(e.text, e.priority));
+  lastSpoken = Math.max(lastSpoken, newest);
+}
+
+// ---- the link: with no state from the server for LINK_LOST_MS (it sends 10 a second), the phone
+// warns by itself, once, and again when the server answers
+
+const LINK_LOST_MS = 2000;
+let lastStateAt = null;
+let lost = false;
+function linkLost() {
+  if (lost || lastStateAt === null) return;   // not before the first state
+  lost = true;
+  speakNow("Connection lost. Stop and wait.", "URGENT");
+}
+setInterval(() => {
+  if (lastStateAt !== null && performance.now() - lastStateAt > LINK_LOST_MS) linkLost();
+}, 500);
 
 // ---- heartbeat: the round trip of the data path
 
@@ -323,6 +362,8 @@ if (location.hash === "#preview") document.getElementById("start").classList.add
 
 document.getElementById("startBtn").onclick = async () => {
   document.getElementById("start").classList.add("hidden");
+  voiceReady = true;   // this tap allows speech: say a first line so the browser keeps it allowed
+  speakNow("MANA is on.", "INFO");
   await startAll();
 };
 grid.addEventListener("click", async (e) => {
