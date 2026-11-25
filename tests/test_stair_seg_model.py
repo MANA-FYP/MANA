@@ -18,7 +18,6 @@ needs_torch = pytest.mark.skipif(importlib.util.find_spec("torch") is None, reas
 @pytest.mark.parametrize("bias, label", [(10.0, "stairs"), (-10.0, "level")])
 def test_a_frame_is_stairs_when_enough_of_it_is(tmp_path, bias, label):
     import torch
-
     from mana_perception.stair_seg import StairSegModel, UNet
 
     model = UNet(3)
@@ -46,4 +45,5 @@ def test_the_training_tool_and_the_demo_use_the_same_models():
     from mana_perception import stair_seg
     from tools import train_stair_seg
 
-    assert train_stair_seg.UNet is stair_seg.UNet and train_stair_seg.Pretrained is stair_seg.Pretrained
+    assert train_stair_seg.UNet is stair_seg.UNet
+    assert train_stair_seg.Pretrained is stair_seg.Pretrained

@@ -74,8 +74,8 @@ class Pretrained(nn.Module):
 
 
 class StairSegModel:
-    """classify(rgb) -> ("stairs" or "level", probability), as ground_classifier.GroundModel says it,
-    from one or more weights files (a pixel is stairs when any model says so)."""
+    """classify(rgb) -> ("stairs" or "level", probability), as ground_classifier.GroundModel
+    says it, from one or more weights files (a pixel is stairs when any model says so)."""
 
     def __init__(self, models, min_share: float = MIN_SHARE, size: int = SIZE):
         self.models, self.min_share, self.size = models, min_share, size
