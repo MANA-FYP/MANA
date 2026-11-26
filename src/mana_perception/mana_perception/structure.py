@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -149,11 +149,15 @@ def way(
 ) -> tuple[float, float, float]:
     """How far the way is free to the left, ahead and to the right: three corridors as wide as the
     device, side by side. Each is the distance to the nearest thing blocking it, inf when nothing
-    does, or NaN when nothing blocks it but less than half of its floor out to open_m has a reading
-    (beside the device, near, is out of the camera's view: a side not seen is not called open). A
-    corridor whose floor drops drop_m or more below the device's (a platform edge, a stairwell
-    beside the path) is blocked where the lower floor is seen: never called open."""
-    st = settings
+    does out to open_m from the device's front (body_m ahead of the camera, as messages.WAY_OPEN_M
+    counts it), or NaN when nothing blocks it but less than half of its floor patches out there have
+    a reading, or less than half of those in its far half (beside the device, near, is out of the
+    camera's view, and a lower floor that gives no return looks the same as no floor: a side not
+    seen is not called open, #254 review). A corridor whose floor drops drop_m or more below the
+    device's (a platform edge, a stairwell beside the path) is blocked where the lower floor is
+    seen: never called open."""
+    reach = settings.body_m + open_m  # from the camera
+    st = replace(settings, max_range_m=max(settings.max_range_m, reach))
     pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
     ahead, left, height = pts[0], pts[1], pts[2]
     width = st.device_width_m + 2.0 * st.margin_m
@@ -161,12 +165,12 @@ def way(
     out = []
     for offset in (width, 0.0, -width):
         near = max(st.min_range_m, st.body_m) if offset == 0.0 else st.min_range_m
-        bins = max(1, math.ceil((open_m - near) / st.bin_m))
+        bins = max(1, math.ceil((reach - near) / st.bin_m))
         found = find(depth, cam, st, chair_pitch_rad, chair_roll_rad, offset, pts)
         if found is not None:  # blocked: what stands there hides the floor behind it
             out.append(found.distance_m)
             continue
-        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
+        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < reach)
         below = lane & (height < -st.drop_m)
         if below.sum() >= st.min_points * cells:  # the floor drops away in this corridor
             out.append(float(np.percentile(ahead[below], 5)))
@@ -174,8 +178,10 @@ def way(
         lane &= np.abs(height) <= st.riser_max_m  # floor at about the device's own level
         row = np.minimum(np.floor((ahead[lane] - near) / st.bin_m).astype(int), bins - 1)
         col = np.clip(np.floor((left[lane] - offset + width / 2.0) / st.cell_m), 0, cells - 1)
-        filled = np.unique(row * cells + col.astype(int)).size  # floor patches with a reading
-        out.append(math.inf if filled >= bins * cells / 2.0 else NAN)
+        patches = np.unique(row * cells + col.astype(int))  # floor patches with a reading
+        far = (patches // cells >= bins // 2).sum()  # in the far half of the corridor
+        seen = patches.size >= bins * cells / 2.0 and far >= (bins - bins // 2) * cells / 2.0
+        out.append(math.inf if seen else NAN)
     return out[0], out[1], out[2]
 
 

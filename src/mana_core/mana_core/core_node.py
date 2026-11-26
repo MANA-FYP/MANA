@@ -111,7 +111,11 @@ class CoreNode(Node):
         """Told as a notice through the same queue as the decisions; a stale or untrusted report,
         or the baseline in place of the core, says nothing."""
         now = self.get_clock().now().nanoseconds / 1e9
-        if self.controller != "mana" or m.trust < 0.5 or now - self.measured(m) > 1.0:
+        if (
+            self.controller != "mana"
+            or m.trust < self.core.limits.min_trust
+            or now - self.measured(m) > 1.0
+        ):
             return
         lanes = (m.left_m, m.ahead_m, m.right_m)
         left, ahead, right = (self.core.from_front_m(d.Source.DEPTH_CAMERA, x) for x in lanes)

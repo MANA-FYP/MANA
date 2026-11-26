@@ -269,8 +269,9 @@ def direction(core: DecisionCore, now: float) -> Message | None:
 
 # Which way is open (readiness review: "if only the right is open, tell me to go right"). The way
 # ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
-# nothing stands in it within WAY_OPEN_M. The phone reads the left, middle and right of its picture;
-# the chair's 3D camera three lanes as wide as the chair (mana_perception.structure.way).
+# nothing stands in it within WAY_OPEN_M, both from the device's front. The phone reads the left,
+# middle and right of its picture; the chair's 3D camera three lanes as wide as the chair, each
+# looked at and its floor seen out to WAY_OPEN_M from the front (mana_perception.structure.way).
 WAY_BLOCKED_M = 1.5
 WAY_OPEN_M = 2.5
 WAY_TEXT = {

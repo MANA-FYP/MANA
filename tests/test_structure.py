@@ -269,7 +269,8 @@ def test_a_corridor_not_seen_is_not_called_open():
     narrow = dp.Camera.from_fov(syn.COLS, syn.ROWS, math.radians(30.0), 1.0, 0.6)
     image = syn.render_boxes([], narrow)
     left, ahead, right = st.way(image, narrow, CHAIR)
-    assert math.isnan(left) and math.isnan(right) and ahead == math.inf
+    # nor, now, the way ahead out to 2.5 m from the front: nothing blocks it, but it is not seen
+    assert math.isnan(left) and math.isnan(right) and not math.isfinite(ahead)
 
 
 def side_drop(cam=syn.CAMERA, edge_left=0.45, depth_m=1.0):
@@ -304,3 +305,23 @@ def test_someone_right_beside_the_chair_is_not_called_open():
         left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
         assert right < 1.0, right
         assert ahead == pytest.approx(1.2, abs=0.1)
+
+
+@pytest.mark.parametrize("from_m", [1.6, 1.8, 2.0])
+def test_a_side_whose_far_floor_gives_no_reading_is_not_called_open(from_m):
+    """A box ahead at 1.2 m and no depth on the right lane's floor beyond from_m (a lower floor that
+    gives no return, dark or wet): the right is not seen out there, so it is not called open (#254
+    review: it was, with half of its patches near)."""
+    cam = syn.CAMERA
+    image = syn.render_boxes([(1.2, 1.5, -0.3, 0.3, 0.0, 0.5)], cam)
+    rows, cols = image.shape
+    yn = (np.arange(rows)[:, None] - cam.cy) / cam.fy
+    xn = (np.arange(cols)[None, :] - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    ahead, left = image * (c - yn * s), -image * xn
+    width = CHAIR.device_width_m + 2.0 * CHAIR.margin_m
+    image = np.where((ahead > from_m) & (left < -width / 2.0), np.nan, image)
+    left_m, ahead_m, right_m = st.way(image, cam, CHAIR)
+    assert ahead_m == pytest.approx(1.2, abs=0.1)
+    assert math.isnan(right_m), right_m
+    assert left_m == math.inf
