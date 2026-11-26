@@ -29,6 +29,13 @@ with nothing to mark is replayed and scored too. Slow-downs that report MANA's o
 state (a sensor not ready, position unknown, no alert link, wheel slip, on tracks) are neither:
 they are not about the ground ahead.
 
+Some marks are about what MANA says rather than a stop (TOLD): which way is open when the way
+ahead is blocked (way_left, way_right, way_both, way_none), and a door's sign (door_push,
+door_pull). Mark start_s when the answer is plain by eye and end_s when the walker reaches it. Such
+a mark is told right when a line with its answer comes in the window (or up to --early seconds
+before it), and told wrong when a line of the same kind gives another answer there: "open to your
+left" with only the right open sends the person into the wall, so it is counted on its own.
+
 The phone has no 3D camera or lidar, so these walks test the camera path and the one-sensor rules;
 the two-sensor confirmation is tested in Gazebo (#89).
 """
@@ -56,8 +63,20 @@ REASONS = {
     "obstacle": ("Obstacle ahead",),
     "person": ("Obstacle ahead", "Someone may be near"),
     "door": ("Obstacle ahead",),
+    "glass": ("Obstacle ahead",),  # a glass door or wall: the glass segmenter's obstacle
+    "wall": ("Obstacle ahead",),
 }
 HAZARDS = tuple(REASONS)
+# what MANA says for marks that are not about a stop: (the decision's kind, the answer's words);
+# a way line starts "Way ahead blocked", a door line holds "push" or "pull" (demo/middleware.py)
+TOLD = {
+    "way_left": ("way", "Open to your left"),
+    "way_right": ("way", "Open to your right"),
+    "way_both": ("way", "Open on both sides"),
+    "way_none": ("way", "and to both sides"),
+    "door_push": ("door", "push"),
+    "door_pull": ("door", "pull"),
+}
 # reasons that report MANA's own state, not the ground ahead
 STATE = (
     "Ground sensors not available",
@@ -101,10 +120,9 @@ def read_marks(path: Path) -> list[Mark]:
     with open(path, newline="", encoding="utf-8") as f:
         for i, row in enumerate(csv.DictReader(f), 2):
             hazard = row["hazard"].strip()
-            if hazard not in REASONS:
-                raise ValueError(
-                    f"{path}:{i}: hazard {hazard!r} is not one of {', '.join(HAZARDS)}"
-                )
+            if hazard not in REASONS and hazard not in TOLD:
+                kinds = ", ".join((*HAZARDS, *TOLD))
+                raise ValueError(f"{path}:{i}: hazard {hazard!r} is not one of {kinds}")
             start, end = float(row["start_s"]), float(row["end_s"])
             if end < start:
                 raise ValueError(f"{path}:{i}: end_s {end} is before start_s {start}")
@@ -186,6 +204,78 @@ def score(
     return rows, false
 
 
+@dataclass
+class Told:
+    walk_s: float
+    kind: str  # way or door
+    text: str
+
+
+def read_told(path: Path) -> list[Told]:
+    """The way and door lines among the decisions `demo.replay --decisions` writes."""
+    kinds = {k for k, _ in TOLD.values()}
+    with open(path, newline="", encoding="utf-8") as f:
+        return [
+            Told(float(r["walk_s"]), r["kind"], r.get("text") or "")
+            for r in csv.DictReader(f)
+            if r.get("kind") in kinds
+        ]
+
+
+def answer(t: Told) -> str | None:
+    """Which TOLD mark a line answers, or None when it is no answer (a way line about the
+    destination, say)."""
+    if t.kind == "way" and not t.text.startswith("Way ahead blocked"):
+        return None
+    found = [m for m, (k, w) in TOLD.items() if k == t.kind and w.lower() in t.text.lower()]
+    return found[0] if len(found) == 1 else None
+
+
+def score_told(marks: list[Mark], told: list[Told], early_s: float = EARLY_S) -> list[dict]:
+    """One row per TOLD mark: told right (and how soon), and told wrong, for one recording."""
+    rows = []
+    for m in marks:
+        kind = TOLD[m.hazard][0]
+        said = [
+            (t, answer(t))
+            for t in told
+            if t.kind == kind and m.start_s - early_s <= t.walk_s <= m.end_s
+        ]
+        right = [t for t, a in said if a == m.hazard]
+        wrong = [t for t, a in said if a is not None and a != m.hazard]
+        first = min(right, key=lambda t: t.walk_s) if right else None
+        rows.append(
+            {
+                "recording": m.recording,
+                "hazard": m.hazard,
+                "start_s": m.start_s,
+                "end_s": m.end_s,
+                "right": first is not None,
+                "wrong": len(wrong),
+                "reaction_s": round(max(0.0, first.walk_s - m.start_s), 2) if first else None,
+                "said": " | ".join(t.text for t in wrong) or (first.text if first else ""),
+                "note": m.note,
+            }
+        )
+    return rows
+
+
+def told_table(rows: list[dict]) -> str:
+    lines = [
+        "| Told | Marked | Right | Wrong answers | Reaction (median) |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for kind in TOLD:
+        mine = [r for r in rows if r["hazard"] == kind]
+        if mine:
+            hit = [r for r in mine if r["right"]]
+            wrong = sum(r["wrong"] for r in mine)
+            lines.append(
+                f"| {kind} | {len(mine)} | {len(hit)} | {wrong} | {median(hit, 'reaction_s')} |"
+            )
+    return "\n".join(lines)
+
+
 def median(rows: list[dict], key: str) -> str:
     return f"{statistics.median(r[key] for r in rows):.1f} s" if rows else "-"
 
@@ -234,10 +324,13 @@ def main(argv=None) -> int:
     # every walk replayed, marked or not: a walk with nothing to mark still counts its minutes
     # and its false alarms, and those are the walks that show false alarms most plainly
     names = sorted(p.stem for p in a.decisions.glob("*.csv"))
-    rows, false, minutes = [], 0, 0.0
+    rows, told_rows, false, minutes = [], [], 0, 0.0
     for name in names:
         decided = read_decisions(a.decisions / f"{name}.csv")
-        mine, wrong = score([m for m in marks if m.recording == name], decided, a.early)
+        here = [m for m in marks if m.recording == name]
+        mine, wrong = score([m for m in here if m.hazard in REASONS], decided, a.early)
+        told = read_told(a.decisions / f"{name}.csv")
+        told_rows += score_told([m for m in here if m.hazard in TOLD], told, a.early)
         rows += mine
         false += len(wrong)
         minutes += walk_minutes(a.recordings / name if a.recordings else None, decided)
@@ -246,6 +339,12 @@ def main(argv=None) -> int:
     unmarked = [n for n in names if n not in {m.recording for m in marks}]
     print(f"{len(names)} walks scored, {len(unmarked)} of them with no hazard marked")
     print(table(rows, false, minutes))
+    if told_rows:
+        print()
+        print(told_table(told_rows))
+        for r in told_rows:
+            if r["wrong"]:
+                print(f"told wrong in {r['recording']} at {r['start_s']} s: {r['said']}")
     if a.out and rows:
         with open(a.out, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, list(rows[0]), lineterminator="\n")

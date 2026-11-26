@@ -140,3 +140,50 @@ def test_a_walk_with_nothing_marked_is_scored_too(tmp_path, capsys):
     assert "2 walks scored, 1 of them with no hazard marked" in text
     assert "false alarm in flat at 30.0 s: stop: Obstacle ahead, stopping" in text
     assert "False alarms: 1 in 1.1 minutes" in text  # 0.1 min for a, 1.0 for flat
+
+
+def test_which_way_is_open_is_scored_right_and_wrong_answers_on_their_own():
+    marks = [Mark("w", "way_left", 10.0, 14.0), Mark("w", "way_right", 30.0, 33.0)]
+    told = [
+        sw.Told(11.0, "way", "Way ahead blocked. Open to your left."),
+        sw.Told(12.0, "way", "Destination cleared."),  # a way line, but no answer
+        sw.Told(31.0, "way", "Way ahead blocked. Open to your left."),  # into the wall
+        sw.Told(32.0, "way", "Way ahead blocked. Open to your right."),
+    ]
+    left, right = sw.score_told(marks, told)
+    assert left["right"] and left["wrong"] == 0 and left["reaction_s"] == 1.0
+    assert right["right"] and right["wrong"] == 1
+    assert right["said"] == "Way ahead blocked. Open to your left."
+
+
+def test_a_door_sign_read_the_wrong_way_is_told_wrong_and_none_is_a_miss():
+    marks = [Mark("w", "door_push", 5.0, 8.0), Mark("w", "door_pull", 20.0, 22.0)]
+    told = [
+        sw.Told(4.0, "door", "Door ahead. Pull to open."),  # just before start_s: still counts
+        sw.Told(25.0, "door", "Door ahead. Pull to open."),  # after the door: too late
+    ]
+    push, pull = sw.score_told(marks, told)
+    assert (push["right"], push["wrong"]) == (False, 1)
+    assert (pull["right"], pull["wrong"]) == (False, 0)
+    assert sw.answer(sw.Told(0.0, "door", "A sign ahead says push.")) == "door_push"
+    assert "| door_push | 1 | 0 | 1 |" in sw.told_table([push, pull])
+
+
+def test_glass_and_walls_are_hazards_and_told_marks_run_through_main(tmp_path, capsys):
+    marks = tmp_path / "marks.csv"
+    marks.write_text(
+        "recording,hazard,start_s,end_s,note\n"
+        "w,glass,10,13,glass door\nw,way_right,20,24,planter\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "w.csv").write_text(
+        "walk_s,n,kind,state,why,text\n"
+        '11.0,1,decision,slow,"Obstacle ahead, slowing down",Slow down. Obstacle ahead\n'
+        "21.0,2,way,,,Way ahead blocked. Open to your right.\n",
+        encoding="utf-8",
+    )
+    assert [m.hazard for m in sw.read_marks(marks)] == ["glass", "way_right"]
+    assert sw.main(["--marks", str(marks), "--decisions", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert "| glass | 1 | 1 |" in out and "| way_right | 1 | 1 | 0 |" in out
