@@ -624,7 +624,8 @@ class DecisionCore:
         needs no second opinion. Stairs down that two sensors confirm are left to the "stairs
         down" and "going down" branches, which stop and ask, so a yes can still take the chair
         down them. A stop needs a measured distance, unless Mount.unknown_drop_stops."""
-        confirmed = self._stairs_down() or self._descending()
+        # after the yes those stairs down are the ones agreed to, as long as the yes holds
+        confirmed = self._stairs_down() or self._descending() or self.down_ok
         edge_m = self.limits.edge_m if edge_m is None else edge_m
         return any(
             (r.distance_m <= edge_m or (self.mount.unknown_drop_stops and math.isnan(r.distance_m)))

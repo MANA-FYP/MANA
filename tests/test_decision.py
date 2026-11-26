@@ -1011,6 +1011,16 @@ def test_after_a_yes_the_classifiers_stairs_keep_it_while_the_3d_camera_reads_a_
     assert c.down_ok and (d.stop, d.mode) == (False, Mode.TRACKS)
 
 
+def test_after_a_yes_one_sensors_stairs_down_before_the_edge_do_not_stop_the_chair():
+    """After the yes, on the last metre before the edge, the camera's report lapsed now and then;
+    the 3D camera's stairs down alone stopped the chair, by turns (Gazebo). A drop still stops."""
+    c = said_yes_to_stairs_down()
+    d = fed(c, (ground(CLS, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.3)), NOW + 0.2)
+    assert (d.stop, d.mode) == (False, Mode.TRACKS)
+    d = fed(c, (ground(CLS, Ground.FLAT), GroundReport(NOW + 0.3, 0.9, DEPTH, Ground.DROP, 0.3, 1.5)), NOW + 0.3)
+    assert d.stop and d.reason == "Drop ahead, stopping"
+
+
 def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
     c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
     assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"
