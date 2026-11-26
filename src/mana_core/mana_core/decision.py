@@ -580,7 +580,10 @@ class DecisionCore:
         # or those stairs were seen down within down_forget_s: at the top edge the camera looks
         # over it, sees the level floor far below, and its stairs are gone just as the 3D camera
         # reads the hidden risers as one drop; the chair stopped and went there by turns (Gazebo)
-        recent = self.now - self.down_seen_at <= lim.down_forget_s
+        # (a curb seen is a ledge, not those stairs: #173 review)
+        recent = self.now - self.down_seen_at <= lim.down_forget_s and not any(
+            r.ground == Ground.CURB for r in found
+        )
         return [
             replace(r, ground=Ground.STAIRS_DOWN)
             if r.ground == Ground.DROP
