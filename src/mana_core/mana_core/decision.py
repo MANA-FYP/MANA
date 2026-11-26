@@ -596,6 +596,14 @@ class DecisionCore:
             for r in found
         ]
 
+    def _descending(self) -> bool:
+        """Going down stairs after a yes, the device pitched nose down on them: stairs down that
+        one sensor sees are the flight it is on. In Gazebo, two-thirds of the way down the campus's
+        12-riser flight the camera, looking down it, saw the level floor at its foot, and the 3D
+        camera's stairs down alone stopped the chair on the stairs for good. A drop still stops."""
+        m = self.motion if self._ok(self.motion) else None
+        return self.down_ok and m is not None and m.pitch_rad > self.limits.level_rad
+
     def _really_down(self) -> bool:
         """A sensor reports stairs down itself: not a drop taken for them after a yes."""
         return any(r.ground == Ground.STAIRS_DOWN for r in self.ground.values() if self._ok(r))
@@ -612,14 +620,6 @@ class DecisionCore:
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
-
-    def _descending(self) -> bool:
-        """Going down stairs after a yes, the device pitched nose down on them: stairs down that
-        one sensor sees are the flight it is on. In Gazebo, two-thirds of the way down the campus's
-        12-riser flight the camera, looking down it, saw the level floor at its foot, and the 3D
-        camera's stairs down alone stopped the chair on the stairs for good. A drop still stops."""
-        m = self.motion if self._ok(self.motion) else None
-        return self.down_ok and m is not None and m.pitch_rad > self.limits.level_rad
 
     def _lone_step_at_edge(self, edge_m: float | None = None) -> bool:
         """A step up or a curb measured within edge_m that no second sensor confirms, as when the
