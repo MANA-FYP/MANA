@@ -374,7 +374,12 @@ def _direction_deg(way: tuple[float, float | None, str]) -> float:
 # distance left. It is forgotten only on evidence: level ground seen while the edge should still be
 # in view, a turn of more than EDGE_TURN_DEG, or walking EDGE_PAST_M past it. Standing still keeps
 # it: no timeout. Our own design: published aids found keep a drop per frame only (26 Nov search).
+# Review of #256: only a drop seen in two frames in a row at the core's min_trust is remembered,
+# and level ground clears it only with EDGE_LAG_M (about one step not yet counted) plus
+# EDGE_LAG_SHARE of the distance walked since, to spare: the step count can lag or miss steps.
 EDGE_VIEW_M = 1.0
+EDGE_LAG_M = 0.7
+EDGE_LAG_SHARE = 0.2
 EDGE_TURN_DEG = 45.0
 EDGE_PAST_M = 1.0
 EDGE_SEEN_M = 3.0  # an edge further than this is not remembered: the phone's depth is rough there
@@ -383,6 +388,7 @@ EDGE_SEEN_M = 3.0  # an edge further than this is not remembered: the phone's de
 @dataclass
 class Edge:
     at_walked_m: float  # how far the person will have walked at the edge
+    seen_walked_m: float  # how far the person had walked when it was seen
     heading: float | None  # degrees, the compass heading when it was seen
     ground: Ground  # DROP or STAIRS_DOWN
 
@@ -543,6 +549,7 @@ class Middleware:
         # (a cane, walking). Only on foot are the steps the person's, not jolts of rough ground.
         self.on_foot = on_foot
         self._edges: dict[Source, Edge] = {}  # a drop seen, per source (EDGE_VIEW_M)
+        self._edge_once: set[Source] = set()  # a drop seen in the last frame, not yet remembered
         # what the user hears: one message at a time, the most urgent first (mana_core.messages)
         self.queue = MessageQueue()
         self.directions = directions  # also say what is ahead, for a cane or glasses host
@@ -942,6 +949,7 @@ class Middleware:
             self.nav.track.on_heading(heading)
         self._guided = None
         self._edges.clear()  # measured on the old walk's steps
+        self._edge_once.clear()
         for kept in (self.decisions, self.heard, self.log, self.inputs):
             kept.clear()
         self._said_at.clear()
@@ -963,6 +971,8 @@ class Middleware:
         if on_foot == self.on_foot:
             return
         self.on_foot = on_foot
+        self._edges.clear()  # steps measure only on foot (review of #256)
+        self._edge_once.clear()
         self.core.mount = replace(self.core.mount, unknown_drop_stops=on_foot)
         self._decide(
             now,
@@ -1241,18 +1251,27 @@ class Middleware:
         now = self.clock() if now is None else now
         trust = confidence * camera_trust_factor(self.brightness)
         if self.on_foot:
-            ground, distance_m = self._edge(source, ground, distance_m)
+            ground, distance_m = self._edge(source, ground, distance_m, trust)
         self.core.on_ground(GroundReport(now, trust, source, ground, distance_m, step_height_m))
         self._say(now, source.name.lower(), "ground", ground.name.lower(), trust)
 
-    def _edge(self, source: Source, ground: Ground, distance_m: float) -> tuple[Ground, float]:
-        """The ground to report on foot: a drop seen nearer than EDGE_SEEN_M is remembered, and
-        still reported once it is too near to see (EDGE_VIEW_M), at the distance left."""
+    def _edge(
+        self, source: Source, ground: Ground, distance_m: float, trust: float = 1.0
+    ) -> tuple[Ground, float]:
+        """The ground to report on foot: a drop seen nearer than EDGE_SEEN_M in two frames in a
+        row is remembered, and still reported once it is too near to see (EDGE_VIEW_M), at the
+        distance left."""
         walked, heading = self.nav.track.step_m, self.nav.track.heading
         if ground in (Ground.DROP, Ground.STAIRS_DOWN):
-            if math.isfinite(distance_m) and distance_m <= EDGE_SEEN_M:
-                self._edges[source] = Edge(walked + distance_m, heading, ground)
+            near = math.isfinite(distance_m) and distance_m <= EDGE_SEEN_M
+            if near and trust >= self.core.limits.min_trust:
+                if source in self._edge_once:
+                    self._edges[source] = Edge(walked + distance_m, walked, heading, ground)
+                self._edge_once.add(source)
+            else:
+                self._edge_once.discard(source)
             return ground, distance_m
+        self._edge_once.discard(source)
         edge = self._edges.get(source)
         if edge is None:
             return ground, distance_m
@@ -1262,7 +1281,8 @@ class Middleware:
             and edge.heading is not None
             and abs((heading - edge.heading + 180.0) % 360.0 - 180.0) > EDGE_TURN_DEG
         )
-        level = ground in (Ground.FLAT, Ground.RAMP) and left >= EDGE_VIEW_M  # seen, and not there
+        lag = EDGE_LAG_M + EDGE_LAG_SHARE * (walked - edge.seen_walked_m)
+        level = ground in (Ground.FLAT, Ground.RAMP) and left >= EDGE_VIEW_M + lag  # not there
         if turned or level or left < -EDGE_PAST_M:
             del self._edges[source]
             return ground, distance_m
