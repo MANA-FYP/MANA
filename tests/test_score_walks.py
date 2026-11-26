@@ -140,3 +140,15 @@ def test_a_walk_with_nothing_marked_is_scored_too(tmp_path, capsys):
     assert "2 walks scored, 1 of them with no hazard marked" in text
     assert "false alarm in flat at 30.0 s: stop: Obstacle ahead, stopping" in text
     assert "False alarms: 1 in 1.1 minutes" in text  # 0.1 min for a, 1.0 for flat
+
+
+def test_a_walk_with_no_decision_is_scored(tmp_path, capsys):
+    (tmp_path / "marks.csv").write_text("recording,hazard,start_s,end_s\na,ramp,5,9\n")
+    out = tmp_path / "decided"
+    out.mkdir()
+    head = "walk_s,n,kind,state,why,text\n"
+    (out / "a.csv").write_text(head + '6,1,decision,slow,"Ramp ahead",x\n')
+    (out / "quiet.csv").write_text(head + "4,1,way,,,Way open\n")
+    assert sw.main(["--marks", str(tmp_path / "marks.csv"), "--decisions", str(out)]) == 0
+    assert "2 walks scored, 1 of them with no hazard marked" in capsys.readouterr().out
+    assert sw.held([]) == []

@@ -137,6 +137,8 @@ def held(decisions: list[Decision]) -> list[tuple[Decision, float]]:
     """Each stop or slow-down with the time it held until: the demo writes a decision only when it
     changes, so one row stands until the next one (or the end of the walk)."""
     ordered = sorted(decisions, key=lambda d: d.walk_s)
+    if not ordered:  # a walk with no decision written (#266 review)
+        return []
     ends = [d.walk_s for d in ordered[1:]] + [math.inf]
     return [(d, end) for d, end in zip(ordered, ends, strict=True) if d.state in ("stop", "slow")]
 
