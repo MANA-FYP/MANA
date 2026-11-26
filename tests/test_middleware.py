@@ -920,3 +920,91 @@ def test_a_walker_is_stopped_for_stairs_down_with_no_distance_and_the_chair_is_n
     walker.set_on_foot(True, 2.0)
     walker.on_ground(Source.CAMERA, Ground.STAIRS_DOWN, 0.9, float("nan"), 3.0)
     assert walker.core.tick(3.0).stop
+
+
+# ---- a drop remembered on foot once it is too near to see (readiness review)
+
+
+def walk(m, metres, now):
+    from demo.navigation import Step
+
+    m.nav.track.on_step(Step(now, metres), now)
+
+
+def see(m, source, ground, distance, now):
+    """A drop seen in two frames in a row, as it is remembered."""
+    m.on_ground(source, ground, 0.9, distance, now=now)
+    m.on_ground(source, ground, 0.9, distance, now=now + 0.05)
+
+
+def test_on_foot_a_drop_too_near_to_see_still_stops():
+    """The phone saw a drop 1.5 m ahead; 1 m later the camera tips up and sees level ground. The
+    edge is 0.5 m ahead, out of view: it is still there, and the person is still stopped."""
+    m = Middleware(on_foot=True)
+    m.nav.track.on_heading(90.0)
+    see(m, Source.CAMERA, Ground.DROP, 1.5, now=0.1)
+    walk(m, 1.0, 0.5)
+    m.on_ground(Source.CAMERA, Ground.FLAT, 0.9, now=1.0)
+    d = m.core.tick(1.1)
+    assert d.stop and d.reason == "Drop ahead, stopping"
+    m.on_ground(Source.CAMERA, Ground.FLAT, 0.9, now=10.0)  # standing still: no timeout
+    assert m.core.tick(10.1).stop
+
+
+def test_on_foot_a_remembered_drop_is_forgotten_on_evidence():
+    m = Middleware(on_foot=True)
+    m.nav.track.on_heading(90.0)
+    see(m, Source.CAMERA, Ground.STAIRS_DOWN, 2.5, now=0.0)
+    # level ground seen while the edge, 2.5 m off, should still be in view: it is not there
+    assert m._edge(Source.CAMERA, Ground.FLAT, math.nan)[0] == Ground.FLAT
+    assert Source.CAMERA not in m._edges
+    see(m, Source.CAMERA, Ground.DROP, 0.8, now=1.0)
+    m.nav.track.on_heading(180.0)  # turned away
+    assert m._edge(Source.CAMERA, Ground.FLAT, math.nan)[0] == Ground.FLAT
+    assert Source.CAMERA not in m._edges
+    m.nav.track.on_heading(90.0)
+    see(m, Source.CAMERA, Ground.DROP, 0.8, now=2.0)
+    assert m._edge(Source.CAMERA, Ground.UNKNOWN, math.nan) == (Ground.DROP, 0.8)
+    m.start_again(now=3.0)  # a new walk: the old steps are gone
+    assert not m._edges
+
+
+def test_on_the_device_a_drop_is_not_remembered_by_steps():
+    m = Middleware()  # on the chair: no steps to measure by
+    m.on_ground(Source.CAMERA, Ground.DROP, 0.9, 0.8, now=0.0)
+    assert not m._edges
+
+
+def test_on_foot_a_drop_seen_in_one_frame_only_is_not_remembered():
+    m = Middleware(on_foot=True)
+    m.on_ground(Source.CAMERA, Ground.DROP, 0.9, 1.5, now=0.0)
+    m.on_ground(Source.CAMERA, Ground.FLAT, 0.9, now=0.05)
+    m.on_ground(Source.CAMERA, Ground.DROP, 0.9, 1.5, now=0.1)
+    assert not m._edges
+
+
+def test_on_foot_a_drop_below_the_trust_needed_is_not_remembered():
+    m = Middleware(on_foot=True)
+    low = m.core.limits.min_trust * 0.9
+    m.on_ground(Source.CAMERA, Ground.DROP, low, 1.5, now=0.0)
+    m.on_ground(Source.CAMERA, Ground.DROP, low, 1.5, now=0.05)
+    assert not m._edges
+
+
+def test_on_foot_level_ground_near_the_edge_does_not_clear_it_while_steps_may_lag():
+    """Seen 2.0 m ahead and 0.5 m walked by the count: 1.5 m left, but a step or two may not be
+    counted yet, so level ground there does not clear it."""
+    m = Middleware(on_foot=True)
+    see(m, Source.CAMERA, Ground.DROP, 2.0, now=0.0)
+    walk(m, 0.5, 0.5)
+    m.on_ground(Source.CAMERA, Ground.FLAT, 0.9, now=1.0)
+    assert Source.CAMERA in m._edges
+
+
+def test_switching_how_the_phone_is_carried_forgets_the_edges():
+    m = Middleware(on_foot=True)
+    see(m, Source.CAMERA, Ground.DROP, 1.5, now=0.0)
+    m.set_on_foot(False, now=1.0)
+    assert not m._edges
+    m.set_on_foot(True, now=2.0)
+    assert not m._edges
