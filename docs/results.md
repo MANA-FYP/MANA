@@ -1442,6 +1442,29 @@ python3 tools/train_stair_seg.py --root datasets/sanpo --val-walks --arch pretra
 python3 tools/train_stair_seg.py --root datasets/sanpo --split test --arch pretrained --eval runs/pre_aug.pt
 ```
 
+## Curbs and road ends from the phone camera: not good enough yet (26 November 2026)
+
+The phone cannot read a curb or a road end from its depth (it took level floors for drops on real
+frames), so a segmentation model was tried, as for stairs (#223): LR-ASPP MobileNetV3, pretrained,
+augmented, 30 epochs, whole SANPO walks held out (`tools/train_stair_seg.py --class-id`). One seed
+each, on the lab GPU. `tools/eval_curb_in_path.py` then asks the question the phone needs: is there
+a curb in the walking path ahead, frame by frame and per approach, on 8 held-out walks (4,118
+frames). "Share" is the part of the path that must be marked.
+
+| model (SANPO classes) | val IoU | share | curb-ahead frames found | false on clear frames | approaches caught |
+|---|---|---|---|---|---|
+| curb (2) | 0.157 | 0.01 | 37.8% of 74 | 1.2% of 3,298 | 2 of 4 |
+| curb (2) | 0.157 | 0.02 | 32.4% of 74 | 0.9% of 3,298 | 2 of 4 |
+| road or curb (1, 2) | 0.301 | 0.01 | 10.1% of 139 | 4.5% of 2,990 | 1 of 8 |
+| road or curb (1, 2) | 0.301 | 0.02 | 5.0% of 139 | 3.6% of 2,990 | 1 of 8 |
+
+With 3 frames in a row required, the curb model found 29.7% with 0.8 to 1.0% false (share 0.005 to 0.01).
+The road-or-curb model has the higher pixel IoU but is worse at the question asked: the road is
+mostly beside or beyond the path, and marking it calls clear walkways. Neither model is used on
+the live demo: half the curb approaches missed is not a stop the user can rely on. On the phone, a
+curb or road end is still not detected, and is said so. More curb data (the route's own walks) and
+a second seed are what is left to try.
+
 ## How early a walking person must be stopped for a drop (26 November 2026)
 
 On a chair, the core slows the chair before it stops it, and its stop distance allows for how far
