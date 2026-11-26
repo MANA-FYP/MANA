@@ -56,7 +56,9 @@ class ClassifierNode(Node):
             log(f"no ground classifier: install onnxruntime and check the model {path!r}")
         self.last: Time | None = None
         self.warned: set[str] = set()
-        self.create_subscription(Image, "camera/image", self.on_image, 10)
+        # only the newest frame: a slower model left frames waiting, and its reports came older
+        # than the core's 0.5 s, so the camera never confirmed the stairs (Gazebo, the campus flight)
+        self.create_subscription(Image, "camera/image", self.on_image, 1)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
 
     def warn_once(self, text: str) -> None:
