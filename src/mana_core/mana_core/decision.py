@@ -524,8 +524,10 @@ class DecisionCore:
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
-        if seen["stairs down"] and self._really_down():
-            self.down_seen_at = now  # only a sensor's own stairs down keeps a yes alive
+        if (seen["stairs down"] or self.down_ok) and self._really_down():
+            # only a sensor's own stairs down keeps a yes alive; after the yes one is enough: at
+            # the top edge the camera looks over it at the floor below (Gazebo)
+            self.down_seen_at = now
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
         was_stop = self.decision.stop
