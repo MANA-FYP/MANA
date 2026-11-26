@@ -811,8 +811,10 @@ class DecisionCore:
                 ),
                 branch(
                     "step",
-                    lambda: self._confirmed_step() is not None
-                    or (self.mode == Mode.TRACKS and self._step_still_ahead() is not None),
+                    lambda: (
+                        self._confirmed_step() is not None
+                        or (self.mode == Mode.TRACKS and self._step_still_ahead() is not None)
+                    ),
                     self._tracks,
                 ),
                 branch(
