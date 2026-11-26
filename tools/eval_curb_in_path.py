@@ -103,6 +103,23 @@ def main(argv=None) -> int:
             row = np.zeros_like(hit)  # 3 frames of one walk and camera in a row
             for k in range(2, len(hit)):
                 row[k] = hit[k] and hit[k - 1] and hit[k - 2] and walk[k] == walk[k - 2]
+            # approaches: runs of curb-ahead frames in a row of one walk and camera; one is caught
+            # when 3 frames in a row inside it call a curb ahead
+            caught = n_runs = 0
+            k = 0
+            while k < len(is_curb):
+                if not is_curb[k]:
+                    k += 1
+                    continue
+                e = k
+                while e + 1 < len(is_curb) and is_curb[e + 1] and walk[e + 1] == walk[k]:
+                    e += 1
+                n_runs += 1
+                caught += bool(row[k : e + 1].any() or (e - k < 2 and hit[k : e + 1].all()))
+                k = e + 1
+            alarms = int((row & ~is_curb & ~np.roll(row, 1)).sum())  # false calls, each once
+            print(f"  approaches to a curb: caught {caught} of {n_runs}; false calls on clear "
+                  f"frames: {alarms}", flush=True)  # fmt: skip
             print(f"{wpath.name} share {s:.3f}: found {hit[is_curb].mean():.1%} of {is_curb.sum()} "
                   f"curb-ahead frames, false on {hit[~is_curb].mean():.1%} of {(~is_curb).sum()} "
                   f"clear | 3 in a row: found {row[is_curb].mean():.1%}, false "
