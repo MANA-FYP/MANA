@@ -608,3 +608,45 @@ def test_a_stairs_model_that_takes_depth_is_asked_with_the_frames_depth():
         assert asked == [None]
 
     run(with_clients(go, classifier=DepthSegmenter()))
+
+
+def test_a_page_that_takes_no_message_is_dropped_and_holds_up_no_one():
+    """A dashboard left with a dead connection: its send never ends. The tick still ends within
+    about SEND_TIMEOUT_S, the page is dropped, and the next tick does not wait for it (26 Nov)."""
+    import time
+
+    from demo import server
+
+    class Stuck:
+        closed = False
+
+        async def send_json(self, message):
+            await asyncio.sleep(3600)
+
+        async def close(self):
+            self.closed = True
+
+    class Fine:
+        def __init__(self):
+            self.got = []
+
+        async def send_json(self, message):
+            self.got.append(message["type"])
+
+    async def go():
+        app = build_app()
+        stuck, fine = Stuck(), Fine()
+        app["dashboards"].update({stuck, fine})
+        start = time.monotonic()
+        await server.broadcast(app)
+        first = time.monotonic() - start
+        start = time.monotonic()
+        await server.broadcast(app)
+        second = time.monotonic() - start
+        await asyncio.sleep(0.05)
+        return first, second, stuck, fine, app
+
+    first, second, stuck, fine, app = run(go())
+    assert first < server.SEND_TIMEOUT_S + 0.4 and second < 0.3, (first, second)
+    assert stuck not in app["dashboards"] and stuck.closed
+    assert fine.got == ["snapshot", "snapshot"]
