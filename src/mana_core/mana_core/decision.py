@@ -706,6 +706,16 @@ class DecisionCore:
     def _slipping(self) -> bool:
         return self._ok(self.motion) and self.motion.wheel_slip
 
+    def _step_still_ahead(self) -> GroundReport | None:
+        """On tracks for a step, the nearest step a sensor still measures ahead within step_m:
+        the tracks stay down, with the same words. Two sensors put the chair on tracks, but one
+        camera's report comes late now and then; on level ground before a curb in Gazebo, the
+        chair went from tracks to wheels and back several times a second, and the 3D camera saw
+        the tracks coming down as a step at 0 m, which stopped it."""
+        step_m = self.limits.step_m + self.mount.tip_lead_m(self.mode, self._switching())
+        near = [r for r in self._grounds() if r.ground in STEPS and r.distance_m <= step_m]
+        return min(near, key=lambda r: r.distance_m, default=None)
+
     def _level_held(self) -> bool:
         return (
             self.level_since is not None and self.now - self.level_since >= self.limits.level_hold_s
@@ -748,7 +758,7 @@ class DecisionCore:
     def _tracks(self):
         if self.down_ok and self._held("stairs down"):  # as the "going down" branch decides
             reason = "Going down the stairs on tracks"
-        elif self._confirmed_step().ground == Ground.CURB:
+        elif (self._confirmed_step() or self._step_still_ahead()).ground == Ground.CURB:
             reason = "Curb ahead, changing to tracks"
         else:
             reason = "Stairs ahead, changing to tracks"
@@ -799,7 +809,12 @@ class DecisionCore:
                     lambda: not self.automatic,
                     self._manual,
                 ),
-                branch("step", lambda: self._confirmed_step() is not None, self._tracks),
+                branch(
+                    "step",
+                    lambda: self._confirmed_step() is not None
+                    or (self.mode == Mode.TRACKS and self._step_still_ahead() is not None),
+                    self._tracks,
+                ),
                 branch(
                     "slip",
                     self._slipping,
