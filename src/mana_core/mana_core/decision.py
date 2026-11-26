@@ -596,7 +596,7 @@ class DecisionCore:
         """Stairs down that stop the device are called stairs, not a drop, when no sensor sees a
         drop: in Gazebo, the 3D camera alone read the campus flight as stairs down, step 0.17 m,
         and the user heard "Drop ahead" at the top of a staircase they could see."""
-        kinds = {r.ground for r in self._grounds()}
+        kinds = {r.ground for r in self.ground.values() if self._ok(r)}  # as the sensors said
         if Ground.STAIRS_DOWN in kinds and Ground.DROP not in kinds:
             return "Stairs down ahead, stopping"
         return "Drop ahead, stopping"
