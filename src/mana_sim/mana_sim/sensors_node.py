@@ -5,7 +5,8 @@
   `odom_from: wheels` odom > base_link comes from the wheels and the gyro instead, and drifts as on
   a real chair; map > odom is then left to a localiser (slam_toolbox, #43).
 - `motion` from the IMU orientation and the wheel encoders (slip is only judged in wheels mode:
-  the speed of the wheels against the chair's speed, and their turn against the gyro).
+  the speed of the wheels against the chair's speed at the same time, by their stamps, and their
+  turn against the gyro).
 - `obstacle` from the nearest echo of the lidar in front of the chair, while the chair is level
   within `scan_max_tilt_rad` (0.17, about 10 degrees: steeper than the ramps it drives on wheels);
   pitched more, as on stairs, the scan plane runs into the ground and nothing is sent.
@@ -26,6 +27,20 @@ from mana_sim.frames import BASE, MAP, ODOM, SENSORS, quaternion
 from mana_sim.host import WHEELS
 
 GROUND_TRUTH = "/model/mana_chair/ground_truth"
+SAMPLES_S = 1.0  # how much of the wheel and ground speeds is kept, to pair them by time
+
+
+def stamp_s(m) -> float | None:
+    """A message's stamp in seconds; None if it has none (0)."""
+    s = m.header.stamp
+    return s.sec + s.nanosec * 1e-9 if s.sec or s.nanosec else None
+
+
+def recent(samples: list, sample: tuple) -> list:
+    """samples with sample added, the last SAMPLES_S of them. One without a stamp is left out."""
+    if sample[0] is None:
+        return samples
+    return [s for s in samples if sample[0] - SAMPLES_S <= s[0] <= sample[0]] + [sample]
 
 
 class SensorsNode(Node):
@@ -49,6 +64,9 @@ class SensorsNode(Node):
         self.left_rad_s: list[float] = []
         self.right_rad_s: list[float] = []
         self.speed_mps = 0.0
+        # the last second of each, by their stamps: slip compares the two at the same time
+        self.wheel_samples: list[tuple[float, list[float], list[float]]] = []
+        self.speed_samples: list[tuple[float, float]] = []
 
         self.tf = TransformBroadcaster(self)
         self.static_tf = StaticTransformBroadcaster(self)
@@ -85,6 +103,7 @@ class SensorsNode(Node):
 
     def on_ground_truth(self, m: Odometry) -> None:
         self.speed_mps = m.twist.twist.linear.x
+        self.speed_samples = recent(self.speed_samples, (stamp_s(m), self.speed_mps))
         if self.odom_from != "ground_truth":
             return
         t = TransformStamped()
@@ -99,6 +118,9 @@ class SensorsNode(Node):
 
     def on_joints(self, m: JointState) -> None:
         self.left_rad_s, self.right_rad_s = conv.wheel_sides(list(m.name), list(m.velocity))
+        self.wheel_samples = recent(
+            self.wheel_samples, (stamp_s(m), self.left_rad_s, self.right_rad_s)
+        )
 
     def on_imu(self, m: Imu) -> None:
         q = m.orientation
@@ -106,9 +128,11 @@ class SensorsNode(Node):
         self.tilt = (pitch, roll, self.get_clock().now().nanoseconds / 1e9)
         if self.odom_from == "wheels":
             self.dead_reckon(m)
-        wheels = self.left_rad_s + self.right_rad_s
+        # the wheels and the chair's speed at the same time, else (no stamps) the newest of each
+        paired = conv.same_time(self.wheel_samples, self.speed_samples)
+        left, right, ground = paired or (self.left_rad_s, self.right_rad_s, self.speed_mps)
         slip = self.mode == WHEELS and (
-            conv.wheel_slip(wheels, self.speed_mps)
+            conv.wheel_slip(left + right, ground)
             or conv.turn_slip(self.left_rad_s, self.right_rad_s, m.angular_velocity.z)
         )
         r = MotionReport()

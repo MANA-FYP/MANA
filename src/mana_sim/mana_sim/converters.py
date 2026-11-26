@@ -53,6 +53,32 @@ def wheel_slip(
     return abs(wheels_mps - abs(ground_mps)) > limit_mps
 
 
+def speed_at(speeds: list[tuple[float, float]], t: float) -> float | None:
+    """The speed at time t from (time, speed) samples in time order, on a straight line between the
+    two around it. None if t is not between the first and the last."""
+    if not speeds or not speeds[0][0] <= t <= speeds[-1][0]:
+        return None
+    for (t0, v0), (t1, v1) in zip(speeds, speeds[1:], strict=False):
+        if t0 <= t <= t1:
+            return v0 if t1 == t0 else v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+    return speeds[-1][1]  # a single sample, at t
+
+
+def same_time(
+    wheels: list[tuple[float, list[float], list[float]]], speeds: list[tuple[float, float]]
+) -> tuple[list[float], list[float], float] | None:
+    """The newest wheel speeds (time, left, right) with the chair's speed at their own time, from
+    the two streams' samples in time order. On a start at full speed the chair gains about 0.3 m/s
+    in 0.1 s, and the two streams' newest samples can be that far apart when the computer is busy:
+    the newest of each, compared, read as slip on level ground (#202). None if no wheel sample lies
+    within the speeds' times."""
+    for t, left, right in reversed(wheels):
+        ground = speed_at(speeds, t)
+        if ground is not None:
+            return left, right, ground
+    return None
+
+
 def turn_slip(
     left_rad_s: list[float], right_rad_s: list[float], gyro_rad_s: float, limit_rad_s: float = 0.6
 ) -> bool:

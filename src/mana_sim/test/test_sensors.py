@@ -44,6 +44,26 @@ def test_reversing_at_the_ground_speed_is_not_slip():
     assert c.wheel_slip([-8.0] * 4, -0.3)
 
 
+def test_the_chairs_speed_between_two_samples_is_on_the_line_between_them():
+    speeds = [(1.0, 0.0), (1.1, 0.4), (1.2, 0.8)]
+    assert c.speed_at(speeds, 1.05) == pytest.approx(0.2)
+    assert c.speed_at(speeds, 1.2) == pytest.approx(0.8)
+    assert c.speed_at(speeds, 1.3) is None and c.speed_at([], 1.0) is None
+    assert c.speed_at([(2.0, 0.5)], 2.0) == 0.5
+
+
+def test_a_start_at_full_speed_is_not_slip_when_wheels_and_chair_are_compared_at_one_time():
+    # the chair gains 3 m/s a second; the newest ground speed is 0.1 s older than the wheels (#202)
+    speeds = [(1.0, 0.3), (1.05, 0.45), (1.1, 0.6)]
+    wheels = [(1.1, [4.0] * 2, [4.0] * 2), (1.2, [6.4] * 2, [6.4] * 2)]  # 0.6, then 0.96 m/s
+    newest = wheels[-1][1] + wheels[-1][2]
+    assert c.wheel_slip(newest, speeds[-1][1])  # the newest of each: read as slip
+    left, right, ground = c.same_time(wheels, speeds)
+    assert (left, right, ground) == ([4.0] * 2, [4.0] * 2, pytest.approx(0.6))
+    assert not c.wheel_slip(left + right, ground)
+    assert c.same_time(wheels, [(2.0, 0.6)]) is None  # no wheel sample at that time
+
+
 def test_only_the_four_wheel_joints_count_and_they_are_split_by_side():
     names = [
         "wheel_fl_joint",
