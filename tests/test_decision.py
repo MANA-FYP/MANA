@@ -556,6 +556,18 @@ def test_with_no_mount_the_distances_are_as_reported():
 BRAKES = Mount(top_mps=1.2, reaction_s=0.4, decel_mps2=3.0)
 
 
+def test_on_tracks_for_a_curb_a_late_camera_report_does_not_send_the_chair_back_to_wheels():
+    """Two sensors put the chair on tracks for a curb. When the camera's report is late, the 3D
+    camera alone still measures the curb ahead: the tracks stay down, with the same words. In
+    Gazebo it went from tracks to wheels and back several times a second."""
+    c = core(ground(CAM, Ground.CURB), ground(DEPTH, Ground.CURB, 1.5))
+    assert (c.decision.mode, c.decision.reason) == (Mode.TRACKS, "Curb ahead, changing to tracks")
+    d = fed(c, (ground(DEPTH, Ground.CURB, 1.4),), NOW + 0.6)  # the camera's report too old
+    assert (d.mode, d.reason, d.stop) == (Mode.TRACKS, "Curb ahead, changing to tracks", False)
+    d = fed(c, (ground(DEPTH, Ground.FLAT),), NOW + 1.2)  # past it: back as before
+    assert d.reason != "Curb ahead, changing to tracks"
+
+
 def test_the_travel_is_the_reaction_then_the_braking():
     assert BRAKES.travel_m(1.0) == pytest.approx(1.2 * 0.4 + 1.2**2 / 6)  # 0.72 m
     assert BRAKES.travel_m(0.3) == pytest.approx(0.36 * 0.4 + 0.36**2 / 6)  # 0.17 m

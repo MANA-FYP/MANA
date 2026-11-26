@@ -33,13 +33,15 @@ Parameters:
                     the mounting height (#156); else the tilt is the mounting's alone
 """
 
+from dataclasses import replace
+
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport, WayReport
+from mana_msgs.msg import DriveRequest, GroundReport, MotionReport, ObstacleReport, WayReport
 from mana_perception import depth as dp
 from mana_perception import structure
 
@@ -64,8 +66,16 @@ class DepthNode(Node):
         self.last: Time | None = None
         self.warned: set[str] = set()
         self.create_subscription(CameraInfo, "depth/camera_info", self.on_info, 10)
-        self.create_subscription(Image, "depth/image", self.on_image, 10)
+        # only the newest frame: with the camera's classifier beside it in Gazebo, frames waited
+        # and its reports grew older than the core's 0.5 s, so the ground sensors went missing
+        self.create_subscription(Image, "depth/image", self.on_image, 1)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
+        # on tracks the chair's own tracks lie on the ground ahead, out to body_m: the ground is
+        # read from there, or the tracks coming down read as a step at 0 m and stopped the chair
+        self.on_tracks = False
+        self.switch_s = self.declare_parameter("switch_s", 2.5).value  # the slides move this long
+        self.switched_at: Time | None = None  # the mode last changed: tracks still moving
+        self.create_subscription(DriveRequest, "drive_request", self.on_drive, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
         self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
         self.way = self.create_publisher(WayReport, "way", 10)  # which way is open
@@ -83,6 +93,24 @@ class DepthNode(Node):
         at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
         self.chair_pitch = (float(m.pitch_rad), at)
         self.chair_roll = float(m.roll_rad) if m.roll_rad == m.roll_rad else 0.0
+
+    def on_drive(self, m: DriveRequest) -> None:
+        tracks = m.mode == DriveRequest.TRACKS
+        if tracks != self.on_tracks:
+            self.switched_at = self.get_clock().now()
+        self.on_tracks = tracks
+
+    def ground_settings(self, now: Time | None = None) -> dp.Settings:
+        """The ground reader's settings now: on tracks, and while the slides still move after a
+        change of mode (switch_s), it starts past the tracks' front end."""
+        now = self.get_clock().now() if now is None else now
+        moving = (
+            self.switched_at is not None
+            and (now - self.switched_at).nanoseconds / 1e9 < self.switch_s
+        )
+        if not (self.on_tracks or moving) or self.structure.body_m <= self.settings.min_range_m:
+            return self.settings
+        return replace(self.settings, min_range_m=self.structure.body_m)
 
     def pitch_now(self, now: Time, image=None) -> float:
         """The chair's pitch if a recent motion report gave it. Else, with the IMU lost, from the
@@ -121,7 +149,7 @@ class DepthNode(Node):
             return
         self.last = now
         pitch = self.pitch_now(now, image)
-        r = dp.read_ground(image, self.cam, self.settings, pitch)
+        r = dp.read_ground(image, self.cam, self.ground_settings(now), pitch)
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,
