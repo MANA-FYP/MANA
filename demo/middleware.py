@@ -500,6 +500,10 @@ SOLO_TEXT = {
     "the ground. It slows down to stay safe.",
 }
 NO_SENSOR_TEXT = "No sensor is on. MANA cannot make a decision, so it slows down to stay safe."
+# on foot, a drop's stop comes this much earlier: a walking pace of 1.0 m/s for 1.3 s to hear
+# "Stop" and react, and 0.8 m to stand still (Mount.walker_reach_m, docs/results.md)
+WALKER_REACH_M = 2.1
+
 SHOWN_DISTANCE_M = 8.0  # camera distances beyond this are too rough to write down
 
 
@@ -544,7 +548,9 @@ class Middleware:
     ):
         self.core = core or DecisionCore()
         if on_foot:  # a walker cannot tell how near a drop with no distance is: it stops
-            self.core.mount = replace(self.core.mount, unknown_drop_stops=True)
+            self.core.mount = replace(
+                self.core.mount, unknown_drop_stops=True, walker_reach_m=WALKER_REACH_M
+            )
         # how the phone is carried: on the device (wheels, the default) or by a person on foot
         # (a cane, walking). Only on foot are the steps the person's, not jolts of rough ground.
         self.on_foot = on_foot
@@ -591,6 +597,7 @@ class Middleware:
         self._seen_logged: frozenset | None = None
         self._last_active: set[str] | None = None
         self.brightness = 1.0
+        self._dark = False  # told that it is too dark for the camera (on_light)
         self.accuracy_m: float | None = None
         self._accel: deque = deque(maxlen=200)
         self.gravity: tuple[float, float, float] | None = None
@@ -973,7 +980,11 @@ class Middleware:
         self.on_foot = on_foot
         self._edges.clear()  # steps measure only on foot (review of #256)
         self._edge_once.clear()
-        self.core.mount = replace(self.core.mount, unknown_drop_stops=on_foot)
+        self.core.mount = replace(
+            self.core.mount,
+            unknown_drop_stops=on_foot,
+            walker_reach_m=WALKER_REACH_M if on_foot else 0.0,
+        )
         self._decide(
             now,
             "switch",
@@ -993,12 +1004,25 @@ class Middleware:
         """The phone's absolute orientation (degrees), or the compass heading an iPhone gives."""
         self.nav.on_orientation(alpha, beta, gamma, compass)
 
+    # too dark for the camera (readiness review: in the dark the person was told to slow down, but
+    # never that the camera cannot see): told when the camera's trust from the light falls below
+    # DARK_BELOW, and that it sees again above LIGHT_ABOVE (apart, so a flickering lamp is quiet)
+    DARK_BELOW = 0.4
+    LIGHT_ABOVE = 0.7
+    DARK_TEXT = "Too dark for the camera to see. Stop, or find more light."
+    LIGHT_TEXT = "The camera can see again."
+
     def on_light(self, brightness: float, now: float | None = None) -> None:
         now = self.clock() if now is None else now
         self.brightness = brightness
-        self._seen(
-            "camera", now, f"light {brightness * 100:.0f} %", camera_trust_factor(brightness)
-        )
+        trust = camera_trust_factor(brightness)
+        self._seen("camera", now, f"light {brightness * 100:.0f} %", trust)
+        if not self._dark and trust < self.DARK_BELOW:
+            self._dark = True
+            self._decide(now, "coverage", self.DARK_TEXT, Priority.WARNING)
+        elif self._dark and trust > self.LIGHT_ABOVE:
+            self._dark = False
+            self._decide(now, "coverage", self.LIGHT_TEXT, Priority.INFO)
 
     def on_heartbeat(self, rtt_ms: float | None, now: float | None = None) -> None:
         now = self.clock() if now is None else now
