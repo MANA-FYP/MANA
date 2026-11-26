@@ -187,3 +187,42 @@ def test_glass_and_walls_are_hazards_and_told_marks_run_through_main(tmp_path, c
     assert sw.main(["--marks", str(marks), "--decisions", str(tmp_path / "out")]) == 0
     out = capsys.readouterr().out
     assert "| glass | 1 | 1 |" in out and "| way_right | 1 | 1 | 0 |" in out
+
+
+def test_a_walk_with_no_decision_is_scored(tmp_path, capsys):
+    (tmp_path / "marks.csv").write_text("recording,hazard,start_s,end_s\na,ramp,5,9\n")
+    out = tmp_path / "decided"
+    out.mkdir()
+    head = "walk_s,n,kind,state,why,text\n"
+    (out / "a.csv").write_text(head + '6,1,decision,slow,"Ramp ahead",x\n')
+    (out / "quiet.csv").write_text(head + "4,1,way,,,Way open\n")
+    assert sw.main(["--marks", str(tmp_path / "marks.csv"), "--decisions", str(out)]) == 0
+    assert "2 walks scored, 1 of them with no hazard marked" in capsys.readouterr().out
+    assert sw.held([]) == []
+
+
+def test_an_obstacle_stop_at_a_told_mark_is_no_false_alarm_and_told_rows_are_written(tmp_path):
+    """A stop at a blocked way and a slow-down at a door are right there, not false alarms; told
+    rows go to --out too (#266 review)."""
+    marks = tmp_path / "marks.csv"
+    marks.write_text(
+        "recording,hazard,start_s,end_s\nw,way_right,20,24\nw,door_pull,40,43\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "decided"
+    out.mkdir()
+    (out / "w.csv").write_text(
+        "walk_s,n,kind,state,why,text\n"
+        '21,1,decision,stop,"Obstacle ahead, stopping",x\n'
+        "22,2,way,,,Way ahead blocked. Open to your right.\n"
+        '30,3,decision,go,"Level ground",x\n'
+        '41,4,decision,slow,"Obstacle ahead, slowing down",x\n'
+        "42,5,door,,,Door ahead. Pull to open.\n",
+        encoding="utf-8",
+    )
+    rows = tmp_path / "rows.csv"
+    assert sw.main(["--marks", str(marks), "--decisions", str(out), "--out", str(rows)]) == 0
+    _, false = sw.score([], sw.read_decisions(out / "w.csv"), told=sw.read_marks(marks))
+    assert false == []
+    written = rows.read_text(encoding="utf-8").splitlines()
+    assert len(written) == 3 and "way_right" in written[1] and "door_pull" in written[2]

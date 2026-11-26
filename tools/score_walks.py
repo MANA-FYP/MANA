@@ -11,7 +11,8 @@ The marks are a CSV with one row per hazard, marked by hand while watching the r
 
 - recording: the recording's folder name; its decisions are <decisions>/<recording>.csv, as
   `demo.replay --decisions` writes them.
-- hazard: one of HAZARDS (stairs_up, stairs_down, curb, drop, ramp, obstacle, person, door).
+- hazard: one of HAZARDS (stairs_up, stairs_down, curb, drop, ramp, obstacle, person, door,
+  glass, wall), or one of TOLD below.
 - start_s: seconds into the walk when the hazard is first in the camera's view and clear enough to
   call by eye: the earliest a reaction could fairly be asked for.
 - end_s: when the walker reaches it (the first step, the edge, the person). A reaction after this
@@ -34,7 +35,10 @@ ahead is blocked (way_left, way_right, way_both, way_none), and a door's sign (d
 door_pull). Mark start_s when the answer is plain by eye and end_s when the walker reaches it. Such
 a mark is told right when a line with its answer comes in the window (or up to --early seconds
 before it), and told wrong when a line of the same kind gives another answer there: "open to your
-left" with only the right open sends the person into the wall, so it is counted on its own.
+left" with only the right open sends the person into the wall, so it is counted on its own. A
+told mark is a place where something stands in the way (a blocked way, a door), so an obstacle
+stop or slow-down in its window answers it and is no false alarm. Two told marks closer than
+--early seconds share the lines between them: mark them apart.
 
 The phone has no 3D camera or lidar, so these walks test the camera path and the one-sensor rules;
 the two-sensor confirmation is tested in Gazebo (#89).
@@ -48,7 +52,7 @@ import json
 import math
 import statistics
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # the core's reasons (mana_core.decision) that count as reacting to each hazard: a reason is
@@ -155,6 +159,8 @@ def held(decisions: list[Decision]) -> list[tuple[Decision, float]]:
     """Each stop or slow-down with the time it held until: the demo writes a decision only when it
     changes, so one row stands until the next one (or the end of the walk)."""
     ordered = sorted(decisions, key=lambda d: d.walk_s)
+    if not ordered:  # a walk with no decision written (#266 review)
+        return []
     ends = [d.walk_s for d in ordered[1:]] + [math.inf]
     return [(d, end) for d, end in zip(ordered, ends, strict=True) if d.state in ("stop", "slow")]
 
@@ -173,7 +179,7 @@ def explains(d: Decision, until: float, m: Mark, early_s: float = EARLY_S) -> bo
 
 
 def score(
-    marks: list[Mark], decisions: list[Decision], early_s: float = EARLY_S
+    marks: list[Mark], decisions: list[Decision], early_s: float = EARLY_S, told=()
 ) -> tuple[list[dict], list[Decision]]:
     """One row per mark (caught or not, the reaction time and the lead), and the false alarms,
     for one recording. A reaction already in force at start_s counts with a reaction of 0 s."""
@@ -199,7 +205,10 @@ def score(
     false = [
         d
         for d, until in acting
-        if about_ground(d.why) and not any(explains(d, until, m, early_s) for m in marks)
+        if about_ground(d.why)
+        and not any(explains(d, until, m, early_s) for m in marks)
+        # a told mark (a blocked way, a door) is something in the way: its obstacle stop is right
+        and not any(explains(d, until, replace(m, hazard="obstacle"), early_s) for m in told)
     ]
     return rows, false
 
@@ -262,7 +271,7 @@ def score_told(marks: list[Mark], told: list[Told], early_s: float = EARLY_S) ->
 
 def told_table(rows: list[dict]) -> str:
     lines = [
-        "| Told | Marked | Right | Wrong answers | Reaction (median) |",
+        "| Told | Marked | Right | Wrong lines | Reaction (median) |",
         "|---|---:|---:|---:|---:|",
     ]
     for kind in TOLD:
@@ -328,9 +337,9 @@ def main(argv=None) -> int:
     for name in names:
         decided = read_decisions(a.decisions / f"{name}.csv")
         here = [m for m in marks if m.recording == name]
-        mine, wrong = score([m for m in here if m.hazard in REASONS], decided, a.early)
-        told = read_told(a.decisions / f"{name}.csv")
-        told_rows += score_told([m for m in here if m.hazard in TOLD], told, a.early)
+        said = [m for m in here if m.hazard in TOLD]
+        mine, wrong = score([m for m in here if m.hazard in REASONS], decided, a.early, said)
+        told_rows += score_told(said, read_told(a.decisions / f"{name}.csv"), a.early)
         rows += mine
         false += len(wrong)
         minutes += walk_minutes(a.recordings / name if a.recordings else None, decided)
@@ -345,11 +354,12 @@ def main(argv=None) -> int:
         for r in told_rows:
             if r["wrong"]:
                 print(f"told wrong in {r['recording']} at {r['start_s']} s: {r['said']}")
-    if a.out and rows:
+    if a.out and (rows or told_rows):  # one row per mark, hazards and told marks alike
+        fields = list(dict.fromkeys(k for r in rows + told_rows for k in r))
         with open(a.out, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, list(rows[0]), lineterminator="\n")
+            w = csv.DictWriter(f, fields, restval="", lineterminator="\n")
             w.writeheader()
-            w.writerows(rows)
+            w.writerows(rows + told_rows)
     return 0
 
 
