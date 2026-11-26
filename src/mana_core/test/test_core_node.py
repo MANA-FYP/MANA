@@ -203,3 +203,40 @@ def test_an_unknown_controller_is_refused():
             CoreNode(parameter_overrides=[Parameter("controller", value="magic")])
     finally:
         rclpy.shutdown()
+
+
+def test_with_the_way_ahead_blocked_the_user_is_told_which_side_is_open(ros):
+    """The 3D camera's three corridors (WayReport): blocked ahead, open to the right only. The
+    user hears it once (two reports in a row, not again within 10 s); a stale one is ignored."""
+    from mana_msgs.msg import WayReport
+
+    core, probe = CoreNode(), rclpy.create_node("probe")
+    messages = []
+    probe.create_subscription(UserMessage, "user_message", messages.append, 10)
+    way = probe.create_publisher(WayReport, "way", 10)
+    executor = SingleThreadedExecutor()
+    executor.add_node(core)
+    executor.add_node(probe)
+    text = "Way ahead blocked. Open to your right."
+    end = time.monotonic() + 5.0
+    while time.monotonic() < end and not any(m.text == text for m in messages):
+        r = WayReport(trust=0.9, left_m=1.0, ahead_m=1.2, right_m=float("inf"))
+        r.header.stamp = core.get_clock().now().to_msg()
+        way.publish(r)
+        executor.spin_once(timeout_sec=0.05)
+    end = time.monotonic() + 1.0  # more of the same: not said again
+    while time.monotonic() < end:
+        r = WayReport(trust=0.9, left_m=1.0, ahead_m=1.2, right_m=float("inf"))
+        r.header.stamp = core.get_clock().now().to_msg()
+        way.publish(r)
+        executor.spin_once(timeout_sec=0.05)
+    stale = WayReport(trust=0.9, left_m=float("inf"), ahead_m=1.0, right_m=1.0)  # stamped 0
+    for _ in range(20):
+        way.publish(stale)
+        executor.spin_once(timeout_sec=0.05)
+    for node in (core, probe):
+        node.destroy_node()
+
+    told = [m for m in messages if m.text.startswith("Way ahead")]
+    assert [m.text for m in told] == [text]
+    assert told[0].speak and told[0].priority == UserMessage.WARNING

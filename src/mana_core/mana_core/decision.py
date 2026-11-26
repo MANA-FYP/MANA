@@ -379,6 +379,15 @@ class DecisionCore:
         ahead = self.mount.ahead_of_sensor(report.source, self.mode, self._switching(), body)
         return replace(report, distance_m=max(0.0, report.distance_m - ahead)) if ahead else report
 
+    def from_front_m(self, source: Source, distance_m: float) -> float:
+        """A distance from a source's sensor as from the device's furthest point, as an obstacle
+        is measured (inf and NaN stay): the chair's lifted tracks reach 0.75 m past its 3D camera,
+        so a way blocked 1.5 m from the camera was never told before the chair stopped (Gazebo)."""
+        if not math.isfinite(distance_m):
+            return distance_m
+        ahead = self.mount.ahead_of_sensor(source, self.mode, self._switching(), body=True)
+        return max(0.0, distance_m - ahead)
+
     def on_ground(self, report: GroundReport) -> None:
         self._keep(self.ground, report.source, self._from_front(report))
 

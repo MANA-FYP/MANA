@@ -265,3 +265,60 @@ def direction(core: DecisionCore, now: float) -> Message | None:
     # most urgent first, then the nearest; an unknown distance (NaN) sorts last
     priority, _, text = min(found, key=lambda f: (-f[0], math.inf if math.isnan(f[1]) else f[1]))
     return Message(text, priority, True, now, DIRECTION)
+
+
+# Which way is open (readiness review: "if only the right is open, tell me to go right"). The way
+# ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
+# nothing stands in it within WAY_OPEN_M, both from the device's front. The phone reads the left,
+# middle and right of its picture; the chair's 3D camera three lanes as wide as the chair, each
+# looked at and its floor seen out to WAY_OPEN_M from the front (mana_perception.structure.way).
+WAY_BLOCKED_M = 1.5
+WAY_OPEN_M = 2.5
+WAY_TEXT = {
+    (True, False): "Way ahead blocked. Open to your left.",
+    (False, True): "Way ahead blocked. Open to your right.",
+    (True, True): "Way ahead blocked. Open on both sides.",
+    (False, False): "Way ahead blocked, and to both sides.",
+}
+
+
+def way_open(left_m, middle_m, right_m) -> str | None:
+    """What to tell the user about which way is open, from the nearest thing standing to the left,
+    ahead and to the right (None or inf: nothing there; NaN: not seen, so not open); None when the
+    way ahead is clear or not seen."""
+
+    def free(d):
+        return d is None or d >= WAY_OPEN_M  # NaN compares False: a side not seen is not open
+
+    if middle_m is None or not middle_m < WAY_BLOCKED_M:
+        return None
+    return WAY_TEXT[(free(left_m), free(right_m))]
+
+
+class WayTeller:
+    """Says which way is open when the same answer comes from two frames in a row, and not the
+    same answer again within repeat_s. A NOTICE: a decision does not drop it; a stop goes first.
+    Once a different answer comes from two frames in a row (the way clear too), a way line still
+    waiting in the queue is dropped: it is no longer true (review of #254)."""
+
+    def __init__(self, repeat_s: float = 10.0):
+        self.repeat_s = repeat_s
+        self._last: str | None = None
+        self._said: tuple[str, float] | None = None
+
+    def on_frame(
+        self, left_m, middle_m, right_m, now: float, queue: MessageQueue | None = None
+    ) -> Message | None:
+        text = way_open(left_m, middle_m, right_m)
+        last, self._last = self._last, text
+        if text != last:
+            return None
+        if queue is not None:
+            stale = set(WAY_TEXT.values()) - {text}
+            queue.waiting = [m for m in queue.waiting if not (m.kind == NOTICE and m.text in stale)]
+        if text is None:
+            return None
+        if self._said and self._said[0] == text and 0 <= now - self._said[1] < self.repeat_s:
+            return None
+        self._said = (text, now)
+        return Message(text, Priority.WARNING, True, now, NOTICE)

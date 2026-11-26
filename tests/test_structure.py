@@ -248,3 +248,80 @@ def test_a_box_is_still_found_by_a_turned_or_leaning_chair(yaw, roll):
         image = syn.render_boxes(boxes, yaw_rad=math.radians(yaw), roll_rad=r)
         found = st.find(image, syn.CAMERA, chair_roll_rad=r)
         assert found is not None and found.label == "obstacle", (yaw, roll, box, found)
+
+
+def test_the_way_is_read_in_three_corridors_as_wide_as_the_chair():
+    """Which way is open (WayReport): a box ahead at 1.2 m, a wall 1.0 m off to the right, the left
+    clear. Each corridor gives the distance to what blocks it, inf when nothing does."""
+    boxes = [(1.2, 1.5, -0.3, 0.3, 0.0, 0.5), (1.0, 4.0, -2.0, -0.5, 0.0, 2.0)]
+    for image in frames(boxes, seeds=3):
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert left == math.inf, left
+        assert ahead == pytest.approx(1.2, abs=0.1)
+        assert right < 1.6, right
+    left, ahead, right = st.way(syn.render_boxes([]), syn.CAMERA, CHAIR)
+    assert (left, ahead, right) == (math.inf, math.inf, math.inf)
+
+
+def test_a_corridor_not_seen_is_not_called_open():
+    blank = np.full((syn.ROWS, syn.COLS), np.nan)
+    assert all(math.isnan(d) for d in st.way(blank, syn.CAMERA, CHAIR))
+    narrow = dp.Camera.from_fov(syn.COLS, syn.ROWS, math.radians(30.0), 1.0, 0.6)
+    image = syn.render_boxes([], narrow)
+    left, ahead, right = st.way(image, narrow, CHAIR)
+    # nor, now, the way ahead out to 2.5 m from the front: nothing blocks it, but it is not seen
+    assert math.isnan(left) and math.isnan(right) and not math.isfinite(ahead)
+
+
+def side_drop(cam=syn.CAMERA, edge_left=0.45, depth_m=1.0):
+    """A level floor whose left part, from edge_left to the left, is depth_m lower: a platform or
+    stairwell edge running beside the path."""
+    v = np.arange(syn.ROWS, dtype=np.float64)[:, None]
+    u = np.arange(syn.COLS, dtype=np.float64)[None, :]
+    yn, xn = (v - cam.cy) / cam.fy, (u - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    shape = (syn.ROWS, syn.COLS)
+    b, d = np.broadcast_to(-xn, shape), np.broadcast_to(yn * c + s, shape)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = np.where(d > 0, cam.height_m / d, np.inf)
+        t = np.where(t * b > edge_left, (cam.height_m + depth_m) / d, t)
+    return np.where(t < 8.0, t, np.inf)
+
+
+def test_a_drop_beside_the_path_is_never_called_open():
+    """Telling the user "Open to your left" towards a platform edge would walk them off it."""
+    noisy = [stereo_noise(side_drop(), np.random.default_rng(k)) for k in range(3)]
+    for image in [side_drop(), *noisy]:
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert math.isfinite(left) and left < 2.5, left
+        assert ahead == math.inf and right == math.inf, (ahead, right)
+
+
+def test_someone_right_beside_the_chair_is_not_called_open():
+    """The chair's own tracks reach body_m ahead only in its own corridor: a person 0.4 to 0.6 m
+    ahead and 0.8 to 1.2 m to the right is in the right corridor, so it is not open (review)."""
+    boxes = [(1.2, 1.3, -W, W, 0.0, 2.0), (0.4, 0.6, -1.2, -0.8, 0.0, 1.7)]
+    for image in frames(boxes, seeds=3):
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert right < 1.0, right
+        assert ahead == pytest.approx(1.2, abs=0.1)
+
+
+@pytest.mark.parametrize("from_m", [1.6, 1.8, 2.0])
+def test_a_side_whose_far_floor_gives_no_reading_is_not_called_open(from_m):
+    """A box ahead at 1.2 m and no depth on the right lane's floor beyond from_m (a lower floor that
+    gives no return, dark or wet): the right is not seen out there, so it is not called open (#254
+    review: it was, with half of its patches near)."""
+    cam = syn.CAMERA
+    image = syn.render_boxes([(1.2, 1.5, -0.3, 0.3, 0.0, 0.5)], cam)
+    rows, cols = image.shape
+    yn = (np.arange(rows)[:, None] - cam.cy) / cam.fy
+    xn = (np.arange(cols)[None, :] - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    ahead, left = image * (c - yn * s), -image * xn
+    width = CHAIR.device_width_m + 2.0 * CHAIR.margin_m
+    image = np.where((ahead > from_m) & (left < -width / 2.0), np.nan, image)
+    left_m, ahead_m, right_m = st.way(image, cam, CHAIR)
+    assert ahead_m == pytest.approx(1.2, abs=0.1)
+    assert math.isnan(right_m), right_m
+    assert left_m == math.inf

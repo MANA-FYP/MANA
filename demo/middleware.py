@@ -31,7 +31,17 @@ from mana_core.decision import (
     Priority,
     Source,
 )
-from mana_core.messages import DECISION, NOTICE, Message, MessageQueue, direction
+from mana_core.messages import (  # noqa: F401  (WAY_* and way_open: the phone's names too)
+    DECISION,
+    NOTICE,
+    WAY_BLOCKED_M,
+    WAY_OPEN_M,
+    WAY_TEXT,
+    Message,
+    MessageQueue,
+    direction,
+    way_open,
+)
 
 from demo.floors import label as floor_label
 from demo.navigation import COMPASS, Fix, Navigator, route_text, way_text
@@ -388,29 +398,7 @@ DOOR_TEXT = {
     ("push", False): "Door ahead. It opens away from you: push.",
     ("pull", False): "Door ahead. It opens towards you: pull. You may need help.",
 }
-# which way is open (readiness review: "if only right is open, tell me to go right"): the way
-# ahead counts as blocked when something stands in it within WAY_BLOCKED_M, and a side as open when
-# nothing stands in it within WAY_OPEN_M; the same answer two depth frames in a row is said
-WAY_BLOCKED_M = 1.5
-WAY_OPEN_M = 2.5
-WAY_TEXT = {
-    (True, False): "Way ahead blocked. Open to your left.",
-    (False, True): "Way ahead blocked. Open to your right.",
-    (True, True): "Way ahead blocked. Open on both sides.",
-    (False, False): "Way ahead blocked, and to both sides.",
-}
-
-
-def way_open(left_m, middle_m, right_m) -> str | None:
-    """What to tell the user about which way is open, from the nearest thing standing in the left,
-    middle and right of the picture (None: nothing there); None when the way ahead is clear."""
-
-    def free(d):
-        return d is None or d >= WAY_OPEN_M
-
-    if middle_m is None or middle_m >= WAY_BLOCKED_M:
-        return None
-    return WAY_TEXT[(free(left_m), free(right_m))]
+# which way is open: the same rule as the chair's (mana_core.messages.way_open)
 
 
 # PUSH or PULL read with no door in view (the whole frame read): only what the sign says, as the
