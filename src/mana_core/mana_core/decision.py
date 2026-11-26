@@ -175,6 +175,9 @@ class Limits:
     # after that yes, a drop no deeper than this is those stairs (#52): passing the top edge of the
     # campus's 12-riser flight, the 3D camera saw four 0.17 m risers as one 0.69 m drop (Gazebo)
     down_drop_m: float = 0.8
+    # and only while a sensor's own stairs down were seen within down_forget_s and down_recent_m
+    # of travel (review of #262): the classifier's stairs never vouch for a drop
+    down_recent_m: float = 1.0
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
@@ -202,6 +205,10 @@ class Mount:
     camera_m: float = 0.0  # the camera, and the classifier and detector that run on its image
     depth_camera_m: float = 0.0
     lidar_m: float = 0.0
+    # how high the lidar's plane is above the ground: pitched nose down going down stairs, it
+    # meets the ground lidar_height_m / tan(pitch) ahead, and only a return that far is the steps
+    # (review of #262). 0: not known, and the lidar is never taken for the steps there.
+    lidar_height_m: float = 0.0
     switch_s: float = 2.5  # the slides take this long: until then the longer front counts
     # how far the chair goes after a stop is decided: at the speed it was last allowed, for
     # reaction_s, then braking at decel_mps2. A stop distance then holds where the chair stands
@@ -334,6 +341,9 @@ class DecisionCore:
         self.level_since: float | None = None
         self.asking_down = False  # stopped at the top of stairs down, waiting for a yes
         self.down_ok = False  # the user said yes to the stairs down in sight
+        self.down_went = False  # and the device went down pitched since that yes
+        self.down_really_at = -math.inf  # a sensor's own stairs down last seen: when, and
+        self.down_really_m = 0.0  # how far the device had travelled then
         self.down_seen_at = -math.inf
         self.asked_at = -math.inf  # when the stairs-down question was last the decision
         self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
@@ -434,7 +444,11 @@ class DecisionCore:
         if report.source != Source.LIDAR or not math.isfinite(report.distance_m):
             return False
         if self._descending():  # pitched nose down on a flight, the plane meets the steps below
-            return True
+            pitch, h = self.motion.pitch_rad, self.mount.lidar_height_m
+            own = report.distance_m + self.mount.ahead_of_sensor(
+                Source.LIDAR, self.mode, self._switching(), body=True
+            )
+            return h > 0 and own >= h / math.tan(pitch) - LIDAR_ON_STEPS_M
         sw = self._switching()
         steps = [
             g.distance_m + self.mount.front_m(self.mode, sw)
@@ -523,13 +537,24 @@ class DecisionCore:
             # the clock went back (a world reset, a bag played again): what was seen is gone
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
+            self.down_really_at, self.down_went = -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
+        if self._really_down():  # a sensor's own stairs down: where, for _grounds' recent memory
+            self.down_really_at, self.down_really_m = now, self.travelled_m
+        if self.down_ok and self._descending():
+            self.down_went = True
+        elif self.down_went and self._level_held():
+            # level for level_hold_s after going down: a landing or the bottom, and the next
+            # flight is asked again (review of #262)
+            self.down_ok = self.down_went = False
         if (seen["stairs down"] and self._really_down()) or (self.down_ok and self._still_down()):
             # only a sensor's own stairs down keeps a yes alive; after the yes one is enough: at
             # the top edge the camera looks over it at the floor below (Gazebo)
             self.down_seen_at = now
         elif self.down_ok and now - self.down_seen_at > lim.down_forget_s:
             self.down_ok = False  # those stairs are behind or gone: ask at the next ones
+        if not self.down_ok:
+            self.down_went = False
         was_stop = self.decision.stop
         self.tree.tick_once()
         if self.decision.mode != self.mode:
@@ -568,23 +593,20 @@ class DecisionCore:
         found = [r for r in self.ground.values() if self._ok(r)]
         if not self.down_ok:
             return found
-        # the camera's classifier says "stairs" with no way up or down (its STAIRS_UP): after the
-        # yes, which gave the way, its stairs are those stairs down (in Gazebo the chair otherwise
-        # stopped on the flight, the 3D camera reading a drop and the classifier stairs)
-        down = {
-            SENSOR_OF.get(r.source, r.source)
-            for r in found
-            if r.ground == Ground.STAIRS_DOWN
-            or (r.source == Source.CLASSIFIER and r.ground == Ground.STAIRS_UP)
-        }
+        # the classifier's stairs (no way up or down) never vouch for a drop: a real 0.5 to 0.8 m
+        # drop beside them would be taken for the stairs (review of #262)
+        down = {SENSOR_OF.get(r.source, r.source) for r in found if r.ground == Ground.STAIRS_DOWN}
         lim = self.limits
         edge = lim.edge_m + self.mount.travel_m(self.moving_speed) + lim.release_m
         # or those stairs were seen down within down_forget_s: at the top edge the camera looks
         # over it, sees the level floor far below, and its stairs are gone just as the 3D camera
         # reads the hidden risers as one drop; the chair stopped and went there by turns (Gazebo)
-        # (a curb seen is a ledge, not those stairs: #173 review)
-        recent = self.now - self.down_seen_at <= lim.down_forget_s and not any(
-            r.ground == Ground.CURB for r in found
+        # (a curb seen is a ledge, not those stairs: #173 review); within down_recent_m of travel
+        # too, so a drop further along the way is not taken for them (review of #262)
+        recent = (
+            self.now - self.down_really_at <= lim.down_forget_s
+            and self.travelled_m - self.down_really_m <= lim.down_recent_m
+            and not any(r.ground == Ground.CURB for r in found)
         )
         return [
             replace(r, ground=Ground.STAIRS_DOWN)

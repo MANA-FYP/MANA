@@ -135,10 +135,11 @@ PERSON = Box("person", 7.0, (0.4, 0.6, 1.7))
 PERSON_AT = PERSON.face_x + 1.0  # its face, from a start at -1 m
 STAIRS_AT = 3.8  # the stairs, 22 m along the route, from a start at 18.2 m (the ramp ends at 18 m)
 STAIRS_TOP = 4.5  # the top of the third step
-CAM_STAIRS = Stretch(STAIRS_AT, STAIRS_TOP, Ground.STAIRS_UP, pitch_rad=0.55, height_m=0.17)
+# REP 103: nose up going up is a negative pitch, nose down going down a positive one
+CAM_STAIRS = Stretch(STAIRS_AT, STAIRS_TOP, Ground.STAIRS_UP, pitch_rad=-0.55, height_m=0.17)
 DOWN_AT = 2.5  # the stairs down, 26 m along the route, from a start on the top at 23.5 m
 DOWN_END = 3.16  # the foot of the third step
-CAM_DOWN = Stretch(DOWN_AT, DOWN_END, Ground.STAIRS_DOWN, pitch_rad=-0.55, height_m=0.17)
+CAM_DOWN = Stretch(DOWN_AT, DOWN_END, Ground.STAIRS_DOWN, pitch_rad=0.55, height_m=0.17)
 
 RUNS = {
     r.scripted: r
