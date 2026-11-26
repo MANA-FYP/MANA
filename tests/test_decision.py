@@ -310,6 +310,16 @@ def test_agreeing_sensors_without_any_distance_do_not_change_mode():
     assert (d.mode, d.reason) == (Mode.WHEELS, "Possible step ahead, slowing down")
 
 
+def test_a_slow_down_holds_a_moment_after_its_reason_goes():
+    """One camera's report coming late now and then made "Possible step ahead, slowing down" and
+    "Level ground" take turns several times a second (Gazebo). The slow-down holds slow_hold_s."""
+    c = core(ground(CAM, Ground.STAIRS_UP), ground(DEPTH, Ground.FLAT))
+    assert c.decision.reason == "Possible step ahead, slowing down"
+    level = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert fed(c, level, NOW + 0.5).reason == "Possible step ahead, slowing down"
+    assert fed(c, level, NOW + LIM.slow_hold_s + 0.1).reason == "Level ground"
+
+
 def test_a_stale_source_cannot_confirm_a_step():
     stale = ground(CLS, Ground.STAIRS_UP, 1.5, age=1.0)
     d = core(stale, ground(DEPTH, Ground.STAIRS_UP, 1.5)).decision
