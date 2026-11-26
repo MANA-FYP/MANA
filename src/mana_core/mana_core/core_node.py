@@ -115,7 +115,7 @@ class CoreNode(Node):
             return
         lanes = (m.left_m, m.ahead_m, m.right_m)
         left, ahead, right = (self.core.from_front_m(d.Source.DEPTH_CAMERA, x) for x in lanes)
-        if said := self.way.on_frame(left, ahead, right, now):
+        if said := self.way.on_frame(left, ahead, right, now, self.queue):
             self.queue.push(said, now)
 
     def on_motion(self, m: MotionReport) -> None:

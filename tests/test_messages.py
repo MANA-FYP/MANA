@@ -731,3 +731,21 @@ def test_which_way_is_open_is_told_on_two_frames_in_a_row_and_not_repeated():
     assert w.on_frame(1.0, 1.0, inf, 5.4).text == "Way ahead blocked. Open to your right."
     assert w.on_frame(inf, 1.0, 1.0, 12.0) is None  # changed back: two in a row again
     assert w.on_frame(inf, 1.0, 1.0, 12.2).text == "Way ahead blocked. Open to your left."
+
+
+def test_a_way_line_still_waiting_is_dropped_once_the_way_has_changed():
+    """Behind a long stop, "Open to your left" waits; the person turns and the way ahead is clear
+    for two frames: the line is not said, as it is no longer true (review of #254)."""
+    from mana_core.messages import NOTICE, WayTeller
+
+    inf = math.inf
+    q, w = MessageQueue(), WayTeller()
+    q.push(Message("Stop. " + "A long line. " * 6, Priority.URGENT, True, 0.0), 0.0)
+    assert q.release(0.0) is not None  # being said for a few seconds
+    w.on_frame(inf, 1.0, 1.0, 0.1, q)
+    q.push(w.on_frame(inf, 1.0, 1.0, 0.3, q), 0.3)
+    assert [m.kind for m in q.waiting] == [NOTICE]
+    w.on_frame(inf, inf, inf, 0.5, q)
+    assert q.waiting  # once is not enough
+    assert w.on_frame(inf, inf, inf, 0.7, q) is None
+    assert not q.waiting

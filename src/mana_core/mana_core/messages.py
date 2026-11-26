@@ -296,17 +296,26 @@ def way_open(left_m, middle_m, right_m) -> str | None:
 
 class WayTeller:
     """Says which way is open when the same answer comes from two frames in a row, and not the
-    same answer again within repeat_s. A NOTICE: a decision does not drop it; a stop goes first."""
+    same answer again within repeat_s. A NOTICE: a decision does not drop it; a stop goes first.
+    Once a different answer comes from two frames in a row (the way clear too), a way line still
+    waiting in the queue is dropped: it is no longer true (review of #254)."""
 
     def __init__(self, repeat_s: float = 10.0):
         self.repeat_s = repeat_s
         self._last: str | None = None
         self._said: tuple[str, float] | None = None
 
-    def on_frame(self, left_m, middle_m, right_m, now: float) -> Message | None:
+    def on_frame(
+        self, left_m, middle_m, right_m, now: float, queue: MessageQueue | None = None
+    ) -> Message | None:
         text = way_open(left_m, middle_m, right_m)
         last, self._last = self._last, text
-        if text is None or text != last:
+        if text != last:
+            return None
+        if queue is not None:
+            stale = set(WAY_TEXT.values()) - {text}
+            queue.waiting = [m for m in queue.waiting if not (m.kind == NOTICE and m.text in stale)]
+        if text is None:
             return None
         if self._said and self._said[0] == text and 0 <= now - self._said[1] < self.repeat_s:
             return None
