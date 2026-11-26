@@ -29,3 +29,15 @@ def test_the_phone_warns_by_itself_when_the_server_goes_quiet_and_when_it_is_bac
     assert 'speakNow("Connection lost. Stop and wait.", "URGENT");' in JS
     assert "linkLost();" in JS[JS.index("ws.onclose") :]  # the socket closing, too
     assert 'speakNow("Connected again.", "INFO");' in JS
+
+
+def test_after_a_reconnect_or_a_server_restart_the_phone_speaks_again_without_a_burst():
+    """A server started again numbers its lines from 1, and the page kept the old count: before,
+    it said nothing, stops included, until the new count passed the old one. After a short drop
+    it said every line it had missed at once."""
+    assert "resync = true;" in JS[JS.index("ws.onopen") : JS.index("ws.onclose")]
+    say = JS[JS.index("function sayAloud") :]
+    assert "if (resync || newest < lastSpoken) {" in say
+    reset = say[say.index("if (resync || newest < lastSpoken) {") :]
+    assert reset.index("lastSpoken = newest;") < reset.index("return;")  # the count starts again
+    assert 'now.priority === "URGENT") speakNow(now.text, now.priority);' in reset  # a stop is said

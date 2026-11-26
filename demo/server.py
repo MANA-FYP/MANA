@@ -828,9 +828,14 @@ def obstacles(
     by its place in detections, for the dashboard."""
     d = app["depth"]
     seen = d["seen"] if d["t"] is not None and now - d["t"] <= 1.5 else None
+    # the phone camera as the depth reader models it (Mount: its long side's field of view), not
+    # the detector's default 55 degrees up and down: held upright, that read every box about 25
+    # percent too far (readiness review)
+    focal = app["mount"].camera(w, h, 0.0).fx
+    hfov = 2.0 * math.atan((w / 2.0) / focal)
     found = []
     for i, det in enumerate(detections):
-        estimate = vision.to_obstacles([det], w, h)
+        estimate = vision.to_obstacles([det], w, h, focal_px=focal, hfov_rad=hfov)
         if not estimate:
             ob = on_the_floor(app, det, w, h, seen)
             if ob is None:
@@ -842,7 +847,7 @@ def obstacles(
                 ob = vision.Obstacle(ob.label, ob.confidence, measured, ob.bearing_rad)
         if per_box is not None:
             per_box[i] = ob.distance_m
-        if vision.side_gap_m(det, ob.distance_m, w) <= PATH_HALF_M:  # beside the path: shown only
+        if vision.side_gap_m(det, ob.distance_m, w, hfov) <= PATH_HALF_M:  # beside: shown only
             found.append(ob)
     return sorted(found, key=lambda o: o.distance_m)
 
@@ -875,6 +880,9 @@ def depth_step(app: web.Application, jpeg: bytes, taken: float | None = None) ->
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     if seen.cam is not None and not stairs:  # which way is open, when the way ahead is blocked
         left, _, right = dz.ahead_by_side(seen.depth, seen.cam)
+        # a side whose floor drops away is never open (NaN: not free), whatever stands there
+        left = left if dz.floor_level(seen.depth, seen.cam, 1 / 6) else math.nan
+        right = right if dz.floor_level(seen.depth, seen.cam, 5 / 6) else math.nan
         mw.on_way(left, seen.ahead_m, right, now)
     d = app["depth"]
     d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now, raw=image)

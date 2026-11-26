@@ -218,6 +218,17 @@ def test_when_every_source_goes_stale_the_chair_slows_down():
 # ---- position source
 
 
+def test_on_foot_the_core_gets_the_walkers_stop_allowance_and_on_the_device_none():
+    from demo.middleware import WALKER_REACH_M
+
+    m = Middleware(on_foot=True)
+    assert m.core.mount.walker_reach_m == WALKER_REACH_M
+    m.set_on_foot(False, now=1.0)
+    assert m.core.mount.walker_reach_m == 0.0
+    m.set_on_foot(True, now=2.0)
+    assert m.core.mount.walker_reach_m == WALKER_REACH_M
+
+
 def test_the_position_source_leaves_gps_after_three_bad_seconds():
     p = PositionSource()
     assert p.update(20.0, 0.0) == "gps"
@@ -397,6 +408,19 @@ def test_the_decision_log_says_stop_and_go_in_words():
     log = texts(m, "decision")
     assert "MANA deactivated. Press GO or say go to restart." in log
     assert any(t.startswith("MANA reactivated.") for t in log)
+
+
+def test_the_person_is_told_when_it_is_too_dark_for_the_camera_and_when_it_sees_again():
+    m = Middleware(on_foot=True)
+    m.on_light(0.5, now=0.0)
+    m.on_light(0.1, now=1.0)  # trust 0.2: too dark
+    m.on_light(0.08, now=2.0)  # still dark: said once
+    m.on_light(0.2, now=3.0)  # trust 0.6: not light enough to say it sees again
+    m.on_light(0.4, now=4.0)  # trust 1.0
+    texts = [d["text"] for d in m.decisions]
+    assert texts.count(Middleware.DARK_TEXT) == 1
+    assert texts.count(Middleware.LIGHT_TEXT) == 1
+    assert texts.index(Middleware.DARK_TEXT) < texts.index(Middleware.LIGHT_TEXT)
 
 
 def test_a_person_in_view_does_not_fill_the_decision_log():

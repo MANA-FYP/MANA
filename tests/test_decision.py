@@ -310,6 +310,16 @@ def test_agreeing_sensors_without_any_distance_do_not_change_mode():
     assert (d.mode, d.reason) == (Mode.WHEELS, "Possible step ahead, slowing down")
 
 
+def test_a_slow_down_holds_a_moment_after_its_reason_goes():
+    """One camera's report coming late now and then made "Possible step ahead, slowing down" and
+    "Level ground" take turns several times a second (Gazebo). The slow-down holds slow_hold_s."""
+    c = core(ground(CAM, Ground.STAIRS_UP), ground(DEPTH, Ground.FLAT))
+    assert c.decision.reason == "Possible step ahead, slowing down"
+    level = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
+    assert fed(c, level, NOW + 0.5).reason == "Possible step ahead, slowing down"
+    assert fed(c, level, NOW + LIM.slow_hold_s + 0.1).reason == "Level ground"
+
+
 def test_a_stale_source_cannot_confirm_a_step():
     stale = ground(CLS, Ground.STAIRS_UP, 1.5, age=1.0)
     d = core(stale, ground(DEPTH, Ground.STAIRS_UP, 1.5)).decision
@@ -583,6 +593,23 @@ def test_slowed_down_the_same_drop_does_not_stop_it_yet():
     c = braked((1.9, NOW), (1.0, NOW + 0.1))
     assert not c.decision.stop and c.decision.speed_limit == pytest.approx(0.3)
     assert braked((1.9, NOW), (1.0, NOW + 0.1), (0.6, NOW + 0.2)).decision.stop  # 0.5 + 0.17 m
+
+
+def test_a_walker_is_stopped_for_a_drop_early_enough_to_stand_still_before_it():
+    """A person walking is not slowed by a speed limit: a drop 2 m off stops them, as they need
+    about 2.1 m from the frame to standing still (Mount.walker_reach_m). An obstacle does not get
+    the allowance: a cane meets it first."""
+    walker = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
+    walker.on_ground(ground(CAM, Ground.DROP, 2.0))
+    walker.on_motion(level())
+    d = walker.tick(NOW)
+    assert d.stop and d.reason == "Drop ahead, stopping"
+    chair = core(ground(CAM, Ground.DROP, 2.0), ground(DEPTH, Ground.FLAT))
+    assert not chair.decision.stop  # no allowance: its own limit slows it first
+    far = DecisionCore(mount=Mount(unknown_drop_stops=True, walker_reach_m=2.1))
+    far.on_ground(ground(CAM, Ground.DROP, 3.0))
+    far.on_motion(level())
+    assert not far.tick(NOW).stop
 
 
 def test_once_stopped_the_travel_of_the_last_speed_still_counts():
@@ -1144,7 +1171,9 @@ def test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop():
     # StairNet has no stairs down, so often only the 3D camera sees them: a fall needs no second
     # opinion, so they stop at the edge instead of rolling on slowly
     d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
-    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+    assert (d.stop, d.reason) == (True, "Stairs down ahead, stopping")  # what the user can see
+    d = core(ground(CAM, Ground.DROP, 0.4), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")  # a drop seen: told as one
 
 
 @pytest.mark.parametrize("distance", [0.4, 0.0])
@@ -1174,7 +1203,7 @@ def test_after_a_yes_stairs_down_seen_by_one_sensor_at_the_edge_still_stop():
     c = core(*stairs_down())
     c.on_command(Command.YES, 0.9)
     d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)), NOW + 0.1)
-    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+    assert (d.stop, d.reason) == (True, "Stairs down ahead, stopping")
 
 
 # ---- a step that only one sensor sees (#103): stop at the edge, as in the dark
@@ -1330,7 +1359,8 @@ def test_on_foot_a_drop_or_stairs_down_with_no_distance_stops_on_the_chair_it_sl
         walker.on_ground(ground(CAM, kind))  # no distance: the phone's tilt was not known
         walker.on_motion(level())
         d = walker.tick(NOW)
-        assert d.stop and d.reason == "Drop ahead, stopping", kind
+        said = "Drop ahead, stopping" if kind == Ground.DROP else "Stairs down ahead, stopping"
+        assert d.stop and d.reason == said, kind
         chair = core(ground(CAM, kind), ground(DEPTH, Ground.FLAT))
         assert not chair.decision.stop, kind  # its 3D camera measures it: no distance, a slow-down
 
