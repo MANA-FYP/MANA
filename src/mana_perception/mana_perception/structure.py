@@ -74,6 +74,7 @@ class Settings:
     angled_bins: int = 2  # a riser met at an angle may take this many more bins to cross the
     # path: 0.9 m wide at 12 degrees off the stairs' axis
     overhang_min_m: float = 0.685  # an object whose lowest edge is above this is an overhang
+    drop_m: float = 0.15  # way(): floor this far below the device's own is a drop beside it
 
 
 DEFAULTS = Settings()
@@ -132,6 +133,52 @@ def points(depth: np.ndarray, cam: Camera, mount: Camera | None = None, roll_rad
     return ahead[ok], np.broadcast_to(left, z.shape)[ok], height[ok], own[ok]
 
 
+def way_points(depth: np.ndarray, cam: Camera, chair_pitch_rad=0.0, chair_roll_rad=0.0):
+    """points() for find and way, with the device's own pitch and roll."""
+    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
+    return points(depth, seen_by, cam, chair_roll_rad)
+
+
+def way(
+    depth: np.ndarray,
+    cam: Camera,
+    settings: Settings = DEFAULTS,
+    chair_pitch_rad: float = 0.0,
+    chair_roll_rad: float = 0.0,
+    open_m: float = 2.5,
+) -> tuple[float, float, float]:
+    """How far the way is free to the left, ahead and to the right: three corridors as wide as the
+    device, side by side. Each is the distance to the nearest thing blocking it, inf when nothing
+    does, or NaN when nothing blocks it but less than half of its floor out to open_m has a reading
+    (beside the device, near, is out of the camera's view: a side not seen is not called open). A
+    corridor whose floor drops drop_m or more below the device's (a platform edge, a stairwell
+    beside the path) is blocked where the lower floor is seen: never called open."""
+    st = settings
+    pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
+    ahead, left, height = pts[0], pts[1], pts[2]
+    width = st.device_width_m + 2.0 * st.margin_m
+    near = max(st.min_range_m, st.body_m)
+    bins = max(1, math.ceil((open_m - near) / st.bin_m))
+    cells = max(1, math.ceil(width / st.cell_m - 1e-9))
+    out = []
+    for offset in (width, 0.0, -width):
+        found = find(depth, cam, st, chair_pitch_rad, chair_roll_rad, offset, pts)
+        if found is not None:  # blocked: what stands there hides the floor behind it
+            out.append(found.distance_m)
+            continue
+        lane = (np.abs(left - offset) <= width / 2.0) & (ahead >= near) & (ahead < open_m)
+        below = lane & (height < -st.drop_m)
+        if below.sum() >= st.min_points * cells:  # the floor drops away in this corridor
+            out.append(float(np.percentile(ahead[below], 5)))
+            continue
+        lane &= np.abs(height) <= st.riser_max_m  # floor at about the device's own level
+        row = np.minimum(np.floor((ahead[lane] - near) / st.bin_m).astype(int), bins - 1)
+        col = np.clip(np.floor((left[lane] - offset + width / 2.0) / st.cell_m), 0, cells - 1)
+        filled = np.unique(row * cells + col.astype(int)).size  # floor patches with a reading
+        out.append(math.inf if filled >= bins * cells / 2.0 else NAN)
+    return out[0], out[1], out[2]
+
+
 def min_height(distance_m: float, settings: Settings = DEFAULTS) -> float:
     """The lowest object reported at this distance: above the depth noise there."""
     return max(settings.min_height_m, settings.noise_per_m2 * distance_m**2)
@@ -143,14 +190,20 @@ def find(
     settings: Settings = DEFAULTS,
     chair_pitch_rad: float = 0.0,
     chair_roll_rad: float = 0.0,
+    offset_m: float = 0.0,
+    pts: tuple | None = None,
 ) -> Obstacle | None:
     """The nearest thing blocking the device's corridor in one depth image, or None. cam is the
     camera as mounted; chair_pitch_rad and chair_roll_rad the device's own pitch and roll (REP 103:
-    nose down, left side up are positive), as depth.read_ground takes the pitch."""
+    nose down, left side up are positive), as depth.read_ground takes the pitch. offset_m moves the
+    corridor to the left (positive) or right, as wide as the device: a way it could turn to. pts:
+    the image's points already worked out (points()), to read several corridors from one image."""
     st = settings
     half = st.device_width_m / 2.0 + st.margin_m
-    seen_by = tilted(cam, chair_pitch_rad) if chair_pitch_rad else cam
-    ahead, left, height, own = points(depth, seen_by, cam, chair_roll_rad)
+    if pts is None:
+        pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
+    ahead, left, height, own = pts
+    left = left - offset_m
     keep = (np.abs(left) <= half) & (ahead >= st.min_range_m) & (ahead < st.max_range_m)
     keep &= own >= st.body_m
     ahead, left, height = ahead[keep], left[keep], height[keep]

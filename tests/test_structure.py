@@ -248,3 +248,49 @@ def test_a_box_is_still_found_by_a_turned_or_leaning_chair(yaw, roll):
         image = syn.render_boxes(boxes, yaw_rad=math.radians(yaw), roll_rad=r)
         found = st.find(image, syn.CAMERA, chair_roll_rad=r)
         assert found is not None and found.label == "obstacle", (yaw, roll, box, found)
+
+
+def test_the_way_is_read_in_three_corridors_as_wide_as_the_chair():
+    """Which way is open (WayReport): a box ahead at 1.2 m, a wall 1.0 m off to the right, the left
+    clear. Each corridor gives the distance to what blocks it, inf when nothing does."""
+    boxes = [(1.2, 1.5, -0.3, 0.3, 0.0, 0.5), (1.0, 4.0, -2.0, -0.5, 0.0, 2.0)]
+    for image in frames(boxes, seeds=3):
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert left == math.inf, left
+        assert ahead == pytest.approx(1.2, abs=0.1)
+        assert right < 1.6, right
+    left, ahead, right = st.way(syn.render_boxes([]), syn.CAMERA, CHAIR)
+    assert (left, ahead, right) == (math.inf, math.inf, math.inf)
+
+
+def test_a_corridor_not_seen_is_not_called_open():
+    blank = np.full((syn.ROWS, syn.COLS), np.nan)
+    assert all(math.isnan(d) for d in st.way(blank, syn.CAMERA, CHAIR))
+    narrow = dp.Camera.from_fov(syn.COLS, syn.ROWS, math.radians(30.0), 1.0, 0.6)
+    image = syn.render_boxes([], narrow)
+    left, ahead, right = st.way(image, narrow, CHAIR)
+    assert math.isnan(left) and math.isnan(right) and ahead == math.inf
+
+
+def side_drop(cam=syn.CAMERA, edge_left=0.45, depth_m=1.0):
+    """A level floor whose left part, from edge_left to the left, is depth_m lower: a platform or
+    stairwell edge running beside the path."""
+    v = np.arange(syn.ROWS, dtype=np.float64)[:, None]
+    u = np.arange(syn.COLS, dtype=np.float64)[None, :]
+    yn, xn = (v - cam.cy) / cam.fy, (u - cam.cx) / cam.fx
+    c, s = math.cos(cam.pitch_rad), math.sin(cam.pitch_rad)
+    shape = (syn.ROWS, syn.COLS)
+    b, d = np.broadcast_to(-xn, shape), np.broadcast_to(yn * c + s, shape)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = np.where(d > 0, cam.height_m / d, np.inf)
+        t = np.where(t * b > edge_left, (cam.height_m + depth_m) / d, t)
+    return np.where(t < 8.0, t, np.inf)
+
+
+def test_a_drop_beside_the_path_is_never_called_open():
+    """Telling the user "Open to your left" towards a platform edge would walk them off it."""
+    noisy = [stereo_noise(side_drop(), np.random.default_rng(k)) for k in range(3)]
+    for image in [side_drop(), *noisy]:
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert math.isfinite(left) and left < 2.5, left
+        assert ahead == math.inf and right == math.inf, (ahead, right)

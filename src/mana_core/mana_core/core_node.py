@@ -18,7 +18,7 @@ from rclpy.time import Time
 
 from mana_core import decision as d
 from mana_core.baseline import BaselineController
-from mana_core.messages import Message, MessageQueue, direction
+from mana_core.messages import Message, MessageQueue, WayTeller, direction
 from mana_msgs.msg import (
     DriveRequest,
     GroundReport,
@@ -29,6 +29,7 @@ from mana_msgs.msg import (
     PresenceReport,
     UserCommand,
     UserMessage,
+    WayReport,
 )
 
 
@@ -69,6 +70,9 @@ class CoreNode(Node):
         self.create_subscription(LinkReport, "link", self.on_link, 10)
         self.create_subscription(PresenceReport, "presence", self.on_presence, 10)
         self.create_subscription(UserCommand, "user_command", self.on_command, 10)
+        # which way is open when the way ahead is blocked, from the 3D camera's three corridors
+        self.way = WayTeller()
+        self.create_subscription(WayReport, "way", self.on_way, 10)
         self.drive = self.create_publisher(DriveRequest, "drive_request", 10)
         self.message = self.create_publisher(UserMessage, "user_message", 10)
         self.create_timer(0.1, self.tick)
@@ -102,6 +106,17 @@ class CoreNode(Node):
         except ValueError:
             return self.ignore("obstacle report", m)
         self.core.on_obstacle(report)
+
+    def on_way(self, m: WayReport) -> None:
+        """Told as a notice through the same queue as the decisions; a stale or untrusted report,
+        or the baseline in place of the core, says nothing."""
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self.controller != "mana" or m.trust < 0.5 or now - self.measured(m) > 1.0:
+            return
+        lanes = (m.left_m, m.ahead_m, m.right_m)
+        left, ahead, right = (self.core.from_front_m(d.Source.DEPTH_CAMERA, x) for x in lanes)
+        if said := self.way.on_frame(left, ahead, right, now):
+            self.queue.push(said, now)
 
     def on_motion(self, m: MotionReport) -> None:
         self.core.on_motion(

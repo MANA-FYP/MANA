@@ -17,6 +17,7 @@
     lobby                          x   12.00  y    9.00  yaw  1.571  ground 0.630
     corridor                       x    2.00  y   15.50  yaw  0.000  ground 0.630
     before_glass_door              x   17.00  y   15.50  yaw  0.000  ground 0.630
+    before_planter                 x   25.90  y   -3.00  yaw  1.571  ground 0.120
     outside_dark_room              x    8.00  y    9.50  yaw  3.142  ground 0.630
     hall                           x   18.00  y   21.00  yaw  1.571  ground 0.630
     behind_building                x   18.00  y   31.00  yaw -1.571  ground 0.120
