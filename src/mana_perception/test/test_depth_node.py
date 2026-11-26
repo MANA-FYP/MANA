@@ -173,8 +173,10 @@ def test_on_tracks_the_ground_is_read_past_the_tracks_front_end(ros):
     assert node.ground_settings().min_range_m == node.settings.min_range_m
     node.on_drive(DriveRequest(mode=DriveRequest.TRACKS))
     assert node.ground_settings().min_range_m == pytest.approx(0.75)
-    node.on_drive(DriveRequest(mode=DriveRequest.WHEELS))
-    assert node.ground_settings().min_range_m == node.settings.min_range_m
+    node.on_drive(DriveRequest(mode=DriveRequest.WHEELS))  # the slides still move for a while
+    assert node.ground_settings().min_range_m == pytest.approx(0.75)
+    later = node.get_clock().now() + rclpy.duration.Duration(seconds=3.0)
+    assert node.ground_settings(later).min_range_m == node.settings.min_range_m
     node.destroy_node()
 
 
