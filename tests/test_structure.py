@@ -294,3 +294,13 @@ def test_a_drop_beside_the_path_is_never_called_open():
         left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
         assert math.isfinite(left) and left < 2.5, left
         assert ahead == math.inf and right == math.inf, (ahead, right)
+
+
+def test_someone_right_beside_the_chair_is_not_called_open():
+    """The chair's own tracks reach body_m ahead only in its own corridor: a person 0.4 to 0.6 m
+    ahead and 0.8 to 1.2 m to the right is in the right corridor, so it is not open (review)."""
+    boxes = [(1.2, 1.3, -W, W, 0.0, 2.0), (0.4, 0.6, -1.2, -0.8, 0.0, 1.7)]
+    for image in frames(boxes, seeds=3):
+        left, ahead, right = st.way(image, syn.CAMERA, CHAIR)
+        assert right < 1.0, right
+        assert ahead == pytest.approx(1.2, abs=0.1)

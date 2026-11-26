@@ -157,11 +157,11 @@ def way(
     pts = way_points(depth, cam, chair_pitch_rad, chair_roll_rad)
     ahead, left, height = pts[0], pts[1], pts[2]
     width = st.device_width_m + 2.0 * st.margin_m
-    near = max(st.min_range_m, st.body_m)
-    bins = max(1, math.ceil((open_m - near) / st.bin_m))
     cells = max(1, math.ceil(width / st.cell_m - 1e-9))
     out = []
     for offset in (width, 0.0, -width):
+        near = max(st.min_range_m, st.body_m) if offset == 0.0 else st.min_range_m
+        bins = max(1, math.ceil((open_m - near) / st.bin_m))
         found = find(depth, cam, st, chair_pitch_rad, chair_roll_rad, offset, pts)
         if found is not None:  # blocked: what stands there hides the floor behind it
             out.append(found.distance_m)
@@ -205,7 +205,8 @@ def find(
     ahead, left, height, own = pts
     left = left - offset_m
     keep = (np.abs(left) <= half) & (ahead >= st.min_range_m) & (ahead < st.max_range_m)
-    keep &= own >= st.body_m
+    if not offset_m:  # the device's own front (its tracks) is only in its own corridor: beside
+        keep &= own >= st.body_m  # it, someone near is still seen (review of #254)
     ahead, left, height = ahead[keep], left[keep], height[keep]
     cells = max(1, math.ceil(2 * half / st.cell_m - 1e-9))
     bins = np.floor((ahead - st.min_range_m) / st.bin_m).astype(int)
