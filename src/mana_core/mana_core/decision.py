@@ -174,6 +174,9 @@ class Limits:
     down_forget_s: float = 1.5  # a yes to stairs down lapses once they are out of sight this long
     down_drop_m: float = 0.6  # after that yes, a drop no deeper than this is those stairs (#52)
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
+    # and a slow-down this long: one camera report coming late now and then made "Possible step
+    # ahead, slowing down" and "Level ground" take turns several times a second (Gazebo)
+    slow_hold_s: float = 1.0
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
@@ -711,6 +714,18 @@ class DecisionCore:
             self.level_since is not None and self.now - self.level_since >= self.limits.level_hold_s
         )
 
+    def _slow_held(self) -> str | None:
+        """The slow-down's reason, or the last one for slow_hold_s after it was last seen. Holding
+        a slow-down only ever errs towards slower."""
+        reason = self._slow_reason()
+        last = getattr(self, "_slow_last", None)
+        if reason is not None:
+            self._slow_last = (reason, self.now)
+            return reason
+        if last is not None and 0.0 <= self.now - last[1] < self.limits.slow_hold_s:
+            return last[0]
+        return None
+
     def _slow_reason(self) -> str | None:
         lim = self.limits
         # at full speed's stop time: slowing down must not shrink the reach that asked for it
@@ -835,9 +850,9 @@ class DecisionCore:
                 ),
                 branch(
                     "slow",
-                    lambda: self._slow_reason() is not None,
+                    lambda: self._slow_held() is not None,
                     lambda: self._set(
-                        Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                        Mode.WHEELS, False, lim.slow, self._slow_held(), Priority.WARNING
                     ),
                 ),
                 branch(  # below every hazard: it has no distance, and it never stops
