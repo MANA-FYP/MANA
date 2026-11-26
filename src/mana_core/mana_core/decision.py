@@ -577,12 +577,16 @@ class DecisionCore:
         }
         lim = self.limits
         edge = lim.edge_m + self.mount.travel_m(self.moving_speed) + lim.release_m
+        # or those stairs were seen down within down_forget_s: at the top edge the camera looks
+        # over it, sees the level floor far below, and its stairs are gone just as the 3D camera
+        # reads the hidden risers as one drop; the chair stopped and went there by turns (Gazebo)
+        recent = self.now - self.down_seen_at <= lim.down_forget_s
         return [
             replace(r, ground=Ground.STAIRS_DOWN)
             if r.ground == Ground.DROP
             and r.step_height_m <= lim.down_drop_m
             and r.distance_m <= edge
-            and down - {SENSOR_OF.get(r.source, r.source)}
+            and (down - {SENSOR_OF.get(r.source, r.source)} or recent)
             else r
             for r in found
         ]

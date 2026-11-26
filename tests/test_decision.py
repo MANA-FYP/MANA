@@ -988,6 +988,18 @@ def test_going_down_after_a_yes_the_lidars_obstacle_is_the_steps_below():
     assert fed(c, reports, NOW + 0.3, motion=0.5).stop
 
 
+def test_at_the_top_edge_after_a_yes_a_drop_just_after_the_stairs_is_them():
+    """Standing at the top edge the camera looks over it and sees level floor far below; the 3D
+    camera reads the hidden risers as one drop. Just after the stairs were seen down, that drop is
+    them; long after, it is a drop again."""
+    c = said_yes_to_stairs_down()
+    edge = (ground(CLS, Ground.FLAT), GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert not fed(c, edge, NOW + 0.2).stop
+    late = NOW + 0.2 + LIM.down_forget_s + 0.5
+    edge = (ground(CLS, Ground.FLAT), GroundReport(late, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert fed(c, edge, late).stop
+
+
 def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
     c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
     assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"
