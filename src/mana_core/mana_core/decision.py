@@ -337,6 +337,7 @@ class DecisionCore:
         self.down_ok = False  # the user said yes to the stairs down in sight
         self.down_seen_at = -math.inf
         self.asked_at = -math.inf  # when the stairs-down question was last the decision
+        self._slow_last: tuple[str, float] | None = None  # the last slow-down, and when (_slow_held)
         self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
@@ -522,6 +523,7 @@ class DecisionCore:
             # the clock went back (a world reset, a bag played again): what was seen is gone
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
+            self._slow_last = None
         self._seen_at.update({name: now for name, s in seen.items() if s})
         if seen["stairs down"] and self._really_down():
             self.down_seen_at = now  # only a sensor's own stairs down keeps a yes alive
@@ -718,7 +720,7 @@ class DecisionCore:
         """The slow-down's reason, or the last one for slow_hold_s after it was last seen. Holding
         a slow-down only ever errs towards slower."""
         reason = self._slow_reason()
-        last = getattr(self, "_slow_last", None)
+        last = self._slow_last
         if reason is not None:
             self._slow_last = (reason, self.now)
             return reason
