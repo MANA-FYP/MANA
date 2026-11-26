@@ -33,13 +33,15 @@ Parameters:
                     the mounting height (#156); else the tilt is the mounting's alone
 """
 
+from dataclasses import replace
+
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 
-from mana_msgs.msg import GroundReport, MotionReport, ObstacleReport
+from mana_msgs.msg import DriveRequest, GroundReport, MotionReport, ObstacleReport
 from mana_perception import depth as dp
 from mana_perception import structure
 
@@ -68,6 +70,10 @@ class DepthNode(Node):
         # and its reports grew older than the core's 0.5 s, so the ground sensors went missing
         self.create_subscription(Image, "depth/image", self.on_image, 1)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
+        # on tracks the chair's own tracks lie on the ground ahead, out to body_m: the ground is
+        # read from there, or the tracks coming down read as a step at 0 m and stopped the chair
+        self.on_tracks = False
+        self.create_subscription(DriveRequest, "drive_request", self.on_drive, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
         self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
 
@@ -84,6 +90,15 @@ class DepthNode(Node):
         at = Time.from_msg(m.header.stamp) if stamped else self.get_clock().now()
         self.chair_pitch = (float(m.pitch_rad), at)
         self.chair_roll = float(m.roll_rad) if m.roll_rad == m.roll_rad else 0.0
+
+    def on_drive(self, m: DriveRequest) -> None:
+        self.on_tracks = m.mode == DriveRequest.TRACKS
+
+    def ground_settings(self) -> dp.Settings:
+        """The ground reader's settings now: on tracks it starts past the tracks' front end."""
+        if not self.on_tracks or self.structure.body_m <= self.settings.min_range_m:
+            return self.settings
+        return replace(self.settings, min_range_m=self.structure.body_m)
 
     def pitch_now(self, now: Time, image=None) -> float:
         """The chair's pitch if a recent motion report gave it. Else, with the IMU lost, from the
@@ -122,7 +137,7 @@ class DepthNode(Node):
             return
         self.last = now
         pitch = self.pitch_now(now, image)
-        r = dp.read_ground(image, self.cam, self.settings, pitch)
+        r = dp.read_ground(image, self.cam, self.ground_settings(), pitch)
         msg = GroundReport(
             trust=0.0 if r.ground == dp.UNKNOWN else self.trust,
             source=GroundReport.DEPTH_CAMERA,

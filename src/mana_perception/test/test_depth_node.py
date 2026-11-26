@@ -161,3 +161,18 @@ def test_the_chairs_roll_comes_with_its_pitch(ros):
     node.on_motion(MotionReport(trust=0.1, pitch_rad=-0.4, roll_rad=0.035))
     assert node.roll_now(node.get_clock().now()) == 0.0
     node.destroy_node()
+
+
+def test_on_tracks_the_ground_is_read_past_the_tracks_front_end(ros):
+    """The tracks lie on the ground ahead of the 3D camera out to body_m: read from 0.3 m, the
+    tracks coming down were a step at 0 m (Gazebo). On wheels the reader starts as before."""
+    from mana_msgs.msg import DriveRequest
+
+    node = DepthNode()
+    node.structure = node.structure.__class__(body_m=0.75)  # as world.launch.py sets it
+    assert node.ground_settings().min_range_m == node.settings.min_range_m
+    node.on_drive(DriveRequest(mode=DriveRequest.TRACKS))
+    assert node.ground_settings().min_range_m == pytest.approx(0.75)
+    node.on_drive(DriveRequest(mode=DriveRequest.WHEELS))
+    assert node.ground_settings().min_range_m == node.settings.min_range_m
+    node.destroy_node()
