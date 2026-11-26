@@ -337,7 +337,7 @@ class DecisionCore:
         self.down_ok = False  # the user said yes to the stairs down in sight
         self.down_seen_at = -math.inf
         self.asked_at = -math.inf  # when the stairs-down question was last the decision
-        self._slow_last: tuple[str, float] | None = None  # the last slow-down, and when (_slow_held)
+        self._slow_last: tuple[str, float] | None = None  # the last slow-down and when
         self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
