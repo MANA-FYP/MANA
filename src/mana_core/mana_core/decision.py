@@ -221,6 +221,13 @@ class Mount:
     # the phone's tilt), and may already be there. False: it only slows, as on the chair, whose
     # 3D camera measures it (readiness review, 25 November).
     unknown_drop_stops: bool = False
+    # a person walking is not slowed by a speed limit (it is advice), so the core cannot shrink
+    # their stop by slowing them: this far is added to a drop's stop distance, from the frame to
+    # the person standing still. Blind cane users walk about 0.9 m/s; from a spoken stop to
+    # standing still takes about 1.1 s (gait termination, PMC9953996), so about 1.0 m/s x 1.3 s
+    # to hear and react, plus 0.8 m to stop: 2.1 m (docs/results.md, 26 November). Drops only (a
+    # fall): an obstacle the cane meets first. 0: none, as on a chair whose limit slows it.
+    walker_reach_m: float = 0.0
 
     def travel_m(self, speed_limit: float) -> float:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
@@ -508,7 +515,9 @@ class DecisionCore:
         past = {name: lim.release_m if self._held(name) else 0.0 for name in STOPS}
         reach = self.mount.travel_m(self.moving_speed)  # the stop distances hold at standstill
         seen = {
-            "drop": self._drop_at_edge(lim.edge_m + reach + past["drop"]),
+            "drop": self._drop_at_edge(
+                lim.edge_m + reach + self.mount.walker_reach_m + past["drop"]
+            ),
             "obstacle": self._obstacle_within(
                 lim.obstacle_stop_m + reach + past["obstacle"], self.moving_speed
             ),
