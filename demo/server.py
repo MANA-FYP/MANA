@@ -76,6 +76,11 @@ warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)  # plain string
 
 WEB = Path(__file__).parent / "web"
 TICK_S = 0.1
+# A page that cannot take a message within this long is dropped, and its page connects again. On
+# 26 Nov, after the lab PC's network dropped, a dashboard left with a dead connection held 2.5 MB
+# unsent; each send to it waited, and as the decisions are ticked in the same loop, the phone got
+# no decision and no stream for everyone, until a restart.
+SEND_TIMEOUT_S = 0.5
 BUTTONS = {
     "stop": Command.STOP,
     "go": Command.GO,
@@ -1064,6 +1069,23 @@ def floor_step(app: web.Application, snap: dict) -> dict:
     return tr.view(now)
 
 
+async def send_all(clients: set, message: dict) -> None:
+    """Send one message to every page in clients at once; a page that cannot take it within
+    SEND_TIMEOUT_S is dropped and closed, so it never holds up the others or the next tick."""
+
+    async def one(ws) -> None:
+        try:
+            await asyncio.wait_for(ws.send_json(message), SEND_TIMEOUT_S)
+        except (ConnectionError, RuntimeError):
+            pass
+        except TimeoutError:
+            clients.discard(ws)
+            closing = asyncio.ensure_future(asyncio.wait_for(ws.close(), SEND_TIMEOUT_S))
+            closing.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+    await asyncio.gather(*(one(ws) for ws in list(clients)))
+
+
 async def broadcast(app: web.Application) -> None:
     mw: Middleware = app["mw"]
     snap = mw.tick()
@@ -1080,21 +1102,14 @@ async def broadcast(app: web.Application) -> None:
     snap["frame"] = {"seq": app["frame"]["seq"], "w": app["frame"]["w"], "h": app["frame"]["h"],
                      "boxes": app["frame"]["boxes"]}  # fmt: skip
     snap["depth"] = app["depth"].get("view")
-    for ws in list(app["dashboards"]):
-        with contextlib.suppress(ConnectionError, RuntimeError):
-            await ws.send_json({"type": "snapshot", **snap})
+    await send_all(app["dashboards"], {"type": "snapshot", **snap})
     if app["caregivers"]:
-        care = caregiver_view(app, snap)
-        for ws in list(app["caregivers"]):
-            with contextlib.suppress(ConnectionError, RuntimeError):
-                await ws.send_json(care)
+        await send_all(app["caregivers"], caregiver_view(app, snap))
     state = {"type": "state", "sensors": snap["sensors"], "decision": snap["decision"],
              "link": snap["link"], "position": snap["position"],
              "manual": snap["manual"], "models": snap["models"],
              "heard": snap["heard"]}  # fmt: skip
-    for ws in list(app["phones"]):
-        with contextlib.suppress(ConnectionError, RuntimeError):
-            await ws.send_json(state)
+    await send_all(app["phones"], state)
 
 
 async def loop(app: web.Application) -> None:
