@@ -592,6 +592,15 @@ class DecisionCore:
             for r in self._grounds()
         )
 
+    def _drop_reason(self) -> str:
+        """Stairs down that stop the device are called stairs, not a drop, when no sensor sees a
+        drop: in Gazebo, the 3D camera alone read the campus flight as stairs down, step 0.17 m,
+        and the user heard "Drop ahead" at the top of a staircase they could see."""
+        kinds = {r.ground for r in self.ground.values() if self._ok(r)}  # as the sensors said
+        if Ground.STAIRS_DOWN in kinds and Ground.DROP not in kinds:
+            return "Stairs down ahead, stopping"
+        return "Drop ahead, stopping"
+
     def _lone_step_at_edge(self, edge_m: float | None = None) -> bool:
         """A step up or a curb measured within edge_m that no second sensor confirms, as when the
         camera cannot be trusted in the dark. A change of mode needs two sensors, but a stop needs
@@ -772,7 +781,7 @@ class DecisionCore:
                 branch(
                     "drop",
                     lambda: self._held("drop"),
-                    lambda: self._stop("Drop ahead, stopping"),
+                    lambda: self._stop(self._drop_reason()),
                 ),
                 branch(
                     "obstacle",

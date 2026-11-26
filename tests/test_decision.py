@@ -1144,7 +1144,9 @@ def test_stairs_down_seen_by_one_sensor_stop_at_the_edge_like_a_drop():
     # StairNet has no stairs down, so often only the 3D camera sees them: a fall needs no second
     # opinion, so they stop at the edge instead of rolling on slowly
     d = core(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
-    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+    assert (d.stop, d.reason) == (True, "Stairs down ahead, stopping")  # what the user can see
+    d = core(ground(CAM, Ground.DROP, 0.4), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)).decision
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")  # a drop seen: told as one
 
 
 @pytest.mark.parametrize("distance", [0.4, 0.0])
@@ -1174,7 +1176,7 @@ def test_after_a_yes_stairs_down_seen_by_one_sensor_at_the_edge_still_stop():
     c = core(*stairs_down())
     c.on_command(Command.YES, 0.9)
     d = fed(c, (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.4)), NOW + 0.1)
-    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+    assert (d.stop, d.reason) == (True, "Stairs down ahead, stopping")
 
 
 # ---- a step that only one sensor sees (#103): stop at the edge, as in the dark
@@ -1330,7 +1332,8 @@ def test_on_foot_a_drop_or_stairs_down_with_no_distance_stops_on_the_chair_it_sl
         walker.on_ground(ground(CAM, kind))  # no distance: the phone's tilt was not known
         walker.on_motion(level())
         d = walker.tick(NOW)
-        assert d.stop and d.reason == "Drop ahead, stopping", kind
+        said = "Drop ahead, stopping" if kind == Ground.DROP else "Stairs down ahead, stopping"
+        assert d.stop and d.reason == said, kind
         chair = core(ground(CAM, kind), ground(DEPTH, Ground.FLAT))
         assert not chair.decision.stop, kind  # its 3D camera measures it: no distance, a slow-down
 

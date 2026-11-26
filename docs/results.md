@@ -1551,3 +1551,32 @@ the check still to make.
 python3 tools/train_glass_seg.py --root datasets/gsds --clear datasets/ade_clear --arch pretrained --out runs/glass_seg.pt
 python3 tools/eval_glass_in_path.py --gsds datasets/gsds --ade datasets/ADEChallengeData2016 runs/glass_seg.pt
 ```
+
+## Down a 12-riser flight in Gazebo, after a yes (26 November 2026)
+
+The campus's flight from the upper floor (12 risers of 0.18 m, 2.16 m in all) is longer than the
+3-riser flight that going down after a yes was tuned on (#52, #173). The campus simulation has one
+ground sensor, the 3D camera, so stairs down are never confirmed there and the chair stops at the
+top ("Stairs down ahead, stopping", front wheels about 0.6 m from the edge). To test the two-sensor
+path, the run's probe also played a **perfect camera classifier from the chair's true position**
+(a test oracle, not a model): stairs down within 3 m of the edge and on the flight, level ground
+otherwise.
+
+- The chair stopped with its lifted tracks' tip 0.73 m short of the edge and asked "Stairs down
+  ahead. Say yes to go down on tracks".
+- After a yes it went down all 12 risers on tracks (pitch up to 33 degrees) to the plaza, and back
+  to wheels on level ground.
+- It stopped twice on the way, each for a moment: at the top edge ("Drop ahead, stopping"; the
+  3D camera saw the whole 2.16 m to the plaza, deeper than `down_drop_m`, 0.6 m), and near the
+  foot, where the oracle still said stairs while the 3D camera saw level ground (one sensor's
+  stairs down stop). The second is the oracle's doing; the first is the core's and would repeat
+  on a real long flight.
+
+A candidate for that real second sensor: the live demo's stairs segmenter (`stairs_plain.pt`,
+trained on SANPO's real walks), run on the chair camera's 16 frames from the climb up the same
+flight, called stairs on 5 of the 6 frames at the foot and on the flight (confidence 0.67 to 0.75)
+and level ground on all 10 frames on the upper floor (0.94 to 0.98). The ROS classifier node runs
+the older StairNet classifier, so it would need the segmenter (and torch in the simulation image).
+
+Still open: that real second ground sensor on the chair, to replace the oracle, and the stop at
+the top edge of a long flight.
