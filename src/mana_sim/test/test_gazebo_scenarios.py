@@ -175,3 +175,14 @@ def test_the_camera_is_trusted_less_as_the_light_falls():
     assert gs.camera_trust(200.0) == pytest.approx(gs.CAMERA_TRUST)
     assert gs.camera_trust(6.0) == pytest.approx(0.09)
     assert gs.camera_trust(0.0) == 0.0
+
+
+def test_a_run_begins_once_the_core_has_heard_its_ground_sensors():
+    # the core's start-up, as it says it, does not begin the run (#202)
+    waiting = "Waiting for the ground sensors (1 of 2 up: the camera), slowing down"
+    assert not gs.run_begins("Ground sensors not available, slowing down", 0.0)
+    assert not gs.run_begins(waiting, 1.1)
+    assert gs.run_begins("Level ground", 0.0)
+    assert gs.run_begins("Stairs ahead, changing to tracks", 0.3)  # a hazard is not start-up
+    # a sensor that never comes: the run begins anyway, and is scored on it
+    assert gs.run_begins(waiting, gs.START_UP_LIMIT_S)

@@ -110,8 +110,9 @@ the traces of `ros2 run mana_core evaluate --world gazebo`.
 
 - A fresh simulation for each scenario: the route's world with the chair at the start of the run and
   the objects of the scenario (a box for the person). The chair settles first; the core is started
-  then, with `config/core.yaml`, and the run begins with its first drive request (before every
-  sensor has reported: a run can start with "Ground sensors not available, slowing down").
+  then, with `config/core.yaml`, and the run begins with its first drive request once it has
+  heard its ground sensors (not "Ground sensors not available" or "Waiting for the ground
+  sensors": the 3D camera's first report can come a second late, #202), or after 5 s anyway.
 - The real sensors and nodes: the 3D camera (`depth_node`), the lidar, the IMU, the position and
   link nodes, the core. **The camera's ground classifier (#38) is not trained yet**, so a stand-in
   (`scenario_runner`) says what the scripted camera says (it names the ground, no distance) and is

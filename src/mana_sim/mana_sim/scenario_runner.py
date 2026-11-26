@@ -5,8 +5,9 @@
 
 The simulation (world.launch.py with the world of the run) must be running. The runner waits for
 the chair to settle after it is put into the world, says so by writing the --ready file, and the
-core is started only then; the run begins with the core's first drive request, as the scripted
-runs begin with the first tick. The runner is the user and the test bench for the length of the run:
+core is started only then; the run begins with the core's first drive request once it has heard
+its ground sensors (gazebo_scenarios.run_begins), as the scripted runs begin with the first tick.
+The runner is the user and the test bench for the length of the run:
 - it says the commands of the scenario (UserCommand) at their times,
 - it switches the faults of the scenario (SetFault) at their times or places,
 - it stands in for the camera's ground classifier (GroundReport, source CAMERA), because the real
@@ -54,6 +55,7 @@ class ScenarioRunner(Node):
         self.request: DriveRequest | None = None
         self.mean_pixel = gs.LIT_MEAN
         self.t0: float | None = None
+        self.answered_at: float | None = None  # the core's first drive request
         self.started_wall = self.now_s()
         self.finished = False
         self.failed = False
@@ -114,7 +116,10 @@ class ScenarioRunner(Node):
             return
         if self.t0 is None:
             if self.request is not None:
-                self.t0 = now  # the run begins with the core's first drive request
+                if self.answered_at is None:
+                    self.answered_at = now
+                if gs.run_begins(self.request.reason, now - self.answered_at):
+                    self.t0 = now  # the core has heard its ground sensors: the run begins
             elif now - self.ready_at > READY_TIMEOUT_S:
                 self.finish("the core did not answer", failed=True)
             return

@@ -15,7 +15,7 @@ import json
 import math
 from dataclasses import dataclass, field
 
-from mana_core.decision import Command, Ground, Mode, Priority, Source
+from mana_core.decision import NO_GROUND, WAITING, Command, Ground, Mode, Priority, Source
 from mana_core.messages import Message as Heard
 from mana_core.scenarios import Message, Sample, Say, Scenario, Trace
 from mana_core.world import Fault, Obstacle, Route, Stretch
@@ -283,6 +283,22 @@ RUNS = {
         ),
     )
 }
+
+
+# ---- the start of a run
+
+START_UP_LIMIT_S = 5.0  # sim time: a core still waiting this long after it answered is scored
+
+
+def run_begins(reason: str, waited_s: float) -> bool:
+    """Whether a drive request of the core, waited_s after its first, begins the run. Started, the
+    core hears its ground sensors one by one ("Ground sensors not available", then "Waiting for
+    the ground sensors"), and the first report of one of them can come a second late (#202): a
+    run begun then was scored on the start-up, not on the scenario. The scripted world has no
+    start-up, so the run begins with the first request that is not one of it. A sensor that never
+    comes does not hold the run back for good: after START_UP_LIMIT_S the run begins anyway."""
+    starting = reason == NO_GROUND or reason.startswith(WAITING)
+    return not starting or waited_s >= START_UP_LIMIT_S
 
 
 # ---- mishaps
