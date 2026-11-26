@@ -247,7 +247,9 @@ def check(scenario: Scenario, trace: Trace) -> list[tuple[Mark, bool, str]]:
 
 # ---- the scenarios
 
-STAIRS = Stretch(6.0, 8.0, Ground.STAIRS_UP, pitch_rad=0.55, height_m=0.17)
+# REP 103, as the IMU's MotionReport: nose up going up stairs is a negative pitch, nose down going
+# down them a positive one (review of #262: these were the other way round)
+STAIRS = Stretch(6.0, 8.0, Ground.STAIRS_UP, pitch_rad=-0.55, height_m=0.17)
 DEPTH_ONLY = frozenset({Source.DEPTH_CAMERA})  # what only the 3D camera sees by its shape
 DROP = Stretch(8.0, 9.0, Ground.DROP)
 
@@ -302,7 +304,7 @@ SCENARIOS = {
             "Stairs down",
             "Both cameras see stairs going down. MANA stops at the top and asks; once the user "
             "says yes it goes down on tracks, and back to wheels at the bottom.",
-            Route(12.0, (Stretch(6.0, 8.0, Ground.STAIRS_DOWN, pitch_rad=-0.55, height_m=0.17),)),
+            Route(12.0, (Stretch(6.0, 8.0, Ground.STAIRS_DOWN, pitch_rad=0.55, height_m=0.17),)),
             60.0,
             says=(Say(12.0, Command.YES),),
             marks=(

@@ -1520,6 +1520,34 @@ python3 tools/eval_door_signs.py --ann TextOCR_0.1_train.json TextOCR_0.1_val.js
 python3 tools/door_sign_sizes.py --root datasets/gsds --hard
 ```
 
+## Down the campus flight with the chair's own two ground sensors (26 November 2026)
+
+The chair's camera now runs the phone demo's stairs segmentation model (`stairs_plain.pt`, trained
+on SANPO's real walks) as its ground classifier (`classifier_node`, `segmenter` parameter;
+`world.launch.py stairs_weights:=...`), beside the 3D camera. The simulation image gets CPU torch
+for it. On the chair camera's frames from the climb, the model called stairs on 5 of the 6 frames
+at the foot and on the flight, and level ground on all 10 on the upper floor.
+
+Driving from the upper floor to the 12-riser flight, the user answering the question when it
+comes, it took these changes to reach the plaza:
+
+| Seen in Gazebo | Change |
+|---|---|
+| The classifier says "stairs" with no way up or down, so after the yes its stairs did not count as stairs down, and the chair stopped on the flight | after a yes, the classifier's stairs are those stairs down |
+| Past the top edge the 3D camera read four hidden risers as one 0.69 m drop | `down_drop_m` 0.6 to 0.8 |
+| At the top edge the camera looks over it at the floor below and says level, so the drop stopped the chair, by turns | after a yes, a drop up to `down_drop_m` just after the stairs were seen down (`down_forget_s`) is them, unless a sensor sees a curb (a ledge); one sensor's own stairs down keeps the yes |
+| Two-thirds of the way down the camera sees the level floor at the foot; the 3D camera's stairs down alone stopped the chair on the stairs | after a yes, pitched nose down on the flight, one sensor's stairs down do not stop it; a drop still does |
+| The lidar, pitched down, meets the steps below | going down after a yes, the lidar's obstacle is the steps |
+| The classifier's reports came older than the core's 0.5 s and the question often never came | the classifier keeps only the newest frame (and runs on 2 CPU threads) |
+
+Six runs after the last change: in 5 the chair asked about 1.6 m before the edge (front wheels
+1.1 m), went down all 12 risers on tracks and back onto its wheels on the plaza. In 2 of those it
+stopped and went several times in the last metre before the edge (on tracks, the 3D camera now and
+then sees the whole 2.16 m flight as one drop, which still stops it: a deep drop right after a yes
+may be a ledge beside the stairs). In 1 it stopped at the top edge for good. All of it in
+simulation, with a model trained on real photos; nothing on a real chair yet.
+
+
 ## Glass walls and doors, found pixel by pixel
 
 A 3D camera's light mostly passes through glass, so a glass wall or a closed glass door can read

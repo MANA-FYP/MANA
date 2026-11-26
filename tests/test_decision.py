@@ -956,7 +956,7 @@ def test_the_next_stairs_down_are_asked_again_once_level_at_the_bottom():
     c = core(*stairs_down())
     c.on_command(Command.YES, 0.9)
     flat = (ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT))
-    assert fed(c, stairs_down(), NOW + 0.1, motion=-0.4).mode == Mode.TRACKS  # going down
+    assert fed(c, stairs_down(), NOW + 0.1, motion=0.4).mode == Mode.TRACKS  # going down
     fed(c, flat, NOW + 1.0)  # at the bottom, level
     assert fed(c, flat, NOW + 1.0 + LIM.level_hold_s).reason == "Level ground"
     assert fed(c, stairs_down(), NOW + 4.0).reason == ASK_DOWN
@@ -976,6 +976,102 @@ def test_after_the_yes_the_floor_at_the_foot_of_the_stairs_is_not_a_drop():
         c.on_ground(r)
     d = c.tick(NOW + 0.2)
     assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
+
+
+@pytest.mark.parametrize("height", [0.52, 0.69])
+def test_after_the_yes_a_drop_just_after_the_stairs_were_seen_down_is_them(height):
+    """Past the top edge the 3D camera reads the hidden risers as one drop: 0.69 m for four on the
+    campus's 12-riser flight (Gazebo). Just after a sensor saw the stairs down, it is them."""
+    c = said_yes_to_stairs_down()
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CLS, Ground.STAIRS_UP))
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, CAM, Ground.FLAT))  # the camera's own reading gone
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=height))
+    d = c.tick(NOW + 0.2)
+    assert (d.stop, d.mode, d.reason) == (False, Mode.TRACKS, "Going down the stairs on tracks")
+
+
+@pytest.mark.parametrize("height", [0.5, 0.65, 0.8])
+def test_after_the_yes_the_classifiers_stairs_never_vouch_for_a_drop(height):
+    """A real 0.5 to 0.8 m drop, with only the classifier's stairs and the 3D camera's drop once
+    the stairs down were last seen too long ago: it stops (review of #262)."""
+    c = said_yes_to_stairs_down()
+    for k in range(30):  # 3 s, past down_forget_s, the classifier seeing stairs all along
+        at = NOW + 0.2 + k / 10
+        drop = GroundReport(at, 0.9, DEPTH, Ground.DROP, 0.0, height)
+        d = fed(c, (ground(CLS, Ground.STAIRS_UP), ground(CAM, Ground.FLAT), drop), at)
+    assert (d.stop, d.reason) == (True, "Drop ahead, stopping")
+
+
+def test_after_the_yes_stairs_seen_down_further_back_than_down_recent_m_do_not_vouch():
+    """The memory of the stairs down is bounded by the distance travelled too (review of #262)."""
+    c = DecisionCore(mount=Mount(top_mps=1.0))
+    for r in stairs_down():
+        c.on_ground(r)
+    c.on_motion(level())
+    c.tick(NOW)
+    c.on_command(Command.YES, 0.9)
+    fed(c, stairs_down(), NOW + 0.1)
+    c.travelled_m = c.down_really_m + LIM.down_recent_m + 0.1  # gone on, 1.1 m in 0.2 s
+    drop = GroundReport(NOW + 0.3, 0.9, DEPTH, Ground.DROP, 0.0, 0.6)
+    assert fed(c, (ground(CLS, Ground.STAIRS_UP), ground(CAM, Ground.FLAT), drop), NOW + 0.3).stop
+
+
+def test_on_the_flight_after_a_yes_one_sensors_stairs_down_do_not_stop_the_chair():
+    """Two-thirds of the way down, the camera sees the level floor at the foot of the flight; the
+    3D camera's stairs down alone are the flight the chair is on (Gazebo). Level, they stop it."""
+    c = said_yes_to_stairs_down()
+    on_flight = (ground(CLS, Ground.FLAT), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    d = fed(c, on_flight, NOW + 0.2, motion=0.45)  # pitched nose down on the stairs
+    assert (d.stop, d.mode) == (False, Mode.TRACKS)
+    c = said_yes_to_stairs_down()
+    c.on_ground(GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, step_height_m=1.0))
+    c.on_motion(MotionReport(NOW + 0.2, 0.9, pitch_rad=0.45))
+    assert c.tick(NOW + 0.2).stop  # a deep drop still stops, on the flight too
+
+
+def test_going_down_after_a_yes_the_lidars_obstacle_is_the_steps_below():
+    """Pitched nose down on the flight, the lidar's plane meets the steps below: it stopped the
+    chair on the campus's flight (Gazebo). The 3D camera's obstacle still stops it."""
+    c = said_yes_to_stairs_down()
+    c.mount = Mount(lidar_height_m=0.3)  # at 0.5 rad, its plane meets the ground 0.55 m ahead
+    reports = (ground(CLS, Ground.STAIRS_UP), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    c.on_obstacle(ObstacleReport(NOW + 0.2, 0.9, Source.LIDAR, 0.9))
+    assert not fed(c, reports, NOW + 0.2, motion=0.5).stop
+    c.on_obstacle(ObstacleReport(NOW + 0.3, 0.9, Source.DEPTH_CAMERA, 0.6, "person"))
+    assert fed(c, reports, NOW + 0.3, motion=0.5).stop
+
+
+def test_at_the_top_edge_after_a_yes_a_drop_just_after_the_stairs_is_them():
+    """Standing at the top edge the camera looks over it and sees level floor far below; the 3D
+    camera reads the hidden risers as one drop. Just after the stairs were seen down, that drop is
+    them; long after, it is a drop again."""
+    c = said_yes_to_stairs_down()
+    edge = (ground(CLS, Ground.FLAT), GroundReport(NOW + 0.2, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert not fed(c, edge, NOW + 0.2).stop
+    late = NOW + 0.2 + LIM.down_forget_s + 0.5
+    edge = (ground(CLS, Ground.FLAT), GroundReport(late, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert fed(c, edge, late).stop
+
+
+def test_after_a_yes_the_classifiers_stairs_keep_the_yes_but_not_the_drop():
+    """At the top edge the 3D camera read the hidden risers as a 0.35 m drop for seconds. The
+    classifier still seeing the stairs keeps the yes, so it is not asked again, but a drop it
+    alone sees stops the chair (review of #262); the 3D camera's stairs down go on down."""
+    c = said_yes_to_stairs_down()
+    for k in range(40):  # 4 s, longer than down_forget_s
+        at = NOW + 0.2 + k / 10
+        edge = (ground(CLS, Ground.STAIRS_UP), GroundReport(at, 0.9, DEPTH, Ground.DROP, 0.0, 0.35))
+        d = fed(c, edge, at)
+    assert c.down_ok and (d.stop, d.reason) == (True, "Drop ahead, stopping")
+    steps = (ground(CLS, Ground.STAIRS_UP), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    for k in range(10):  # the drop's stop holds hold_s
+        d = fed(c, steps, NOW + 4.2 + k / 10)
+    assert (d.stop, d.mode) == (False, Mode.TRACKS)
+
+
+def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
+    c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
+    assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"
 
 
 @pytest.mark.parametrize("height", [1.0, math.nan], ids=["deep", "unknown"])
@@ -1419,3 +1515,33 @@ def test_a_lidar_obstacle_nearer_than_the_step_still_stops_and_without_stairs_to
     assert near.decision.reason == "Obstacle ahead, stopping"  # 1.4 m: well before the stairs
     flat = mounted(ground(CAM, Ground.FLAT), ground(DEPTH, Ground.FLAT), obstacle(1.4))
     assert flat.decision.reason == "Obstacle ahead, stopping"
+
+
+@pytest.mark.parametrize("height", [0.0, 0.3])
+def test_going_down_a_lidar_obstacle_nearer_than_its_plane_meets_the_ground_still_stops(height):
+    """The lidar is taken for the steps only from where its plane meets the ground: 0.3 m up,
+    pitched 0.5 rad, 0.55 m ahead. A person 0.2 m ahead is above the steps, and stops the chair.
+    With the lidar's height unknown (0), it is never taken for the steps (review of #262)."""
+    c = said_yes_to_stairs_down()
+    c.mount = Mount(lidar_height_m=height)
+    reports = (ground(CLS, Ground.STAIRS_UP), ground(DEPTH, Ground.STAIRS_DOWN, 0.0))
+    c.on_obstacle(ObstacleReport(NOW + 0.2, 0.9, Source.LIDAR, 0.2 if height else 0.5))
+    assert fed(c, reports, NOW + 0.2, motion=0.5).stop
+
+
+def test_a_second_flight_after_a_level_landing_is_asked_again():
+    """Down one flight after a yes, then level on a landing for level_hold_s, with the next flight
+    down in sight all along: the yes ends, and the next flight is asked (review of #262)."""
+    c = said_yes_to_stairs_down()
+    assert fed(c, stairs_down(0.0), NOW + 0.2, motion=0.4).mode == Mode.TRACKS  # going down
+    for k in range(int(LIM.level_hold_s * 10) + 2):  # the landing, the next flight in view
+        d = fed(c, stairs_down(), NOW + 0.3 + k / 10)
+    assert not c.down_ok and (d.stop, d.reason) == (True, ASK_DOWN)
+
+
+def test_level_at_the_top_after_a_yes_does_not_end_it():
+    """Before going down, the chair is level at the top for as long as it takes: the yes holds."""
+    c = said_yes_to_stairs_down()
+    for k in range(int(LIM.level_hold_s * 10) + 5):
+        d = fed(c, stairs_down(), NOW + 0.2 + k / 10)
+    assert c.down_ok and d.mode == Mode.TRACKS and d.reason == "Going down the stairs on tracks"

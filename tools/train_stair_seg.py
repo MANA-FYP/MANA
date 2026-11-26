@@ -36,67 +36,11 @@ import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "mana_perception"))
+from mana_perception.stair_seg import Pretrained, UNet, conv  # noqa: E402, F401 (re-exported)
+
 STAIR_ID = 15  # SANPO 'stairs' class, stored in the mask's red channel (see sanpo_to_yolo.py)
 IMG = 256  # frames are resized to this square for training
-
-
-def conv(i: int, o: int) -> nn.Sequential:
-    return nn.Sequential(
-        nn.Conv2d(i, o, 3, padding=1),
-        nn.BatchNorm2d(o),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(o, o, 3, padding=1),
-        nn.BatchNorm2d(o),
-        nn.ReLU(inplace=True),
-    )
-
-
-class UNet(nn.Module):
-    """A small U-Net that outputs one stair/not-stair logit per pixel."""
-
-    def __init__(self, in_ch: int = 3):
-        super().__init__()
-        self.e1 = conv(in_ch, 32)
-        self.e2 = conv(32, 64)
-        self.e3 = conv(64, 128)
-        self.b = conv(128, 256)
-        self.u3 = nn.ConvTranspose2d(256, 128, 2, 2)
-        self.d3 = conv(256, 128)
-        self.u2 = nn.ConvTranspose2d(128, 64, 2, 2)
-        self.d2 = conv(128, 64)
-        self.u1 = nn.ConvTranspose2d(64, 32, 2, 2)
-        self.d1 = conv(64, 32)
-        self.out = nn.Conv2d(32, 1, 1)
-        self.p = nn.MaxPool2d(2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        e1 = self.e1(x)
-        e2 = self.e2(self.p(e1))
-        e3 = self.e3(self.p(e2))
-        b = self.b(self.p(e3))
-        d = self.d3(torch.cat([self.u3(b), e3], 1))
-        d = self.d2(torch.cat([self.u2(d), e2], 1))
-        d = self.d1(torch.cat([self.u1(d), e1], 1))
-        return self.out(d)
-
-
-class Pretrained(nn.Module):
-    """torchvision's LR-ASPP on a MobileNetV3-Large backbone pretrained on ImageNet (BSD-3), with
-    one stair logit per pixel: a backbone that has seen a million photos, against the U-Net's
-    from-scratch features, for frames from walks it never saw. RGB only."""
-
-    def __init__(self, pretrained: bool = True):
-        super().__init__()
-        from torchvision.models import MobileNet_V3_Large_Weights
-        from torchvision.models.segmentation import lraspp_mobilenet_v3_large
-
-        weights = MobileNet_V3_Large_Weights.IMAGENET1K_V1 if pretrained else None
-        self.net = lraspp_mobilenet_v3_large(weights_backbone=weights, num_classes=1)
-        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
-        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net((x - self.mean) / self.std)["out"]
 
 
 def walk_of(frame: Path) -> str:
