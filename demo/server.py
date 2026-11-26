@@ -875,6 +875,9 @@ def depth_step(app: web.Application, jpeg: bytes, taken: float | None = None) ->
         mw.on_obstacle("something", seen.ahead_m, 0.8, 0.0, now, source=Source.CAMERA)
     if seen.cam is not None and not stairs:  # which way is open, when the way ahead is blocked
         left, _, right = dz.ahead_by_side(seen.depth, seen.cam)
+        # a side whose floor drops away is never open (NaN: not free), whatever stands there
+        left = left if dz.floor_level(seen.depth, seen.cam, 1 / 6) else math.nan
+        right = right if dz.floor_level(seen.depth, seen.cam, 5 / 6) else math.nan
         mw.on_way(left, seen.ahead_m, right, now)
     d = app["depth"]
     d.update(seq=d["seq"] + 1, jpeg=dz.colour(seen.depth), seen=seen, t=now, raw=image)
