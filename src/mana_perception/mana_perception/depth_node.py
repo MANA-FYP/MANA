@@ -64,7 +64,9 @@ class DepthNode(Node):
         self.last: Time | None = None
         self.warned: set[str] = set()
         self.create_subscription(CameraInfo, "depth/camera_info", self.on_info, 10)
-        self.create_subscription(Image, "depth/image", self.on_image, 10)
+        # only the newest frame: with the camera's classifier beside it in Gazebo, frames waited
+        # and its reports grew older than the core's 0.5 s, so the ground sensors went missing
+        self.create_subscription(Image, "depth/image", self.on_image, 1)
         self.create_subscription(MotionReport, "motion", self.on_motion, 10)
         self.ground = self.create_publisher(GroundReport, "ground", 10)
         self.obstacle = self.create_publisher(ObstacleReport, "obstacle", 10)
