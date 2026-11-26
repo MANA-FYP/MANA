@@ -1000,6 +1000,17 @@ def test_at_the_top_edge_after_a_yes_a_drop_just_after_the_stairs_is_them():
     assert fed(c, edge, late).stop
 
 
+def test_after_a_yes_the_classifiers_stairs_keep_it_while_the_3d_camera_reads_a_drop():
+    """At the top edge the 3D camera read the hidden risers as a 0.35 m drop for seconds; with
+    the classifier still seeing the stairs the yes holds, and the chair goes on down."""
+    c = said_yes_to_stairs_down()
+    for k in range(40):  # 4 s, longer than down_forget_s
+        at = NOW + 0.2 + k / 10
+        edge = (ground(CLS, Ground.STAIRS_UP), GroundReport(at, 0.9, DEPTH, Ground.DROP, 0.0, 0.35))
+        d = fed(c, edge, at)
+    assert c.down_ok and (d.stop, d.mode) == (False, Mode.TRACKS)
+
+
 def test_without_a_yes_the_classifiers_stairs_do_not_turn_a_drop_into_stairs():
     c = core(ground(CLS, Ground.STAIRS_UP), GroundReport(NOW, 0.9, DEPTH, Ground.DROP, 0.0, 0.69))
     assert c.decision.stop and c.decision.reason == "Drop ahead, stopping"

@@ -524,7 +524,7 @@ class DecisionCore:
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
         self._seen_at.update({name: now for name, s in seen.items() if s})
-        if (seen["stairs down"] or self.down_ok) and self._really_down():
+        if (seen["stairs down"] and self._really_down()) or (self.down_ok and self._still_down()):
             # only a sensor's own stairs down keeps a yes alive; after the yes one is enough: at
             # the top edge the camera looks over it at the floor below (Gazebo)
             self.down_seen_at = now
@@ -603,6 +603,17 @@ class DecisionCore:
         camera's stairs down alone stopped the chair on the stairs for good. A drop still stops."""
         m = self.motion if self._ok(self.motion) else None
         return self.down_ok and m is not None and m.pitch_rad > self.limits.level_rad
+
+    def _still_down(self) -> bool:
+        """After the yes, a sensor still sees those stairs: its own stairs down, or the camera
+        classifier's stairs, which give no way up or down. At the top edge the 3D camera read the
+        hidden risers as a drop and the yes lapsed with the classifier still seeing the stairs, so
+        the chair stopped there for good (Gazebo)."""
+        return self._really_down() or any(
+            r.source == Source.CLASSIFIER and r.ground == Ground.STAIRS_UP
+            for r in self.ground.values()
+            if self._ok(r)
+        )
 
     def _really_down(self) -> bool:
         """A sensor reports stairs down itself: not a drop taken for them after a yes."""
