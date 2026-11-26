@@ -430,7 +430,7 @@ def test_with_depth_farther_than_the_box_says_the_nearer_box_estimate_is_kept():
 
     from demo.vision import Detection, to_obstacles
 
-    close = Detection("person", 0.9, 200, 20, 280, 330)  # tall: about 1.9 m by its height
+    close = Detection("person", 0.9, 200, 20, 280, 330)  # tall: about 2 m by its height
 
     class OnePerson:
         def detect(self, jpeg):
@@ -450,9 +450,10 @@ def test_with_depth_farther_than_the_box_says_the_nearer_box_estimate_is_kept():
                 kept += [d["distance_m"] for d in mw.detections if d["label"] == "person"]
                 if len(kept) >= 20:
                     break
-        estimate = to_obstacles([close], 480, 360)[0].distance_m
+        focal = MOUNT.camera(480, 360, 0.0).fx  # the phone camera, as the server takes it
+        estimate = to_obstacles([close], 480, 360, focal_px=focal)[0].distance_m
         measured = dz.box_distance(depth["seen"], close, 480, 360)
-        assert measured > estimate + 0.1  # the depth says farther (2.14 m against 1.90 m)
+        assert measured > estimate + 0.1  # the depth says farther (2.14 m against 2.03 m)
         assert kept and max(kept) == pytest.approx(estimate, abs=0.01)
 
     run(with_clients(go, detector=OnePerson(), depth=WallAt6m(), mount=MOUNT))
@@ -710,6 +711,21 @@ def test_each_side_is_measured_on_its_own():
     assert middle == pytest.approx(1.0, abs=0.15) and right == pytest.approx(1.2, abs=0.15)
 
 
+def test_a_side_whose_floor_drops_away_is_never_called_open():
+    """A platform edge or stairs down beside the path: nothing stands there, but "Open to your
+    left" would walk the person off it. The way ahead blocked, only the right is open."""
+    from demo.middleware import way_open
+
+    cam = MOUNT.camera(COLS, ROWS, PITCH)
+    image = bands(syn.step(0.5, -1.0), wall(1.0), syn.flat)
+    left, middle, right = dz.ahead_by_side(image, cam)
+    assert left is None  # nothing stands there: before, this side was "open"
+    assert not dz.floor_level(image, cam, 1 / 6)
+    assert dz.floor_level(image, cam, 5 / 6)
+    assert dz.floor_level(bands(syn.flat, syn.flat, syn.flat), cam, 1 / 6)
+    assert way_open(math.nan, middle, right) == "Way ahead blocked. Open to your right."
+
+
 def test_only_the_open_side_is_told_when_the_way_ahead_is_blocked():
     from demo.middleware import way_open
 
@@ -731,3 +747,23 @@ def test_the_way_is_said_once_it_holds_for_two_frames_and_not_repeated():
     mw.on_way(None, 1.0, None, 1.6)  # and not again within 10 s
     said = [d["text"] for d in mw.decisions if d["kind"] == "way"]
     assert said == ["Way ahead blocked. Open on both sides."]
+
+
+def test_a_person_held_upright_in_view_is_as_far_as_the_phone_camera_says():
+    """A 1.7 m person filling a box 1.7 * f / 2 px high is 2 m away, f from the phone camera as the
+    depth reader models it (66 degrees along the long side). The detector's own 55-degree default
+    read them about 2.5 m away in an upright frame (readiness review)."""
+    import math as m
+
+    from demo import server
+    from demo.vision import Detection
+
+    mount = dz.Mount(1.2, 66.0)
+    w, h = 480, 640  # held upright
+    f = mount.camera(w, h, 0.0).fx
+    tall = 1.7 * f / 2.0
+    det = Detection("person", 0.9, w / 2 - 40, h / 2 - tall / 2, w / 2 + 40, h / 2 + tall / 2)
+    app = {"depth": {"t": None}, "mount": mount}
+    (ob,) = server.obstacles(app, [det], w, h, now=0.0)
+    assert ob.distance_m == pytest.approx(2.0, rel=0.02)
+    assert m.isfinite(ob.distance_m)

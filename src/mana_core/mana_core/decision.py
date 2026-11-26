@@ -179,6 +179,9 @@ class Limits:
     # of travel (review of #262): the classifier's stairs never vouch for a drop
     down_recent_m: float = 1.0
     hold_s: float = 0.5  # a stop holds this long after its hazard was last seen (#97)
+    # and a slow-down this long: one camera report coming late now and then made "Possible step
+    # ahead, slowing down" and "Level ground" take turns several times a second (Gazebo)
+    slow_hold_s: float = 1.0
     release_m: float = 0.1  # and while stopped, a hazard this far past its limit still counts
     answer_s: float = 2.0  # a yes this soon after the question was last asked still answers it
     slow: float = 0.3  # speed limit when slowing down, as a share of top speed
@@ -230,6 +233,13 @@ class Mount:
     # the phone's tilt), and may already be there. False: it only slows, as on the chair, whose
     # 3D camera measures it (readiness review, 25 November).
     unknown_drop_stops: bool = False
+    # a person walking is not slowed by a speed limit (it is advice), so the core cannot shrink
+    # their stop by slowing them: this far is added to a drop's stop distance, from the frame to
+    # the person standing still. Blind cane users walk about 0.9 m/s; from a spoken stop to
+    # standing still takes about 1.1 s (gait termination, PMC9953996), so about 1.0 m/s x 1.3 s
+    # to hear and react, plus 0.8 m to stop: 2.1 m (docs/results.md, 26 November). Drops only (a
+    # fall): an obstacle the cane meets first. 0: none, as on a chair whose limit slows it.
+    walker_reach_m: float = 0.0
 
     def travel_m(self, speed_limit: float) -> float:
         """How far the chair goes at this speed limit, from a stop decided to standing still."""
@@ -346,6 +356,7 @@ class DecisionCore:
         self.down_really_m = 0.0  # how far the device had travelled then
         self.down_seen_at = -math.inf
         self.asked_at = -math.inf  # when the stairs-down question was last the decision
+        self._slow_last: tuple[str, float] | None = None  # the last slow-down and when
         self._seen_at: dict[str, float] = {}  # stop branch: when its hazard was last seen
         self.now = 0.0
         self.decision = Decision(Mode.WHEELS, True, 0.0, "Starting", Priority.INFO)
@@ -526,7 +537,9 @@ class DecisionCore:
         past = {name: lim.release_m if self._held(name) else 0.0 for name in STOPS}
         reach = self.mount.travel_m(self.moving_speed)  # the stop distances hold at standstill
         seen = {
-            "drop": self._drop_at_edge(lim.edge_m + reach + past["drop"]),
+            "drop": self._drop_at_edge(
+                lim.edge_m + reach + self.mount.walker_reach_m + past["drop"]
+            ),
             "obstacle": self._obstacle_within(
                 lim.obstacle_stop_m + reach + past["obstacle"], self.moving_speed
             ),
@@ -538,6 +551,7 @@ class DecisionCore:
             self._seen_at.clear()
             self.down_seen_at, self.asked_at, self.down_ok = -math.inf, -math.inf, False
             self.down_really_at, self.down_went = -math.inf, False
+            self._slow_last = None
         self._seen_at.update({name: now for name, s in seen.items() if s})
         if self._really_down():  # a sensor's own stairs down: where, for _grounds' recent memory
             self.down_really_at, self.down_really_m = now, self.travelled_m
@@ -653,6 +667,15 @@ class DecisionCore:
             and (r.ground == Ground.DROP or (r.ground == Ground.STAIRS_DOWN and not confirmed))
             for r in self._grounds()
         )
+
+    def _drop_reason(self) -> str:
+        """Stairs down that stop the device are called stairs, not a drop, when no sensor sees a
+        drop: in Gazebo, the 3D camera alone read the campus flight as stairs down, step 0.17 m,
+        and the user heard "Drop ahead" at the top of a staircase they could see."""
+        kinds = {r.ground for r in self.ground.values() if self._ok(r)}  # as the sensors said
+        if Ground.STAIRS_DOWN in kinds and Ground.DROP not in kinds:
+            return "Stairs down ahead, stopping"
+        return "Drop ahead, stopping"
 
     def _lone_step_at_edge(self, edge_m: float | None = None) -> bool:
         """A step up or a curb measured within edge_m that no second sensor confirms, as when the
@@ -773,6 +796,18 @@ class DecisionCore:
             self.level_since is not None and self.now - self.level_since >= self.limits.level_hold_s
         )
 
+    def _slow_held(self) -> str | None:
+        """The slow-down's reason, or the last one for slow_hold_s after it was last seen. Holding
+        a slow-down only ever errs towards slower."""
+        reason = self._slow_reason()
+        last = self._slow_last
+        if reason is not None:
+            self._slow_last = (reason, self.now)
+            return reason
+        if last is not None and 0.0 <= self.now - last[1] < self.limits.slow_hold_s:
+            return last[0]
+        return None
+
     def _slow_reason(self) -> str | None:
         lim = self.limits
         # at full speed's stop time: slowing down must not shrink the reach that asked for it
@@ -834,7 +869,7 @@ class DecisionCore:
                 branch(
                     "drop",
                     lambda: self._held("drop"),
-                    lambda: self._stop("Drop ahead, stopping"),
+                    lambda: self._stop(self._drop_reason()),
                 ),
                 branch(
                     "obstacle",
@@ -897,9 +932,9 @@ class DecisionCore:
                 ),
                 branch(
                     "slow",
-                    lambda: self._slow_reason() is not None,
+                    lambda: self._slow_held() is not None,
                     lambda: self._set(
-                        Mode.WHEELS, False, lim.slow, self._slow_reason(), Priority.WARNING
+                        Mode.WHEELS, False, lim.slow, self._slow_held(), Priority.WARNING
                     ),
                 ),
                 branch(  # below every hazard: it has no distance, and it never stops
